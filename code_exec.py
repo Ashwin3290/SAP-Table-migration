@@ -52,6 +52,13 @@ def save_file(uploadFile):
 
 
 def preprocess_code(code, local_path, is_merge):
+    code_block_pattern = r"```python(.*?)```"
+    match = re.search(code_block_pattern, code, re.DOTALL)
+    if match:
+        code = match.group(1).strip()
+    code = re.sub(r'#.*', '', code)
+    # Remove multi-line comments
+    code = re.sub(r'""".*?"""|\'\'\'.*?\'\'\'', '', code, flags=re.DOTALL)
     # code check
     if code.find('plt') != -1:
         savefig = re.findall('plt.savefig\(.*?\)', code)
@@ -80,7 +87,7 @@ def preprocess_code(code, local_path, is_merge):
         code = code.replace('data2.csv', local_path[1]).lstrip('\n').lstrip(' ')
     else:
         code = code.replace('data.csv', local_path).lstrip('\n').lstrip(' ')
-    
+        
     return code
 
 
@@ -109,7 +116,7 @@ def run_code(code, local_path, is_merge=False):
         return answer
     except Exception as e:
         sys.stdout = sys.__stdout__  # resume stdout
-        # print(str(e))
+        print(str(e))
         return 'Error occur while running code.'
 
 

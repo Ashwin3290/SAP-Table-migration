@@ -2,12 +2,14 @@ import json
 import requests
 import base64
 import os
+from dotenv import load_dotenv
 import google.generativeai as genai
-# from google.genai import types
+
 from code_exec import check_code
 from mongodb import insert_chat
 from prompt_format import QA_PROMPT, CODE_PROMPT, CODE_MERGE_PROMPT
 
+load_dotenv()
 with open('config.json', 'r') as f:
     config = json.load(f)
 URL = config['model_url']
@@ -93,33 +95,31 @@ def get_tablellm_response(question, table, file_detail, mode):
     
     return response, session_id
 
-def get_tllm_response_pure(question, table, table_detail, mode):
+def get_tllm_response_pure(question, table, file_detail, mode):
     # get prompt
     if mode == 'QA':
-        prompt = get_qa_prompt(question, table, table_detail)
+        prompt = get_qa_prompt(question, table, file_detail)
     elif mode == 'Code':
         prompt = get_code_prompt(question, table)
     elif mode == 'Code_Merge':
         prompt = get_code_merge_prompt(question, table)
     
-
-    
     try:
-        print(prompt)
+        prompt=prompt+'\n'+"the file name is "+file_detail['name']+" and use pandas library for handling the data, and present the result in tabular format"
         res = generate(prompt)
-        return res
+        session_id = insert_chat(question=question, answer=res, file_detail=file_detail)
+        if mode != 'QA':
+            local_path = file_detail['local_path'] if mode == 'Code' else [file_detail[0]['local_path'], file_detail[1]['local_path']]
+            if not check_code(code=res, local_path=local_path, is_merge=(mode == 'Code_Merge')):
+                pass
+        return res, session_id
     except Exception as e:
-        return f"Error connecting to LLM service: {str(e)}"
+        return f"Error connecting to LLM service: {str(e)}", None
     
 
 def generate(prompt):
-    # client = genai.Client(
-    #     # api_key=os.environ.get("GEMINI_API_KEY"),
-    #     api_key="AIzaSyAHBvtJ3CXsbncWtH6cg-CLOVSgXumMdeg"
-    # )
-
+    genai.configure(api_key=os.environ['GEMINI_API_KEY'])
     model = genai.GenerativeModel('gemini-2.0-flash')
-
     return model.generate_content(prompt).text
 
 

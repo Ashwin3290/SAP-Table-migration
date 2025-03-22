@@ -8,8 +8,8 @@ import time
 import pandas as pd
 import streamlit as st
 
-from code_exec import save_file, run_code
-from tablellm import get_tablellm_response
+from code_exec import save_file, run_code,preprocess_code
+from tablellm import get_tllm_response_pure
 from mongodb import update_vote_by_session_id
 
 st.set_page_config(page_title="TableLLM", layout = "wide")
@@ -102,7 +102,7 @@ with tab1:
                 if st.session_state['table0']['table'] is not None:
                     user_input_single_placeholder.markdown(user_input)
                     with st.spinner('loading...'):
-                        bot_response, session_id = get_tablellm_response(user_input, 
+                        bot_response, session_id = get_tllm_response_pure(user_input, 
                             st.session_state['table0']['table'],
                             st.session_state['table0']['file_detail'],
                             st.session_state['chat_mode'])
@@ -297,7 +297,7 @@ with tab2:
                 if (st.session_state['table1']['dataframe'] is not None) and (st.session_state['table2']['dataframe'] is not None):
                     user_input_double_placeholder.markdown(user_input)
                     with st.spinner('loading...'):
-                        bot_response, session_id = get_tablellm_response(question=user_input,
+                        bot_response, session_id = get_tllm_response_pure(question=user_input,
                             table=(st.session_state['table1']['table'], st.session_state['table2']['table']),
                             file_detail=[st.session_state['table1']['file_detail'], st.session_state['table2']['file_detail']],
                             mode='Code_Merge')
@@ -307,6 +307,7 @@ with tab2:
                     st.session_state['session_id_double'] = session_id
 
                     bot_response_double_1_placeholder.code(bot_response, language='python')
+
                     
                     # run code and display result
                     code_res = run_code(bot_response,
