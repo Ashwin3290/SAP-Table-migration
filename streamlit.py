@@ -287,7 +287,7 @@ with tab2:
             bot_response_double_1_placeholder = st.empty()
             bot_response_double_2_placeholder = st.empty()
 
-        user_input = st.text_area("Enter your query:", key = "double tab2 user input")
+        user_input = st.text_area("Enter your query:", key = "double tab2 user input area")
 
         button_column = st.columns(3)
         button_info2 = st.empty()

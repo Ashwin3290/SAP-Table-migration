@@ -98,7 +98,7 @@ def get_tablellm_response(question, table, file_detail, mode):
 def get_tllm_response_pure(question, table, file_detail, mode):
     # get prompt
     if mode == 'QA':
-        prompt = get_qa_prompt(question, table, file_detail)
+        prompt = get_qa_prompt(question, table, file_detail['description'] if isinstance(file_detail, dict) and 'description' in file_detail else '')
     elif mode == 'Code':
         prompt = get_code_prompt(question, table)
     elif mode == 'Code_Merge':
