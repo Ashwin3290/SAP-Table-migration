@@ -6,3 +6,4 @@ streamlit
 pymongo
 requests
 python-docx
+google
