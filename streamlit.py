@@ -1,372 +1,506 @@
-# Install `pip3 install streamlit`
-# Run `streamlit run streamlit.py --server.port 8501`
-# For more, check the docs for streamlit
-
-import warnings
-warnings.filterwarnings('ignore')
-import time
-import pandas as pd
-import streamlit as st
-
-from code_exec import save_file, run_code,preprocess_code
-from tablellm import get_tllm_response_pure
-from mongodb import update_vote_by_session_id
-
-st.set_page_config(page_title="TableLLM", layout = "wide")
-
-if 'chat' not in st.session_state:
-    st.session_state['chat'] = {
-        "user_input_single": None,
-        "user_input_double": None,
-        "bot_response_single_1": None, # single table operation, show text or code
-        "bot_response_single_2": None, # single table operation, show code execution result
-        "bot_response_double_1": None, # multiple table operation, show text or code
-        "bot_response_double_2": None, # multiple table operation, show code execution result
-    }
-
-# chat mode: QA or Code
-if 'chat_mode' not in st.session_state:
-    st.session_state['chat_mode'] = 'Code'  # Default to Code mode
-
-# Initialize empty tables instead of using default_table
-if 'table0' not in st.session_state:
-    st.session_state['table0'] = {
-        "uploadFile": None,
-        "table": None,
-        "dataframe": None,
-        "file_detail": None,
-    }
-
-if 'table1' not in st.session_state:
-    st.session_state['table1'] = {
-        "uploadFile": None,
-        "table": None,
-        "dataframe": None,
-        "file_detail": None,
-    }
-
-if 'table2' not in st.session_state:
-    st.session_state['table2'] = {
-        "uploadFile": None,
-        "table": None,
-        "dataframe": None,
-        "file_detail": None,
-    }
-
-# session id
-if 'session_id' not in st.session_state:
-    st.session_state['session_id'] = None
-if 'session_id_double' not in st.session_state:
-    st.session_state['session_id_double'] = None
-
-text_style = """
-    <style>
-        .mytext {
-            border:1px solid black;
-            border-radius:10px;
-            border-color: #D6D6D8;
-            padding:10px;
-            height:auto;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            margin-bottom: 15px;
-        }
-    </style>
+"""
+Streamlit application for TableLLM
 """
 
-st.markdown(text_style, unsafe_allow_html=True)
+import os
+import pandas as pd
+import streamlit as st
+from pymongo import MongoClient
 
-st.markdown('## TableLLM: Enabling Tabular Data Manipulation by LLMs in Real Office Usage Scenarios')
+from code_exec import save_file
+from tablellm import TableLLM
 
-tab1, tab2 = st.tabs(["Single Table Operation", "Double Table Operation"])
-with tab1:
-    left_column, right_column = st.columns(2, gap = "large")
+# Page configuration
+st.set_page_config(
+    page_title="TableLLM", 
+    layout="wide",
+    page_icon="📊"
+)
+
+# Initialize MongoDB connection if available
+db_client = None
+try:
+    db_client = MongoClient('localhost', 27017, serverSelectionTimeoutMS=1000).table_llm
+    db_client.admin.command('ping')  # Check connection
+except Exception as e:
+    st.sidebar.warning(f"Database connection failed: {e}")
+
+# Initialize TableLLM
+tablellm = TableLLM()
+session_id = 0
+# Initialize session state variables
+if 'show_code' not in st.session_state:
+    st.session_state['show_code'] = True
+
+if 'tables' not in st.session_state:
+    st.session_state['tables'] = {
+        'single': {
+            'file': None,
+            'df': None,
+            'text': None,
+            'details': None
+        },
+        'first': {
+            'file': None,
+            'df': None,
+            'text': None,
+            'details': None
+        },
+        'second': {
+            'file': None,
+            'df': None,
+            'text': None,
+            'details': None
+        }
+    }
+
+if 'history' not in st.session_state:
+    st.session_state['history'] = {
+        'single': {
+            'question': None,
+            'code': None,
+            'result': None,
+            'session_id': 0
+        },
+        'double': {
+            'question': None,
+            'code': None,
+            'result': None,
+            'session_id': 0
+        }
+    }
+
+# Custom CSS for better appearance
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem !important;
+        font-weight: 600;
+        margin-bottom: 1rem;
+    }
+    .sub-header {
+        font-size: 1.5rem !important;
+        font-weight: 500;
+        margin-bottom: 0.5rem;
+    }
+    .code-box {
+        background-color: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 5px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+    .example-query {
+        padding: 0.5rem;
+        background-color: #f1f3f5;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-bottom: 0.5rem;
+    }
+    .example-query:hover {
+        background-color: #e9ecef;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Helper function to update vote in database
+def update_vote(session_id, vote):
+    """Update the vote for a session"""
+    if not db_client or not session_id:
+        return False
     
-    with right_column.container():
-        with st.chat_message(name="user", avatar="user"):
-            user_input_single_placeholder = st.empty()
-        with st.chat_message(name="assistant", avatar="assistant"):
-            bot_response_single_1_placeholder = st.empty()
-            bot_response_single_2_placeholder = st.empty()
+    try:
+        db_client.chat.update_one(
+            {'session_id': session_id},
+            {'$set': {'vote': vote}}
+        )
+        return True
+    except Exception as e:
+        st.error(f"Error updating vote: {e}")
+        return False
 
-        user_input = st.text_area("Enter your query:", key = "single tab1 user input")
+# Main app header
+st.markdown('<p class="main-header">TableLLM: Interactive Data Analysis</p>', unsafe_allow_html=True)
+st.markdown("Ask questions about your data in natural language and get immediate insights.")
 
-        # buttons (send, upvote, downvote)
-        button_column = st.columns(3)
-        button_info = st.empty()
-        with button_column[2]:
-            send_button = st.button("✉️ Send", key = "single tab1 button", use_container_width=True)
-            if send_button and len(user_input) != 0:
-                if st.session_state['table0']['table'] is not None:
-                    user_input_single_placeholder.markdown(user_input)
-                    with st.spinner('loading...'):
-                        bot_response, session_id = get_tllm_response_pure(user_input, 
-                            st.session_state['table0']['table'],
-                            st.session_state['table0']['file_detail'],
-                            st.session_state['chat_mode'])
+# Create tabs for different operations
+tab1, tab2 = st.tabs(["Single Table Analysis", "Two-Table Analysis"])
 
-                    st.session_state['chat']['user_input_single'] = user_input
-                    st.session_state['chat']['bot_response_single_1'] = bot_response
-                    st.session_state['session_id'] = session_id
-
-                    if st.session_state['chat_mode'] == 'QA':
-                        bot_response_single_1_placeholder.markdown(bot_response)
-                        st.session_state['chat']['bot_response_single_2'] = None
-                    else:
-                        bot_response_single_1_placeholder.code(bot_response, language='python')
-                        
-                        # run code and display result
-                        code_res = run_code(bot_response, st.session_state['table0']['file_detail']['local_path'])
-                        st.session_state['chat']['bot_response_single_2'] = code_res
-                        
-                        # change the type of code_res
-                        if isinstance(code_res, pd.Series):
-                            code_res = pd.DataFrame(code_res)
-
-                        if isinstance(code_res, pd.DataFrame):
-                            bot_response_single_2_placeholder.dataframe(code_res, height=min(250, len(st.session_state['table0']['dataframe'])*50), use_container_width=True)
-                        elif bot_response.find('plt') != -1 and not isinstance(code_res, str):
-                            bot_response_single_2_placeholder.pyplot(code_res)
-                        else:
-                            bot_response_single_2_placeholder.markdown(code_res)
-                else:
-                    st.error("Please upload a file to start")
-
-        with button_column[1]:
-            upvote_button = st.button("👍 Upvote", key = "single upvote button", use_container_width=True)
-            if upvote_button and st.session_state['table0']['table'] is not None and st.session_state['session_id'] is not None:
-                if st.session_state['chat']['user_input_single'] is not None:
-                    user_input_single_placeholder.markdown(st.session_state['chat']['user_input_single'])
-                if st.session_state['chat']['bot_response_single_1'] is not None:
-                    if st.session_state['chat_mode'] == 'QA':
-                        bot_response_single_1_placeholder.markdown(st.session_state['chat']['bot_response_single_1'])
-                    else:
-                        bot_response_single_1_placeholder.code(st.session_state['chat']['bot_response_single_1'], language='python')
-                if st.session_state['chat']['bot_response_single_2'] is not None:
-                    if st.session_state['chat_mode'] == 'Code':
-                        code_res = st.session_state['chat']['bot_response_single_2']
-                        if isinstance(code_res, pd.DataFrame):
-                            bot_response_single_2_placeholder.dataframe(code_res, height=min(250, len(st.session_state['table0']['dataframe'])*50), use_container_width=True)
-                        elif st.session_state['chat']['bot_response_single_1'].find('plt') != -1:
-                            code_res = run_code(st.session_state['chat']['bot_response_single_1'], st.session_state['table0']['file_detail']['local_path'])
-                            bot_response_single_2_placeholder.pyplot(code_res)
-                        else:
-                            bot_response_single_2_placeholder.markdown(code_res)
-                # update vote
-                update_vote_by_session_id(1, st.session_state['session_id'])
-                button_info.success("Your upvote has been uploaded")
-            elif upvote_button:
-                button_info.info("Please start a conversation before voting.")
-
-        with button_column[0]:
-            downvote_button = st.button("👎 Downvote", key = "single downvote button", use_container_width=True)
-            if downvote_button and st.session_state['table0']['table'] is not None and st.session_state['session_id'] is not None:
-                if st.session_state['chat']['user_input_single'] is not None:
-                    user_input_single_placeholder.markdown(st.session_state['chat']['user_input_single'])
-                if st.session_state['chat']['bot_response_single_1'] is not None:
-                    if st.session_state['chat_mode'] == 'QA':
-                        bot_response_single_1_placeholder.markdown(st.session_state['chat']['bot_response_single_1'])
-                    else:
-                        bot_response_single_1_placeholder.code(st.session_state['chat']['bot_response_single_1'], language='python')
-                if st.session_state['chat']['bot_response_single_2'] is not None:
-                    if st.session_state['chat_mode'] == 'Code':
-                        code_res = st.session_state['chat']['bot_response_single_2']
-                        if isinstance(code_res, pd.DataFrame):
-                            bot_response_single_2_placeholder.dataframe(code_res, height=min(250, len(st.session_state['table0']['dataframe'])*50), use_container_width=True)
-                        elif st.session_state['chat']['bot_response_single_1'].find('plt') != -1:
-                            code_res = run_code(st.session_state['chat']['bot_response_single_1'], st.session_state['table0']['file_detail']['local_path'])
-                            bot_response_single_2_placeholder.pyplot(code_res)
-                        else:
-                            bot_response_single_2_placeholder.markdown(code_res)
-                # update vote
-                update_vote_by_session_id(-1, st.session_state['session_id'])
-                button_info.success("Your downvote has been uploaded")
-            elif downvote_button:
-                button_info.info("Please start a conversation before voting.")
-
-    with left_column:
-        illustration0 = st.markdown('- Upload a CSV or Excel file to analyze it with natural language queries.\n\n- The system will generate Python code based on your queries and execute it.\n\n- You can ask questions like "What is the average value?" or "Plot the distribution of values."')
-        uploadFile = st.file_uploader("Upload your file", type=["csv", "xlsx", "xls", "docx"])
-
-        # Display mode selection
-        st.radio("Select Mode", ["Code", "QA"], key="chat_mode_selector", index=0, 
-                 on_change=lambda: setattr(st.session_state, 'chat_mode', st.session_state.mode_selector))
-
-        # Show table if file is uploaded
-        if uploadFile is not None:
-            if uploadFile == st.session_state['table0']['uploadFile']:
-                st.dataframe(st.session_state['table0']['dataframe'], height=min(500, len(st.session_state['table0']['dataframe'])*50), use_container_width=True)
-            else:
-                try:
-                    # if upload csv or xlsx, use Code mode
-                    if uploadFile.name.endswith(('.csv', '.xlsx', '.xls')):
-                        st.session_state['chat_mode'] = 'Code'
-                        st.session_state.mode_selector = 'Code'
-                    elif uploadFile.name.endswith(('.docx')):
-                        st.session_state['chat_mode'] = 'QA'
-                        st.session_state.mode_selector = 'QA'
-
-                    # save file
-                    with st.spinner('loading...'):
-                        df, tabular, file_detail = save_file(uploadFile)
-                        st.session_state['table0'] = {
-                            "uploadFile": uploadFile,
-                            "table": tabular,
-                            "dataframe": df,
-                            "file_detail": file_detail
-                        }
-                    st.dataframe(df, height=min(500, len(df)*50), use_container_width=True)
-                    st.session_state['chat']['user_input_single'] = None
-                    st.session_state['chat']['bot_response_single_1'] = None
-                    st.session_state['chat']['bot_response_single_2'] = None
-
-                except Exception as e:
-                    st.error(f"Error Saving File: {str(e)}")
-                st.rerun()
-        else:
-            # Display instructions if no file is uploaded
-            st.info("Please upload a file to get started")
-
-with tab2:
-    left_column2, right_column2= st.columns(2, gap = "large")
-    with left_column2:
-        illustration1 = st.markdown('- Upload two CSV or Excel files to merge or analyze them together.\n\n- You can specify how to join the tables (e.g., inner join, outer join).\n\n- Ask questions like "Merge these tables on customer_id" or "Count unique values across both tables."')
-
-        uploadFile1 = st.file_uploader("Upload your first table", type=["csv", "xlsx", "xls"])
-        uploadFile2 = st.file_uploader("Upload your second table", type=["csv", "xlsx", "xls"])
-
-        # Show tables if files are uploaded
-        if uploadFile1 is not None:
-            if uploadFile1 != st.session_state['table1']['uploadFile']:
-                try:
-                    with st.spinner('loading table1...'):
-                        df, tabular, file_detail = save_file(uploadFile1)
-                        st.session_state['table1'] = {
-                            "uploadFile": uploadFile1,
-                            "table": tabular,
-                            "dataframe": df,
-                            "file_detail": file_detail
-                        }
-                        st.session_state['chat']['user_input_double'] = None
-                        st.session_state['chat']['bot_response_double_1'] = None
-                        st.session_state['chat']['bot_response_double_2'] = None
-                except Exception as e:
-                    st.error(f"Error Saving File: {str(e)}")
-                    
-        if uploadFile2 is not None:
-            if uploadFile2 != st.session_state['table2']['uploadFile']:
-                try:
-                    with st.spinner('loading table2...'):
-                        df, tabular, file_detail = save_file(uploadFile2)
-                        st.session_state['table2'] = {
-                            "uploadFile": uploadFile2,
-                            "table": tabular,
-                            "dataframe": df,
-                            "file_detail": file_detail
-                        }
-                        st.session_state['chat']['user_input_double'] = None
-                        st.session_state['chat']['bot_response_double_1'] = None
-                        st.session_state['chat']['bot_response_double_2'] = None
-                except Exception as e:
-                    st.error(f"Error Saving File: {str(e)}")
-            
-        if (st.session_state['table1']['dataframe'] is not None) and (st.session_state['table2']['dataframe'] is not None):
-            st.subheader("Table 1")
-            st.dataframe(st.session_state['table1']['dataframe'], height=min(250, len(st.session_state['table1']['dataframe'])*50), use_container_width=True)
-            st.subheader("Table 2")
-            st.dataframe(st.session_state['table2']['dataframe'], height=min(250, len(st.session_state['table2']['dataframe'])*50), use_container_width=True)
-        else:
-            st.info("Please upload both files to get started with table merging")
-
-    with right_column2:
-        with st.chat_message(name="user", avatar="user"):
-            user_input_double_placeholder = st.empty()
-        with st.chat_message(name="assistant", avatar="assistant"):
-            bot_response_double_1_placeholder = st.empty()
-            bot_response_double_2_placeholder = st.empty()
-
-        user_input = st.text_area("Enter your query:", key = "double tab2 user input area")
-
-        button_column = st.columns(3)
-        button_info2 = st.empty()
-        with button_column[2]:
-            send_button = st.button("✉️ Send", key = "double tab1 button", use_container_width=True)
-            if send_button and len(user_input) != 0:
-                if (st.session_state['table1']['dataframe'] is not None) and (st.session_state['table2']['dataframe'] is not None):
-                    user_input_double_placeholder.markdown(user_input)
-                    with st.spinner('loading...'):
-                        bot_response, session_id = get_tllm_response_pure(question=user_input,
-                            table=(st.session_state['table1']['table'], st.session_state['table2']['table']),
-                            file_detail=[st.session_state['table1']['file_detail'], st.session_state['table2']['file_detail']],
-                            mode='Code_Merge')
-
-                    st.session_state['chat']['user_input_double'] = user_input
-                    st.session_state['chat']['bot_response_double_1'] = bot_response
-                    st.session_state['session_id_double'] = session_id
-
-                    bot_response_double_1_placeholder.code(bot_response, language='python')
-
-                    
-                    # run code and display result
-                    code_res = run_code(bot_response,
-                        (st.session_state['table1']['file_detail']['local_path'], st.session_state['table2']['file_detail']['local_path']),
-                        is_merge=True)
-                    st.session_state['chat']['bot_response_double_2'] = code_res
-                    bot_response_double_2_placeholder.dataframe(code_res, height=min(250, len(st.session_state['table1']['dataframe'])*50), use_container_width=True)
-                else:
-                    button_info2.error("Please upload both files to start")
-
-        with button_column[1]:
-            upvote_button = st.button("👍 Upvote", key = "double upvote button", use_container_width=True)
-            if upvote_button and (st.session_state['table1']['dataframe'] is not None) and (st.session_state['table2']['dataframe'] is not None) and st.session_state['session_id_double'] is not None:
-                if st.session_state['chat']['user_input_double'] is not None:
-                    user_input_double_placeholder.markdown(st.session_state['chat']['user_input_double'])
-                if st.session_state['chat']['bot_response_double_1'] is not None:
-                    bot_response_double_1_placeholder.code(st.session_state['chat']['bot_response_double_1'], language='python')
-                if st.session_state['chat']['bot_response_double_2'] is not None:
-                    bot_response_double_2_placeholder.dataframe(st.session_state['chat']['bot_response_double_2'], height=min(250, len(st.session_state['table2']['dataframe'])*50), use_container_width=True)
-                # update vote
-                update_vote_by_session_id(1, st.session_state['session_id_double'])
-                button_info2.success("Your upvote has been uploaded")
-            elif upvote_button:
-                button_info2.info("Please start a conversation before voting.")
-
-        with button_column[0]:
-            downvote_button = st.button("👎 Downvote", key = "double downvote button", use_container_width=True)
-            if downvote_button and (st.session_state['table1']['dataframe'] is not None) and (st.session_state['table2']['dataframe'] is not None) and st.session_state['session_id_double'] is not None:
-                if st.session_state['chat']['user_input_double'] is not None:
-                    user_input_double_placeholder.markdown(st.session_state['chat']['user_input_double'])
-                if st.session_state['chat']['bot_response_double_1'] is not None:
-                    bot_response_double_1_placeholder.code(st.session_state['chat']['bot_response_double_1'], language='python')
-                if st.session_state['chat']['bot_response_double_2'] is not None:
-                    bot_response_double_2_placeholder.dataframe(st.session_state['chat']['bot_response_double_2'], height=min(250, len(st.session_state['table2']['dataframe'])*50), use_container_width=True)
-                # update vote
-                update_vote_by_session_id(-1, st.session_state['session_id_double'])
-                button_info2.success("Your downvote has been uploaded")
-            elif downvote_button:
-                button_info2.info("Please start a conversation before voting.")
-
-        # Example queries
-        st.markdown("##### Example queries you can try:")
-        example_queries = [
-            "Merge these tables on common column names",
-            "Join the tables and show all records from both tables",
-            "Count the total records after merging the tables",
-            "What are the common columns between these tables?",
-            "Merge the tables and calculate summary statistics"
-        ]
+# Single Table Analysis Tab
+with tab1:
+    col1, col2 = st.columns([1, 1.5])
+    
+    with col1:
+        st.markdown('<p class="sub-header">Upload Your Data</p>', unsafe_allow_html=True)
         
-        for i, query in enumerate(example_queries):
-            cols = st.columns([7,1])
-            with cols[0]:
-                st.markdown(f"<div class='mytext'>{query}</div>", unsafe_allow_html=True)
-            with cols[1]:
-                if st.button("Send", key=f"example_query_{i}", use_container_width=True):
-                    if (st.session_state['table1']['dataframe'] is not None) and (st.session_state['table2']['dataframe'] is not None):
-                        # Set query text and trigger similar flow as Send button
-                        st.session_state["double tab2 user input"] = query
+        # File uploader
+        uploaded_file = st.file_uploader(
+            "Choose a CSV, Excel, or DOCX file", 
+            type=["csv", "xlsx", "xls", "docx"], 
+            key="single_file_uploader"
+        )
+        
+        # Mode selection
+        analysis_mode = st.radio(
+            "Select Analysis Mode",
+            ["Code (generates & runs Python)", "QA (direct answers)"],
+            key="single_mode",
+            horizontal=True
+        )
+        mode = "Code" if "Code" in analysis_mode else "QA"
+        
+        # Process uploaded file
+        if uploaded_file:
+            if uploaded_file != st.session_state['tables']['single']['file']:
+                try:
+                    with st.spinner("Processing file..."):
+                        df, text, details = save_file(uploaded_file)
+                        st.session_state['tables']['single'] = {
+                            'file': uploaded_file,
+                            'df': df,
+                            'text': text,
+                            'details': details
+                        }
+                except Exception as e:
+                    st.error(f"Error processing file: {e}")
+            
+            # Display the DataFrame
+            st.dataframe(
+                st.session_state['tables']['single']['df'],
+                height=400,
+                use_container_width=True
+            )
+            
+            # Show file info
+            if st.session_state['tables']['single']['details']:
+                with st.expander("File Details"):
+                    st.write(f"Filename: {st.session_state['tables']['single']['details']['name']}")
+                    st.write(f"Rows: {len(st.session_state['tables']['single']['df'])}")
+                    st.write(f"Columns: {len(st.session_state['tables']['single']['df'].columns)}")
+        else:
+            st.info("Please upload a file to begin analysis")
+    
+    with col2:
+        st.markdown('<p class="sub-header">Ask a Question</p>', unsafe_allow_html=True)
+        
+        # Query input
+        query = st.text_area(
+            "What would you like to know about your data?",
+            height=100,
+            key="single_query"
+        )
+        
+        # Submit button and progress indicator
+        col_button1, col_button2, col_button3 = st.columns([1, 1, 1])
+        with col_button3:
+            submit = st.button("📊 Analyze", key="single_analyze_button", use_container_width=True)
+        
+        # Process the query
+        if submit and query and st.session_state['tables']['single']['df'] is not None:
+            with st.spinner("Analyzing data..."):
+                # Get response from TableLLM
+                code, result = tablellm.process_query(
+                    query,
+                    st.session_state['tables']['single']['text'],
+                    st.session_state['tables']['single']['df'],
+                    mode=mode
+                )
+                
+                # # Save to history
+                # session_id = tablellm.save_interaction(
+                #     query, code, result, 
+                #     st.session_state['tables']['single']['details'],
+                #     db_client
+                # )
+                st.session_state['history']['single'] = {
+                    'question': query,
+                    'code': code,
+                    'result': result,
+                    'session_id': session_id
+                }
+            
+            # Display results
+            st.success("Analysis complete!")
+            st.markdown("### Result")
+            
+            # Display code if in Code mode
+            if mode == "Code":
+                if st.session_state['show_code']:
+                    with st.expander("Generated Python Code", expanded=True):
+                        st.code(code, language="python")
+                else:
+                    if st.button("Show Code", key="show_code_button_single"):
+                        st.session_state['show_code'] = True
                         st.rerun()
-                    else:
-                        button_info2.error("Please upload both files first")
+                
+                # Display different result types appropriately
+                if isinstance(result, pd.DataFrame):
+                    st.dataframe(result, use_container_width=True)
+                elif str(type(result)).find('matplotlib') != -1:
+                    st.pyplot(result)
+                elif isinstance(result, (list, dict)):
+                    st.json(result)
+                else:
+                    st.write(result)
+            else:
+                # QA mode - just display the text response
+                st.markdown(code)
+            
+            # Voting buttons
+            if session_id:
+                vote_col1, vote_col2 = st.columns(2)
+                with vote_col1:
+                    if st.button("👍 Helpful", key="single_upvote"):
+                        update_vote(session_id, 1)
+                        st.success("Thanks for your feedback!")
+                
+                with vote_col2:
+                    if st.button("👎 Not Helpful", key="single_downvote"):
+                        update_vote(session_id, -1)
+                        st.success("Thanks for your feedback!")
+        
+        # Example queries
+        with st.expander("Example Queries"):
+            example_queries = [
+                "What's the average value in each column?",
+                "Create a bar chart of the top 5 values",
+                "Find correlations between numeric columns",
+                "Show summary statistics for all columns",
+                "Identify outliers in the data"
+            ]
+            
+            for i, query in enumerate(example_queries):
+                if st.button(query, key=f"example_{i}"):
+                    st.session_state["single_query"] = query
+                    st.rerun()
+
+# Two-Table Analysis Tab
+with tab2:
+    col1, col2 = st.columns([1, 1.5])
+    
+    with col1:
+        st.markdown('<p class="sub-header">Upload Your Data</p>', unsafe_allow_html=True)
+        
+        # File uploaders
+        uploaded_file1 = st.file_uploader(
+            "Choose first CSV or Excel file", 
+            type=["csv", "xlsx", "xls"], 
+            key="double_file_uploader1"
+        )
+        
+        uploaded_file2 = st.file_uploader(
+            "Choose second CSV or Excel file", 
+            type=["csv", "xlsx", "xls"], 
+            key="double_file_uploader2"
+        )
+        
+        # Process first uploaded file
+        if uploaded_file1:
+            if uploaded_file1 != st.session_state['tables']['first']['file']:
+                try:
+                    with st.spinner("Processing first file..."):
+                        df, text, details = save_file(uploaded_file1)
+                        st.session_state['tables']['first'] = {
+                            'file': uploaded_file1,
+                            'df': df,
+                            'text': text,
+                            'details': details
+                        }
+                except Exception as e:
+                    st.error(f"Error processing first file: {e}")
+            
+            # Display the first DataFrame
+            st.subheader("First Table")
+            st.dataframe(
+                st.session_state['tables']['first']['df'],
+                height=200,
+                use_container_width=True
+            )
+        
+        # Process second uploaded file
+        if uploaded_file2:
+            if uploaded_file2 != st.session_state['tables']['second']['file']:
+                try:
+                    with st.spinner("Processing second file..."):
+                        df, text, details = save_file(uploaded_file2)
+                        st.session_state['tables']['second'] = {
+                            'file': uploaded_file2,
+                            'df': df,
+                            'text': text,
+                            'details': details
+                        }
+                except Exception as e:
+                    st.error(f"Error processing second file: {e}")
+            
+            # Display the second DataFrame
+            st.subheader("Second Table")
+            st.dataframe(
+                st.session_state['tables']['second']['df'],
+                height=200,
+                use_container_width=True
+            )
+            
+        # Generate exploration code for both tables
+        if (uploaded_file1 and uploaded_file2 and 
+            st.session_state['tables']['first']['df'] is not None and 
+            st.session_state['tables']['second']['df'] is not None):
+            
+            if st.button("Generate Dual Table Exploration", key="generate_exploration_dual"):
+                try:
+                    from code_generator import generate_exploration_code
+                    with st.spinner("Generating exploration code..."):
+                        code_file = generate_exploration_code(
+                            st.session_state['tables']['first']['df'],
+                            f"{uploaded_file1.name}_{uploaded_file2.name}",
+                            is_double=True
+                        )
+                    st.success(f"Dual table exploration code generated: {code_file}")
+                    
+                    # Add option to run the exploration code
+                    if st.button("Run Dual Exploration", key="run_exploration_dual"):
+                        with st.spinner("Running exploration..."):
+                            from code_exec import execute_code
+                            result = execute_code(
+                                code_file, 
+                                (st.session_state['tables']['first']['df'], 
+                                 st.session_state['tables']['second']['df']),
+                                is_double=True
+                            )
+                        
+                        # Display various types of results
+                        if isinstance(result, dict):
+                            for key, value in result.items():
+                                if 'plot' in key or 'figure' in key or 'heatmap' in key:
+                                    st.pyplot(value)
+                                elif isinstance(value, pd.DataFrame):
+                                    st.dataframe(value)
+                                else:
+                                    st.write(f"**{key}:**", value)
+                        else:
+                            st.write(result)
+                except Exception as e:
+                    st.error(f"Error generating dual exploration code: {e}")
+        
+        if not uploaded_file1 or not uploaded_file2:
+            st.info("Please upload both files to begin analysis")
+    
+    with col2:
+        st.markdown('<p class="sub-header">Ask a Question About Both Tables</p>', unsafe_allow_html=True)
+        
+        # Query input
+        query = st.text_area(
+            "What would you like to know about these tables?",
+            height=100,
+            key="double_query"
+        )
+        
+        # Submit button and progress indicator
+        col_button1, col_button2, col_button3 = st.columns([1, 1, 1])
+        with col_button3:
+            submit = st.button("📊 Analyze", key="double_analyze_button", use_container_width=True)
+        
+        # Process the query
+        if (submit and query and 
+            st.session_state['tables']['first']['df'] is not None and 
+            st.session_state['tables']['second']['df'] is not None):
+            
+            with st.spinner("Analyzing data..."):
+                # Get response from TableLLM
+                code, result = tablellm.process_query(
+                    query,
+                    (st.session_state['tables']['first']['text'], st.session_state['tables']['second']['text']),
+                    (st.session_state['tables']['first']['df'], st.session_state['tables']['second']['df']),
+                    mode="Code"  # Only Code mode for two tables
+                )
+                
+                # Save to history
+                # session_id = tablellm.save_interaction(
+                #     query, code, result, 
+                #     [st.session_state['tables']['first']['details'], st.session_state['tables']['second']['details']],
+                #     db_client
+                # )
+                st.session_state['history']['double'] = {
+                    'question': query,
+                    'code': code,
+                    'result': result,
+                    'session_id': session_id
+                }
+            
+            # Display results
+            st.success("Analysis complete!")
+            st.markdown("### Result")
+            
+            # Display code
+            if st.session_state['show_code']:
+                with st.expander("Generated Python Code", expanded=True):
+                    st.code(code, language="python")
+            else:
+                if st.button("Show Code", key="show_code_button_double"):
+                    st.session_state['show_code'] = True
+                    st.rerun()
+            
+            # Display different result types appropriately
+            if isinstance(result, pd.DataFrame):
+                st.dataframe(result, use_container_width=True)
+            elif str(type(result)).find('matplotlib') != -1:
+                st.pyplot(result)
+            elif isinstance(result, (list, dict)):
+                st.json(result)
+            else:
+                st.write(result)
+            
+            # Voting buttons
+            if session_id:
+                vote_col1, vote_col2 = st.columns(2)
+                with vote_col1:
+                    if st.button("👍 Helpful", key="double_upvote"):
+                        update_vote(session_id, 1)
+                        st.success("Thanks for your feedback!")
+                
+                with vote_col2:
+                    if st.button("👎 Not Helpful", key="double_downvote"):
+                        update_vote(session_id, -1)
+                        st.success("Thanks for your feedback!")
+        
+        # Example queries
+        with st.expander("Example Queries"):
+            example_queries = [
+                "Merge these tables on common column names",
+                "Join the tables and show all records from both tables",
+                "Count the total records after merging the tables",
+                "What are the common columns between these tables?",
+                "Compare summary statistics between both tables"
+            ]
+            
+            for i, query in enumerate(example_queries):
+                if st.button(query, key=f"double_example_{i}"):
+                    st.session_state["double_query"] = query
+                    st.rerun()
+
+# Sidebar for settings
+with st.sidebar:
+    st.title("Settings")
+    
+    # Code visibility toggle
+    st.session_state['show_code'] = st.checkbox("Show generated code by default", value=st.session_state['show_code'])
+    
+    # About section
+    st.markdown("---")
+    st.markdown("### About TableLLM")
+    st.markdown("""
+    TableLLM enables table data analysis through natural language.
+    
+    **Features:**
+    - Upload CSV, Excel, or DOCX files
+    - Query your data using natural language
+    - Automatic code generation and execution
+    - Support for table merging and comparison
+    """)
+    
+    # Add information about the LLM being used
+    st.markdown("---")
+    st.markdown("### Model Information")
+    if tablellm.use_gemini:
+        st.markdown("Using **Google Gemini** for code generation")
+    else:
+        st.markdown(f"Using Ollama for code generation")

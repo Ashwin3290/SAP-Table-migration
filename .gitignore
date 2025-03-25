@@ -174,3 +174,4 @@ cython_debug/
 .pypirc
 
 uploaded_files/
+generated_code/

@@ -1,125 +1,202 @@
+"""
+Core TableLLM module for generating and executing code from natural language queries
+"""
+
+import os
+import uuid
+import logging
 import json
 import requests
-import base64
-import os
+import re
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-from code_exec import check_code
-from mongodb import insert_chat
-from prompt_format import QA_PROMPT, CODE_PROMPT, CODE_MERGE_PROMPT
+from prompt_format import SINGLE_TABLE_TEMPLATE, DOUBLE_TABLE_TEMPLATE, QA_TEMPLATE
+from code_exec import create_code_file, execute_code
 
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Load environment variables
 load_dotenv()
-with open('config.json', 'r') as f:
-    config = json.load(f)
-URL = config['model_url']
-MODEL_NAME = config.get('model_name', 'codellama')  # Default to codellama if not specified
 
-def get_qa_prompt(question, table, description):
-    prompt = QA_PROMPT.format_map({
-        'table_descriptions': description,
-        'table_in_csv': table,
-        'question': question
-    })
-    return prompt
+# Load configuration
+try:
+    with open('config.json', 'r') as f:
+        config = json.load(f)
+    OLLAMA_URL = config.get('model_url', 'http://localhost:11434/api/generate')
+    OLLAMA_MODEL = config.get('model_name', 'llama3')
+except Exception as e:
+    logger.warning(f"Error loading config: {e}. Using default values.")
+    OLLAMA_URL = 'http://localhost:11434/api/generate'
+    OLLAMA_MODEL = 'llama3'
 
-def get_code_prompt(question, table):
-    # Use a simple approach without tokenizer
-    table = table.split('\n')
-    head = table[0]
-    body = table[1:6]  # Take first 5 lines
-    body_str = "\n".join(body)
-    
-    prompt = CODE_PROMPT.format_map({
-        'csv_data': f'{head}\n{body_str}',
-        'question': question
-    })
-    return prompt
 
-def get_code_merge_prompt(question, table):
-    # Use a simple approach without tokenizer
-    table1 = table[0].split('\n')
-    head1, body1 = table1[0], table1[1:6]  # Take first 5 lines
-    table2 = table[1].split('\n')
-    head2, body2 = table2[0], table2[1:6]  # Take first 5 lines
+class TableLLM:
+    """TableLLM handles generating and executing code for table analysis"""
     
-    body1_str = "\n".join(body1)
-    body2_str = "\n".join(body2)
+    def __init__(self):
+        """Initialize the TableLLM instance"""
+        # Configure Gemini if API key is available
+        self.use_gemini = False
+        if 'GEMINI_API_KEY' in os.environ:
+            try:
+                genai.configure(api_key=os.environ['GEMINI_API_KEY'])
+                self.use_gemini = True
+                logger.info("Using Gemini API for code generation")
+            except Exception as e:
+                logger.warning(f"Error configuring Gemini: {e}. Falling back to Ollama.")
     
-    prompt = CODE_MERGE_PROMPT.format_map({
-        'csv_data1': f'{head1}\n{body1_str}',
-        'csv_data2': f'{head2}\n{body2_str}',
-        'question': question
-    })
-    return prompt
-
-def get_tablellm_response(question, table, file_detail, mode):
-    # get prompt
-    if mode == 'QA':
-        prompt = get_qa_prompt(question, table, file_detail['description'] if isinstance(file_detail, dict) and 'description' in file_detail else '')
-    elif mode == 'Code':
-        prompt = get_code_prompt(question, table)
-    elif mode == 'Code_Merge':
-        prompt = get_code_merge_prompt(question, table)
+    def _format_single_table_prompt(self, question, table):
+        """Format a single table prompt"""
+        # Extract header and first few rows
+        table_lines = table.strip().split('\n')
+        header = table_lines[0]
+        sample_rows = '\n'.join(table_lines[1:6])  # First 5 data rows
+        
+        return SINGLE_TABLE_TEMPLATE.format(
+            csv_data=f"{header}\n{sample_rows}",
+            question=question
+        )
     
-    # get LLM response using Ollama API
-    data = {
-        'model': MODEL_NAME,
-        'prompt': prompt,
-        'stream': False,
-        'temperature': 0.8,
-        'top_p': 0.95,
-        'max_tokens': 512
-    }
+    def _format_double_table_prompt(self, question, tables):
+        """Format a double table prompt"""
+        # Extract header and first few rows for each table
+        table1_lines = tables[0].strip().split('\n')
+        header1 = table1_lines[0]
+        sample_rows1 = '\n'.join(table1_lines[1:6])
+        
+        table2_lines = tables[1].strip().split('\n')
+        header2 = table2_lines[0]
+        sample_rows2 = '\n'.join(table2_lines[1:6])
+        
+        return DOUBLE_TABLE_TEMPLATE.format(
+            csv_data1=f"{header1}\n{sample_rows1}",
+            csv_data2=f"{header2}\n{sample_rows2}",
+            question=question
+        )
     
-    try:
-        res = requests.post(url=URL, json=data)
-        if res.status_code == 200:
-            response = res.json()['response']
+    def _format_qa_prompt(self, question, table, description=''):
+        """Format a QA prompt"""
+        return QA_TEMPLATE.format(
+            table_descriptions=description,
+            table_in_csv=table,
+            question=question
+        )
+    
+    def _generate_with_gemini(self, prompt):
+        """Generate response using Gemini API"""
+        try:
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            logger.error(f"Error with Gemini: {e}")
+            return None
+    
+    def _generate_with_ollama(self, prompt):
+        """Generate response using Ollama API"""
+        try:
+            data = {
+                'model': OLLAMA_MODEL,
+                'prompt': prompt,
+                'stream': False,
+                'temperature': 0.2,  # Lower temperature for more deterministic code
+                'top_p': 0.95,
+                'max_tokens': 2048
+            }
             
-            # For code mode, check if code runs successfully
-            if mode != 'QA':
-                local_path = file_detail['local_path'] if mode == 'Code' else [file_detail[0]['local_path'], file_detail[1]['local_path']]
-                if not check_code(code=response, local_path=local_path, is_merge=(mode == 'Code_Merge')):
-                    # Could implement retry logic here
-                    pass
+            response = requests.post(url=OLLAMA_URL, json=data, timeout=60)
+            if response.status_code == 200:
+                return response.json()['response']
+            else:
+                logger.error(f"Error from Ollama API: {response.status_code}")
+                return f"Error from LLM service. Status code: {response.status_code}"
+        except Exception as e:
+            logger.error(f"Error connecting to Ollama: {e}")
+            return f"Error connecting to LLM service: {str(e)}"
+    
+    def generate(self, prompt):
+        """Generate a response using the available LLM service"""
+        if self.use_gemini:
+            response = self._generate_with_gemini(prompt)
+            if response:
+                return response
+            
+        # Fall back to Ollama if Gemini fails or isn't configured
+        return self._generate_with_ollama(prompt)
+    
+    def process_query(self, question, tables, dataframes, mode='Code'):
+        """Process a query and execute code or generate QA response"""
+        
+        is_double = isinstance(tables, tuple) and len(tables) == 2
+        
+        # Generate the appropriate prompt
+        if mode == 'QA':
+            description = ''
+            if isinstance(tables, dict) and 'description' in tables:
+                description = tables['description']
+            prompt = self._format_qa_prompt(question, tables, description)
+            response = self.generate(prompt)
+            return response, None  # No code to execute for QA
+        
+        elif mode == 'Code':
+            if is_double:
+                prompt = self._format_double_table_prompt(question, tables)
+            else:
+                prompt = self._format_single_table_prompt(question, tables)
+                
+            logger.info(f"Generating code for query: {question}")
+            
+            # Generate code content and extract only the body
+            raw_code = self.generate(prompt)
+            
+            # Clean the code - extract only what would go inside the function
+            if "# CODE STARTS HERE" in raw_code and "# CODE ENDS HERE" in raw_code:
+                start_marker = "# CODE STARTS HERE"
+                end_marker = "# CODE ENDS HERE"
+                start_idx = raw_code.find(start_marker) + len(start_marker)
+                end_idx = raw_code.find(end_marker)
+                if start_idx != -1 and end_idx != -1:
+                    code_content = raw_code[start_idx:end_idx].strip()
+                else:
+                    code_content = raw_code
+            else:
+                code_content = raw_code
+
+            
+            if "```python" in code_content:
+                code_content = code_content.replace("```python", "").replace("```", "")
+            if "```" in code_content:
+                code_content = code_content.replace("```", "")
+            # Create a code file with the generated content
+            code_file = create_code_file(code_content, question, is_double=is_double)
+            
+            # Execute the code
+            result = execute_code(code_file, dataframes, is_double=is_double)
+            
+            return code_content, result
+        
         else:
-            response = f'Error occur when generating response. Status code: {res.status_code}'
-            print(response)
-    except Exception as e:
-        response = f'Error connecting to LLM service: {str(e)}'
-        print(response)
-    
-    # save log
-    session_id = insert_chat(question=question, answer=response, file_detail=file_detail)
-    
-    return response, session_id
-
-def get_tllm_response_pure(question, table, file_detail, mode):
-    # get prompt
-    if mode == 'QA':
-        prompt = get_qa_prompt(question, table, file_detail['description'] if isinstance(file_detail, dict) and 'description' in file_detail else '')
-    elif mode == 'Code':
-        prompt = get_code_prompt(question, table)
-    elif mode == 'Code_Merge':
-        prompt = get_code_merge_prompt(question, table)
-    
-    try:
-        prompt=prompt+'\n'+"the file name is "+file_detail['name']+" and use pandas library for handling the data, and present the result in tabular format"
-        res = generate(prompt)
-        session_id = insert_chat(question=question, answer=res, file_detail=file_detail)
-        if mode != 'QA':
-            local_path = file_detail['local_path'] if mode == 'Code' else [file_detail[0]['local_path'], file_detail[1]['local_path']]
-            if not check_code(code=res, local_path=local_path, is_merge=(mode == 'Code_Merge')):
-                pass
-        return res, session_id
-    except Exception as e:
-        return f"Error connecting to LLM service: {str(e)}", None
-    
-
-def generate(prompt):
-    genai.configure(api_key=os.environ['GEMINI_API_KEY'])
-    model = genai.GenerativeModel('gemini-2.0-flash')
-    return model.generate_content(prompt).text
-
-
+            return f"Unknown mode: {mode}", None
+            
+    def save_interaction(self, question, code, result, file_details, db_client=None):
+        """Save the interaction to database if a client is provided"""
+        if not db_client:
+            return None
+            
+        session_id = str(uuid.uuid4())
+        try:
+            db_client.chat.insert_one({
+                'session_id': session_id,
+                'question': question,
+                'code': code,
+                'result': str(result)[:1000],  # Limit result size
+                'file_details': file_details,
+                'vote': 0
+            })
+            return session_id
+        except Exception as e:
+            logger.error(f"Error saving to database: {e}")
+            return None

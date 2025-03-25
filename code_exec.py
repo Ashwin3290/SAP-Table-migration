@@ -1,141 +1,131 @@
-import re
+"""
+Code execution module for TableLLM
+"""
+
+import os
 import sys
+import uuid
+import tempfile
+import importlib.util
 import pandas as pd
-from io import StringIO
+import matplotlib.pyplot as plt
 from docx import Document
+from io import StringIO
 
 
-def docx2tabular(docxPath):
-    doc = Document(docxPath)
+def docx2tabular(docx_path):
+    """Convert a DOCX table to a list of rows"""
+    doc = Document(docx_path)
+    if not doc.tables:
+        return None
     table = doc.tables[0]
-    tabular = [[cell.text for cell in row.cells] for row in table.rows]
-    return tabular
+    return [[cell.text for cell in row.cells] for row in table.rows]
 
 
-def save_file(uploadFile):
+def save_file(upload_file):
+    """Save an uploaded file and return its dataframe, text, and metadata"""
+    # Create uploads directory if it doesn't exist
     base_dir = 'uploaded_files'
-    local_path = f'{base_dir}/{uploadFile.file_id}-{uploadFile.name}'
-    table_description = ''
-    if uploadFile.name.endswith('.csv'):
-        # read csv and save to local file
-        df = pd.read_csv(uploadFile, encoding="latin-1")
+    os.makedirs(base_dir, exist_ok=True)
+    
+    # Generate a unique path for the file
+    file_id = str(uuid.uuid4())[:8]
+    local_path = f'{base_dir}/{file_id}-{upload_file.name}'
+    
+    # Process based on file type
+    if upload_file.name.endswith('.csv'):
+        df = pd.read_csv(upload_file, encoding="utf-8", on_bad_lines='skip')
         df.to_csv(local_path, index=False)
-        query_tabular = uploadFile.getvalue().decode("utf-8")
+        query_tabular = upload_file.getvalue().decode("utf-8")
 
-    elif uploadFile.name.endswith(('.xlsx', 'xls')):
-        # read xlsx and save to local file
-        df = pd.ExcelFile(uploadFile).parse()
-        if uploadFile.name.endswith('.xlsx'):
-            local_path = local_path.replace(".xlsx", ".csv")
-            df.to_csv(local_path, index=False)
-        else:
-            local_path = local_path.replace(".xls", ".csv")
-            df.to_csv(local_path, index=False)
-        with open(local_path, 'r') as fp:
+    elif upload_file.name.endswith(('.xlsx', '.xls')):
+        df = pd.ExcelFile(upload_file).parse()
+        csv_path = local_path.replace(".xlsx", ".csv").replace(".xls", ".csv")
+        df.to_csv(csv_path, index=False)
+        local_path = csv_path
+        with open(local_path, 'r', encoding='utf-8') as fp:
             query_tabular = fp.read()
 
-    elif uploadFile.name.endswith('.docx'):
-        # read docx and save to local file
+    elif upload_file.name.endswith('.docx'):
         with open(local_path, "wb") as fpdf:
-            fpdf.write(uploadFile.read())
+            fpdf.write(upload_file.read())
         tabular_rows = docx2tabular(local_path)
+        if not tabular_rows:
+            raise ValueError("No table found in the DOCX file")
         df = pd.DataFrame(tabular_rows[1:], columns=tabular_rows[0])
-        query_tabular = '\n'.join(','.join(row) for row in tabular_rows)
+        query_tabular = '\n'.join(','.join(str(cell) for cell in row) for row in tabular_rows)
+    else:
+        raise ValueError(f"Unsupported file type: {upload_file.name}")
 
     file_detail = {
-        'name': uploadFile.name,
+        'name': upload_file.name,
         'local_path': local_path,
-        'description': table_description
+        'description': ''
     }
 
     return df, query_tabular, file_detail
 
 
-def preprocess_code(code, local_path, is_merge):
-    code_block_pattern = r"```python(.*?)```"
-    match = re.search(code_block_pattern, code, re.DOTALL)
-    if match:
-        code = match.group(1).strip()
-    code = re.sub(r'#.*', '', code)
-    # Remove multi-line comments
-    code = re.sub(r'""".*?"""|\'\'\'.*?\'\'\'', '', code, flags=re.DOTALL)
-    # code check
-    if code.find('plt') != -1:
-        savefig = re.findall('plt.savefig\(.*?\)', code)
-        for i in savefig:
-            code = code.replace(i, '')
-        code = code.replace('plt.show()', 'print(plt)')
-
-    content_in_print = re.findall('print\((.*?)\)', code)
-    if len(content_in_print) == 0:
-        return None
-    content_in_print = content_in_print[-1]
-
-    if content_in_print.find('[') != -1:
-        variable_in_print = re.findall('[0-9a-zA-Z\_]+\[.*?\]', code)[0]
-        code = code.replace(f'print({content_in_print})', '')
-        code = code + f'final_result = {variable_in_print}\n\nprint(final_result)'
+def create_code_file(code_content, query, is_double=False):
+    """Create a permanent Python file with the provided code content"""
+    # Create directory if it doesn't exist
+    code_dir = 'generated_code'
+    os.makedirs(code_dir, exist_ok=True)
+    
+    # Create a sanitized filename from the query
+    timestamp = uuid.uuid4().hex[:8]
+    sanitized_query = "".join(c if c.isalnum() else "_" for c in query[:30])
+    
+    if is_double:
+        filename = f"{code_dir}/dual_{sanitized_query}_{timestamp}.py"
+        function_def = """def analyze_data(df1, df2):
+    """
     else:
-        variable_in_print = content_in_print
-        while variable_in_print.find(',') != -1:
-            variable_in_print = variable_in_print[variable_in_print.find(',') + len(', '):]
-        code = code.replace(f'print({content_in_print})', f'print({variable_in_print})')
+        filename = f"{code_dir}/single_{sanitized_query}_{timestamp}.py"
+        function_def = """def analyze_data(df):
+    """
+    
+    # Create a template with the necessary imports
+    template = """# Generated by TableLLM on {date}
+# Query: {query}
+{code_content}
+    
+"""
+    
+    # Fill in the template
+    full_code = template.format(
+        date=pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+        query=query,
+        # function_def=function_def,
+        code_content=code_content.strip()
+    )
+    
+    # Write to permanent file
+    with open(filename, 'w') as f:
+        f.write(full_code)
+    
+    return filename
 
-    # replace file path
-    if is_merge:
-        code = code.replace('data1.csv', local_path[0])
-        code = code.replace('data2.csv', local_path[1]).lstrip('\n').lstrip(' ')
-    else:
-        code = code.replace('data.csv', local_path).lstrip('\n').lstrip(' ')
-        
-    return code
 
-
-def run_code(code, local_path, is_merge=False):
+def execute_code(file_path, dataframes, is_double=False):
+    """Execute a Python file and return the result"""
     try:
-        # preprocess code
-        code = preprocess_code(code, local_path, is_merge)
-        if code is None:
-            return 'Error occur while running code.'
+        # Import the module
+        module_name = os.path.basename(file_path).replace('.py', '')
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
         
-        # run file, get the variables and console output
-        sys.stdout = StringIO()
-        exec(code)
-        variables = locals()
-        output_str = sys.stdout.getvalue().rstrip('\n')
-        sys.stdout.close()
-        sys.stdout = sys.__stdout__  # resume stdout
-
-        # extract variable name from print()
-        output_variable_name = re.findall('print\((.*?)\)', code)[0]
-
-        # find the output variable
-        output_variable = variables[output_variable_name]
-        answer = output_variable
-
-        return answer
+        # Call the analyze_data function with the dataframe(s)
+        if is_double:
+            df1, df2 = dataframes
+            result = module.analyze_data(df1, df2)
+        else:
+            result = module.analyze_data(dataframes)
+            
+        return result
     except Exception as e:
-        sys.stdout = sys.__stdout__  # resume stdout
-        print(str(e))
-        return 'Error occur while running code.'
-
-
-def check_code(code, local_path, is_merge=False):
-    try:
-        # replace file path
-        code = preprocess_code(code, local_path, is_merge)
-        if code is None:
-            return False
-        
-        # run code
-        sys.stdout = StringIO()
-        exec(code)
-        variables = locals()
-        sys.stdout.close()
-        sys.stdout = sys.__stdout__  # resume stdout
-
-        return True
-    except Exception as e:
-        sys.stdout = sys.__stdout__  # resume stdout
-        # print(str(e))
-        return False
+        # Capture the error and return it
+        error_msg = f"Error executing code: {str(e)}"
+        print(error_msg)
+        return error_msg
