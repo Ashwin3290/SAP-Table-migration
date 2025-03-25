@@ -7,3 +7,4 @@ pymongo
 requests
 python-docx
 google
+google-generativeai
