@@ -1,7 +1,3 @@
-"""
-Streamlit application for TableLLM
-"""
-
 import os
 import pandas as pd
 import streamlit as st
@@ -140,14 +136,15 @@ with tab1:
             key="single_file_uploader"
         )
         
-        # Mode selection
-        analysis_mode = st.radio(
-            "Select Analysis Mode",
-            ["Code (generates & runs Python)", "QA (direct answers)"],
-            key="single_mode",
-            horizontal=True
-        )
-        mode = "Code" if "Code" in analysis_mode else "QA"
+        # # Mode selection
+        # analysis_mode = st.radio(
+        #     "Select Analysis Mode",
+        #     ["Code (generates & runs Python)", "QA (direct answers)"],
+        #     key="single_mode",
+        #     horizontal=True
+        # )
+        # mode = "Code" if "Code" in analysis_mode else "QA"
+        mode = "Code"
         
         # Process uploaded file
         if uploaded_file:

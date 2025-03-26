@@ -1,7 +1,3 @@
-"""
-Code generator for TableLLM - Creates boilerplate analysis code for datasets
-"""
-
 import os
 import pandas as pd
 

@@ -1,13 +1,9 @@
-"""
-Core TableLLM module for generating and executing code from natural language queries
-"""
-
 import os
 import uuid
 import logging
 import json
 import requests
-import re
+import pandas as pd    
 from dotenv import load_dotenv
 import google.generativeai as genai
 
@@ -31,6 +27,8 @@ except Exception as e:
     logger.warning(f"Error loading config: {e}. Using default values.")
     OLLAMA_URL = 'http://localhost:11434/api/generate'
     OLLAMA_MODEL = 'llama3'
+
+table_desc = pd.read_excel('MARA_desc.xlsx')
 
 
 class TableLLM:
@@ -146,6 +144,8 @@ class TableLLM:
                 prompt = self._format_double_table_prompt(question, tables)
             else:
                 prompt = self._format_single_table_prompt(question, tables)
+            
+            prompt = prompt + "\n\nTable Description:\n" + table_desc.to_csv(index=False)
                 
             logger.info(f"Generating code for query: {question}")
             
