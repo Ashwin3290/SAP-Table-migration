@@ -7,7 +7,7 @@ import pandas as pd
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-from prompt_format import SINGLE_TABLE_TEMPLATE, DOUBLE_TABLE_TEMPLATE, QA_TEMPLATE
+from prompt_format import SINGLE_TABLE_TEMPLATE, DOUBLE_TABLE_TEMPLATE, QA_TEMPLATE, DOUBLE_TABLE_TEMPLATE_PRE
 from code_exec import create_code_file, execute_code
 
 # Set up logging
@@ -56,6 +56,22 @@ class TableLLM:
         return SINGLE_TABLE_TEMPLATE.format(
             csv_data=f"{header}\n{sample_rows}",
             question=question
+        )
+    
+    def _format_double_table_prompt_pre(self, question, tables):
+        """Format a double table prompt"""
+        # Extract header and first few rows for each table
+        table1_lines = tables[0].strip().split('\n')
+        header1 = table1_lines[0]
+        
+        table2_lines = tables[1].strip().split('\n')
+        header2 = table2_lines[0]
+        
+        return DOUBLE_TABLE_TEMPLATE_PRE.format(
+            csv_data1=f"{header1}",
+            csv_data2=f"{header2}",
+            question=question,
+            table_desc=table_desc.to_csv(index=False),
         )
     
     def _format_double_table_prompt(self, question, tables):
@@ -124,6 +140,24 @@ class TableLLM:
             
         # Fall back to Ollama if Gemini fails or isn't configured
         return self._generate_with_ollama(prompt)
+    
+    def pre_process_query(self, question, tables, dataframes, mode='Code'):
+        """Preprocess the query to return structured response"""
+
+        is_double = isinstance(tables,tuple) and len(tables) == 2
+
+        # generate appropriate prompt
+
+        if mode=='Code':
+            if is_double:
+                prompt = self._format_double_table_prompt_pre(question, tables)
+
+            prompt = prompt 
+            logger.info(f"Generating structured query for user query:{question}")
+
+            raw_prompt = self.generate(prompt)
+
+        return raw_prompt
     
     def process_query(self, question, tables, dataframes, mode='Code'):
         """Process a query and execute code or generate QA response"""

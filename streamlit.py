@@ -403,6 +403,15 @@ with tab2:
             
             with st.spinner("Analyzing data..."):
                 # Get response from TableLLM
+
+                response = tablellm.pre_process_query(
+                    query,
+                    (st.session_state['tables']['first']['text'], st.session_state['tables']['second']['text']),
+                    (st.session_state['tables']['first']['df'], st.session_state['tables']['second']['df']),
+                    mode="Code"  # Only Code mode for two tables
+                )
+                print(response)
+
                 code, result = tablellm.process_query(
                     query,
                     (st.session_state['tables']['first']['text'], st.session_state['tables']['second']['text']),
