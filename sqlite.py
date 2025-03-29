@@ -1,5 +1,7 @@
 import sqlite3
 import os
+import re
+import json
 import pandas as pd
 import pandas as pd    
 from dotenv import load_dotenv
@@ -65,41 +67,42 @@ def fetch_data_by_ids(db_path, object_id, segment_id, project_id):
 
     1.  Identify Relevant Row(s):
            Analyze the `User Query` to identify the descriptive terms the user is asking about.
-           Match these descriptive terms against the values in the `description` column of the `Table Description` to find the corresponding row(s) and field name from `fields column`. The match should be robust enough to handle partial descriptions.
+           Match these descriptive terms against the values in the `description` column of the `Table Description` to find the corresponding rows and field names from `fields column`. The match should be robust enough to handle partial descriptions.
 
-    2.  Extract Information: For each matched row, extract the following details precisely from the corresponding columns in the `Table Description`:
-        *   `target_sap_field`: The value from the `target_sap_fields` column. This is the primary technical field name you need to identify based on the user's description.
-        *   `table_name`: The value from the `table_name` column.
-        *   `sap_structure`: The value from the `sap_struct` column.
-        *   `source_field_name`: The value from the `source_field` column.
-        *   `target_sap_table`: The value from the `target_sap_table` column.
-        *   `segment_name`: The value from the `segement` column.
+    2.  Extract Information: For all matched rows, extract the following details precisely from the corresponding columns in the `Table Description` and consolidate them into a single JSON object:
+        *   `query_terms_matched`: List of all descriptive terms from the query that were matched
+        *   `target_sap_fields`: List of values from the `target_sap_fields` column for all matched terms
+        *   `table_name`: The value from the `table_name` column (should be the same for all matched fields in this context)
+        *   `sap_structure`: The value from the `sap_struct` column (should be the same for all matched fields in this context)
+        *   `source_field_names`: List of values from the `source_field` column for all matched terms
+        *   `target_sap_table`: The value from the `target_sap_table` column (should be the same for all matched fields in this context)
+        *   `segment_name`: The value from the `segement` column (should be the same for all matched fields in this context)
+        *   `restructured_question`: The original question with descriptive terms replaced by their technical field names
 
     Output Format:
 
-    *   Present the extracted information in a clear, structured JSON format.
-    *   If the query potentially matches multiple fields/rows, list the details for each distinct match.
-    *   If no match is found for a term in the query, explicitly state that.
+    *   Present all extracted information in a single, consolidated JSON object
+    *   If no match is found for any term in the query, explicitly state that
+    *   Group common values that should be the same across all matches (like table_name, sap_structure, etc.)
 
-    Example JSON Output Structure (if one match found):
+    Example JSON Output Structure (if matches found):
 
     ```json
-    [
     {{
-    "query_term_matched": "[Descriptive term from query]",
-    "target_sap_field": "[Value from 'fields' column]",
-    "table_name": "[Value from 'table_name' column]",
-    "sap_structure": "[Value from 'sap_struct' column]",
-    "source_field_name": "[Value from 'source_fie' column]",
-    "target_sap_table": "[Value from 'target_sap_tab' column]",
+    "query_term_matched": "[All Descriptive terms from query]",
+    "target_sap_field": "[All Values from 'fields' column]",
+    "table_name": "[All Values from 'table_name' column if distinct]",
+    "sap_structure": "[All Values from 'sap_struct' column if distinct]",
+    "source_field_name": "[Value from 'source_field' column]",
+    "target_sap_table": "[Value from 'target_sap_table' column]",
     "segment_name": "[Value from 'segement' column]"
+    "Question" : "[Restructured Question]"
     }}
-    ]
     ```
-    """ 
+"""
 
     table_desc = pd.read_csv("joined_data.csv")   
-    prompt = prompt.format(question = "Extract the description and Product number",table_desc = table_desc.to_csv(index=False))
+    prompt = prompt.format(question = "Extract the description and Product number where the product numeber starts with S",table_desc = table_desc.to_csv(index=False))
     api_key = os.environ.get('GEMINI_API_KEY')
     genai.configure(api_key=api_key)
     """Generate response using Gemini API"""
@@ -114,7 +117,25 @@ def fetch_data_by_ids(db_path, object_id, segment_id, project_id):
             },
         )
         response = model_instance.generate_content(prompt)
-        print(response.text)
+        try:
+    # Try to find JSON block between ```json and ```
+            json_str = re.search(r'```json(.*?)```', response.text, re.DOTALL)
+            if json_str:
+                json_data = json.loads(json_str.group(1).strip())
+            else:
+                # If no code block markers, try parsing the whole response as JSON
+                json_data = json.loads(response.text.strip())
+            
+            # Save to file
+            with open("resolved_query.json", 'w') as file:
+                json.dump(json_data, file, indent=2)
+                
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON response: {e}")
+            print("Raw response:")
+            print(response.text)
+    except Exception as e:
+        print(f"Error: {e}")
     except Exception as e:
         return None
     finally:
