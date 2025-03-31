@@ -5,7 +5,8 @@ import json
 import requests
 import pandas as pd    
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from prompt_format import SINGLE_TABLE_TEMPLATE, DOUBLE_TABLE_TEMPLATE
 from code_exec import create_code_file, execute_code
@@ -16,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
+api_key = os.environ.get('GEMINI_API_KEY')
+
+client = genai.Client(api_key=api_key)
 
 # Load configuration
 try:
@@ -79,8 +84,10 @@ class TableLLM:
     def _generate_with_gemini(self, prompt):
         """Generate response using Gemini API"""
         try:
-            model = genai.GenerativeModel('gemini-2.0-flash')
-            response = model.generate_content(prompt)
+            response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents = prompt,
+        )
             return response.text
         except Exception as e:
             logger.error(f"Error with Gemini: {e}")

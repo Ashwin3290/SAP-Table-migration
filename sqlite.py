@@ -5,9 +5,12 @@ import json
 import pandas as pd
 import pandas as pd    
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 load_dotenv()
+
+
 
 def fetch_data_by_ids(db_path, object_id, segment_id, project_id):
     conn = sqlite3.connect(db_path)   
@@ -107,19 +110,19 @@ def fetch_data_by_ids(db_path, object_id, segment_id, project_id):
     prompt = prompt.format(question = "Bring Material Number with Material Type = ROH from MARA Table"
 ,table_desc = table_desc.to_csv(index=False))
     api_key = os.environ.get('GEMINI_API_KEY')
-    genai.configure(api_key=api_key)
+    client = genai.Client(api_key = api_key)
     """Generate response using Gemini API"""
     try:
-        model_instance = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
-            generation_config={
-                "temperature": 0.3,
-                "max_output_tokens": 2048,
-                "top_p": 0.95,
-                "top_k": 40,
-            },
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents = prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.5,  # Corrected: keyword argument, not a string
+                max_output_tokens=2048, # Corrected: keyword argument, not a string
+                top_p=0.95,    # Corrected: keyword argument, not a string
+                top_k=40      #
+            )
         )
-        response = model_instance.generate_content(prompt)
         try:
     # Try to find JSON block between ```json and ```
             json_str = re.search(r'```json(.*?)```', response.text, re.DOTALL)
