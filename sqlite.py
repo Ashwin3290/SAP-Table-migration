@@ -129,12 +129,8 @@ def fetch_data_by_ids(db_path, object_id, segment_id, project_id):
             if json_str:
                 json_data = json.loads(json_str.group(1).strip())
             else:
-                # If no code block markers, try parsing the whole response as JSON
                 json_data = json.loads(response.text.strip())
             
-            # Save to file
-            with open("resolved_query.json", 'w') as file:
-                json.dump(json_data, file, indent=2)
                 
         except json.JSONDecodeError as e:
             print(f"Error parsing JSON response: {e}")
@@ -144,16 +140,9 @@ def fetch_data_by_ids(db_path, object_id, segment_id, project_id):
         print(f"Error: {e}")
     except Exception as e:
         return None
-    finally:
-        return joined_df
+
     
-    
-if __name__ == "__main__":
-    db_path = "db.sqlite3"
-    object_id = 29
-    segment_id = 336
-    project_id = 24
-    
+
     results = fetch_data_by_ids(db_path, object_id, segment_id, project_id)
     
     joined_df = results
@@ -165,5 +154,3 @@ if __name__ == "__main__":
         json_data = json.load(file)
         print(json.dumps(json_data, indent=2))
 
-    # joined_df.to_csv('joined_data.csv', index=False)
- 

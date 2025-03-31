@@ -8,8 +8,52 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-from prompt_format import SINGLE_TABLE_TEMPLATE, DOUBLE_TABLE_TEMPLATE
+# from prompt_format import SINGLE_TABLE_TEMPLATE, DOUBLE_TABLE_TEMPLATE
 from code_exec import create_code_file, execute_code
+
+
+DOUBLE_TABLE_TEMPLATE = """
+I need ONLY Python code - DO NOT include any explanations, markdown, or comments outside the code.
+
+Source table info and decription:
+{source_data_info}
+{source_data_describe}
+
+
+Target table info and decription:
+{target_data_info}
+{target_data_describe}
+
+columns that will be used for filtering:
+{filtering_columns}
+
+source column from where data has to be picked:
+{insertion_source_column}
+
+target column where data will be inserted:
+{insertion_target_column}
+
+Question: {question}
+
+I'll place your code inside this function template:
+df1 will be the source table and df2 will be the target table.
+
+
+def analyze_data(df1, df2):
+    # CODE STARTS HERE
+    
+    # CODE ENDS HERE, must set 'result' variable
+    return result
+
+REQUIREMENTS:
+1. Output ONLY the code that goes between the comments
+2. Assign your final output to a variable named 'result'
+3. For visualizations use: result = plt.gcf()
+4. Handle data errors and empty dataframes
+5. NEVER use print() statements
+6. NEVER reference file paths
+7. Include comments inside your code
+"""
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -52,32 +96,20 @@ class TableLLM:
                 logger.warning(f"Error configuring Gemini: {e}. Falling back to Ollama.")
     
     def _format_single_table_prompt(self, question, table):
-        """Format a single table prompt"""
-        # Extract header and first few rows
-        table_lines = table.strip().split('\n')
-        header = table_lines[0]
-        sample_rows = '\n'.join(table_lines[1:6])  # First 5 data rows
-        
-        return SINGLE_TABLE_TEMPLATE.format(
-            csv_data=f"{header}\n{sample_rows}",
-            question=question
-        )
+        pass
     
-    def _format_double_table_prompt(self, question, tables):
+    def _format_double_table_prompt(self, resolved_data):
         """Format a double table prompt"""
-        # Extract header and first few rows for each table
-        table1_lines = tables[0].strip().split('\n')
-        header1 = table1_lines[0]
-        sample_rows1 = '\n'.join(table1_lines[1:6])
-        
-        table2_lines = tables[1].strip().split('\n')
-        header2 = table2_lines[0]
-        sample_rows2 = '\n'.join(table2_lines[1:6])
         
         return DOUBLE_TABLE_TEMPLATE.format(
-            csv_data1=f"{header1}\n{sample_rows1}",
-            csv_data2=f"{header2}\n{sample_rows2}",
-            question=question
+            question=resolved_data['restructured_question'],
+            source_data_info = resolved_data['source_info'],
+            source_data_describe = resolved_data['source_describe'],
+            target_data_info = resolved_data['target_info'],
+            target_data_describe = resolved_data['target_describe'],
+            filtering_columns = resolved_data['filtering_fields'],
+            insertion_source_column = resolved_data['insertion_fields']['source_field'],
+            insertion_target_column = resolved_data['insertion_fields']['target_field']
         )
 
     
