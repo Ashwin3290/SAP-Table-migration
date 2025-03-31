@@ -15,5 +15,14 @@
   ],
   "target_sap_table": "S_MARA",
   "segment_name": "Basic Data (mandatory)",
-  "restructured_question": "Bring PRODUCT with MTART = ROH from MARA Table"
+  "filtering_fields": [
+    "MTART"
+  ],
+  "insertion_fields": [
+    {
+      "source_field": "MATNR",
+      "target_field": "PRODUCT"
+    }
+  ],
+  "restructured_question": "Bring MATNR with MTART = ROH from MARA Table"
 }
