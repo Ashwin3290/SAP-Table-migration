@@ -44,4 +44,3 @@ AND f.project_id_id = ?
     joined_df = pd.read_sql_query(joined_query, conn, params=params)
     conn.close()    
     return joined_df
-
