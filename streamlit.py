@@ -2,6 +2,9 @@ import os
 import pandas as pd
 import streamlit as st
 from pymongo import MongoClient
+import sqlite3
+import json
+from datetime import datetime
 
 from code_exec import save_file
 from tablellm import TableLLM
@@ -21,12 +24,23 @@ try:
 except Exception as e:
     st.sidebar.warning(f"Database connection failed: {e}")
 
+# Initialize SQLite connection for data access
+sqlite_conn = None
+try:
+    sqlite_conn = sqlite3.connect('db.sqlite3')
+    st.sidebar.success("Connected to SQLite database")
+except Exception as e:
+    st.sidebar.warning(f"SQLite connection failed: {e}")
+
 # Initialize TableLLM
 tablellm = TableLLM()
-session_id = 0
+
 # Initialize session state variables
 if 'show_code' not in st.session_state:
     st.session_state['show_code'] = True
+
+if 'transformation_session_id' not in st.session_state:
+    st.session_state['transformation_session_id'] = None
 
 if 'tables' not in st.session_state:
     st.session_state['tables'] = {
@@ -58,13 +72,16 @@ if 'history' not in st.session_state:
             'result': None,
             'session_id': 0
         },
-        'double': {
-            'question': None,
-            'code': None,
-            'result': None,
-            'session_id': 0
+        'transformation': {
+            'questions': [],
+            'codes': [],
+            'results': [],
+            'session_id': None
         }
     }
+
+if 'transformation_history' not in st.session_state:
+    st.session_state['transformation_history'] = []
 
 # Custom CSS for better appearance
 st.markdown("""
@@ -96,31 +113,27 @@ st.markdown("""
     .example-query:hover {
         background-color: #e9ecef;
     }
+    .history-item {
+        padding: 0.5rem;
+        background-color: #e9ecef;
+        border-left: 4px solid #0066cc;
+        margin-bottom: 0.5rem;
+    }
+    .context-info {
+        padding: 0.8rem;
+        background-color: #f0f7ff;
+        border-radius: 5px;
+        margin-bottom: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# Helper function to update vote in database
-def update_vote(session_id, vote):
-    """Update the vote for a session"""
-    if not db_client or not session_id:
-        return False
-    
-    try:
-        db_client.chat.update_one(
-            {'session_id': session_id},
-            {'$set': {'vote': vote}}
-        )
-        return True
-    except Exception as e:
-        st.error(f"Error updating vote: {e}")
-        return False
-
 # Main app header
-st.markdown('<p class="main-header">TableLLM: Interactive Data Analysis</p>', unsafe_allow_html=True)
-st.markdown("Ask questions about your data in natural language and get immediate insights.")
+st.markdown('<p class="main-header">TableLLM: Context-Aware Data Transformations</p>', unsafe_allow_html=True)
+st.markdown("Process sequential data transformations with context awareness, preserving state between queries.")
 
 # Create tabs for different operations
-tab1, tab2 = st.tabs(["Single Table Analysis", "Two-Table Analysis"])
+tab1, tab2 = st.tabs(["Single Table Analysis", "Sequential Data Transformations"])
 
 # Single Table Analysis Tab
 with tab1:
@@ -136,14 +149,7 @@ with tab1:
             key="single_file_uploader"
         )
         
-        # # Mode selection
-        # analysis_mode = st.radio(
-        #     "Select Analysis Mode",
-        #     ["Code (generates & runs Python)", "QA (direct answers)"],
-        #     key="single_mode",
-        #     horizontal=True
-        # )
-        # mode = "Code" if "Code" in analysis_mode else "QA"
+        # Set mode to Code
         mode = "Code"
         
         # Process uploaded file
@@ -203,17 +209,11 @@ with tab1:
                     mode=mode
                 )
                 
-                # # Save to history
-                # session_id = tablellm.save_interaction(
-                #     query, code, result, 
-                #     st.session_state['tables']['single']['details'],
-                #     db_client
-                # )
                 st.session_state['history']['single'] = {
                     'question': query,
                     'code': code,
                     'result': result,
-                    'session_id': session_id
+                    'session_id': 0
                 }
             
             # Display results
@@ -242,19 +242,6 @@ with tab1:
             else:
                 # QA mode - just display the text response
                 st.markdown(code)
-            
-            # Voting buttons
-            if session_id:
-                vote_col1, vote_col2 = st.columns(2)
-                with vote_col1:
-                    if st.button("👍 Helpful", key="single_upvote"):
-                        update_vote(session_id, 1)
-                        st.success("Thanks for your feedback!")
-                
-                with vote_col2:
-                    if st.button("👎 Not Helpful", key="single_downvote"):
-                        update_vote(session_id, -1)
-                        st.success("Thanks for your feedback!")
         
         # Example queries
         with st.expander("Example Queries"):
@@ -271,216 +258,182 @@ with tab1:
                     st.session_state["single_query"] = query
                     st.rerun()
 
-# Two-Table Analysis Tab
+# Sequential Data Transformations Tab
 with tab2:
     col1, col2 = st.columns([1, 1.5])
     
     with col1:
-        st.markdown('<p class="sub-header">Upload Your Data</p>', unsafe_allow_html=True)
+        st.markdown('<p class="sub-header">Configuration</p>', unsafe_allow_html=True)
         
-        # File uploaders
-        uploaded_file1 = st.file_uploader(
-            "Choose first CSV or Excel file", 
-            type=["csv", "xlsx", "xls"], 
-            key="double_file_uploader1"
-        )
+        # Object and segment selection widgets
+        object_id = st.number_input("Object ID", min_value=1, value=1, step=1, key="object_id")
+        segment_id = st.number_input("Segment ID", min_value=1, value=1, step=1, key="segment_id")
+        project_id = st.number_input("Project ID", min_value=1, value=1, step=1, key="project_id")
         
-        uploaded_file2 = st.file_uploader(
-            "Choose second CSV or Excel file", 
-            type=["csv", "xlsx", "xls"], 
-            key="double_file_uploader2"
-        )
+        # Session management
+        st.markdown("### Session Management")
+        col_session1, col_session2 = st.columns(2)
         
-        # Process first uploaded file
-        if uploaded_file1:
-            if uploaded_file1 != st.session_state['tables']['first']['file']:
+        with col_session1:
+            if st.button("Create New Session", key="new_session"):
+                # Create a new transformation session
+                with st.spinner("Creating new session..."):
+                    st.session_state['transformation_session_id'] = None
+                    st.session_state['transformation_history'] = []
+                    st.success("New session created!")
+                    st.rerun()
+        
+        with col_session2:
+            if st.button("Clear Current Session", key="clear_session") and st.session_state['transformation_session_id']:
+                st.session_state['transformation_session_id'] = None
+                st.session_state['transformation_history'] = []
+                st.success("Session cleared!")
+                st.rerun()
+        
+        # Display current session info
+        if st.session_state['transformation_session_id']:
+            session_info = tablellm.get_session_info(st.session_state['transformation_session_id'])
+            
+            st.markdown("### Current Session")
+            st.markdown(f"""
+            <div class="context-info">
+                <strong>Session ID:</strong> {session_info['session_id']}<br>
+                <strong>Transformations:</strong> {len(session_info['transformation_history'])}<br>
+                <strong>Populated Fields:</strong> {', '.join(session_info['target_table_state'].get('populated_fields', ['None']))}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Display transformation history
+            if session_info['transformation_history']:
+                with st.expander("Transformation History", expanded=False):
+                    for i, tx in enumerate(session_info['transformation_history']):
+                        st.markdown(f"""
+                        <div class="history-item">
+                            <strong>#{i+1}:</strong> {tx.get('description', 'Unknown transformation')}<br>
+                            <strong>Modified:</strong> {', '.join(tx.get('fields_modified', []))}<br>
+                            <strong>Filters:</strong> {json.dumps(tx.get('filter_conditions', {}))}
+                        </div>
+                        """, unsafe_allow_html=True)
+        
+        # Display sample tables from database if connected
+        if sqlite_conn:
+            with st.expander("Available Database Tables", expanded=False):
                 try:
-                    with st.spinner("Processing first file..."):
-                        df, text, details = save_file(uploaded_file1)
-                        st.session_state['tables']['first'] = {
-                            'file': uploaded_file1,
-                            'df': df,
-                            'text': text,
-                            'details': details
-                        }
-                except Exception as e:
-                    st.error(f"Error processing first file: {e}")
-            
-            # Display the first DataFrame
-            st.subheader("First Table")
-            st.dataframe(
-                st.session_state['tables']['first']['df'],
-                height=200,
-                use_container_width=True
-            )
-        
-        # Process second uploaded file
-        if uploaded_file2:
-            if uploaded_file2 != st.session_state['tables']['second']['file']:
-                try:
-                    with st.spinner("Processing second file..."):
-                        df, text, details = save_file(uploaded_file2)
-                        st.session_state['tables']['second'] = {
-                            'file': uploaded_file2,
-                            'df': df,
-                            'text': text,
-                            'details': details
-                        }
-                except Exception as e:
-                    st.error(f"Error processing second file: {e}")
-            
-            # Display the second DataFrame
-            st.subheader("Second Table")
-            st.dataframe(
-                st.session_state['tables']['second']['df'],
-                height=200,
-                use_container_width=True
-            )
-            
-        # Generate exploration code for both tables
-        if (uploaded_file1 and uploaded_file2 and 
-            st.session_state['tables']['first']['df'] is not None and 
-            st.session_state['tables']['second']['df'] is not None):
-            
-            if st.button("Generate Dual Table Exploration", key="generate_exploration_dual"):
-                try:
-                    from code_generator import generate_exploration_code
-                    with st.spinner("Generating exploration code..."):
-                        code_file = generate_exploration_code(
-                            st.session_state['tables']['first']['df'],
-                            f"{uploaded_file1.name}_{uploaded_file2.name}",
-                            is_double=True
-                        )
-                    st.success(f"Dual table exploration code generated: {code_file}")
+                    cursor = sqlite_conn.cursor()
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                    tables = cursor.fetchall()
                     
-                    # Add option to run the exploration code
-                    if st.button("Run Dual Exploration", key="run_exploration_dual"):
-                        with st.spinner("Running exploration..."):
-                            from code_exec import execute_code
-                            result = execute_code(
-                                code_file, 
-                                (st.session_state['tables']['first']['df'], 
-                                 st.session_state['tables']['second']['df']),
-                                is_double=True
-                            )
-                        
-                        # Display various types of results
-                        if isinstance(result, dict):
-                            for key, value in result.items():
-                                if 'plot' in key or 'figure' in key or 'heatmap' in key:
-                                    st.pyplot(value)
-                                elif isinstance(value, pd.DataFrame):
-                                    st.dataframe(value)
-                                else:
-                                    st.write(f"**{key}:**", value)
-                        else:
-                            st.write(result)
+                    for table in tables:
+                        if st.button(table[0], key=f"table_{table[0]}"):
+                            # Show sample data for this table
+                            sample_df = pd.read_sql_query(f"SELECT * FROM '{table[0]}' LIMIT 5", sqlite_conn)
+                            st.dataframe(sample_df)
                 except Exception as e:
-                    st.error(f"Error generating dual exploration code: {e}")
-        
-        if not uploaded_file1 or not uploaded_file2:
-            st.info("Please upload both files to begin analysis")
+                    st.error(f"Error fetching tables: {e}")
+        else:
+            st.warning("SQLite database connection is required for data transformations")
     
     with col2:
-        st.markdown('<p class="sub-header">Ask a Question About Both Tables</p>', unsafe_allow_html=True)
+        st.markdown('<p class="sub-header">Data Transformation Query</p>', unsafe_allow_html=True)
         
         # Query input
         query = st.text_area(
-            "What would you like to know about these tables?",
+            "What transformation would you like to perform?",
             height=100,
-            key="double_query"
+            key="transformation_query",
+            placeholder="Example: Bring Material Number with Material Type = ROH from MARA Table"
         )
         
         # Submit button and progress indicator
         col_button1, col_button2, col_button3 = st.columns([1, 1, 1])
         with col_button3:
-            submit = st.button("📊 Analyze", key="double_analyze_button", use_container_width=True)
+            submit = st.button("🔄 Transform", key="transform_button", use_container_width=True)
         
-        # Process the query
-        if (submit and query and 
-            st.session_state['tables']['first']['df'] is not None and 
-            st.session_state['tables']['second']['df'] is not None):
-            
-            with st.spinner("Analyzing data..."):
-                # Get response from TableLLM
-
-                response = tablellm.pre_process_query(
-                    query,
-                    (st.session_state['tables']['first']['text'], st.session_state['tables']['second']['text']),
-                    (st.session_state['tables']['first']['df'], st.session_state['tables']['second']['df']),
-                    mode="Code"  # Only Code mode for two tables
-                )
-                print(response)
-
-                code, result = tablellm.process_query(
-                    query,
-                    (st.session_state['tables']['first']['text'], st.session_state['tables']['second']['text']),
-                    (st.session_state['tables']['first']['df'], st.session_state['tables']['second']['df']),
-                    mode="Code"  # Only Code mode for two tables
-                )
-                
-                # Save to history
-                # session_id = tablellm.save_interaction(
-                #     query, code, result, 
-                #     [st.session_state['tables']['first']['details'], st.session_state['tables']['second']['details']],
-                #     db_client
-                # )
-                st.session_state['history']['double'] = {
-                    'question': query,
-                    'code': code,
-                    'result': result,
-                    'session_id': session_id
-                }
-            
-            # Display results
-            st.success("Analysis complete!")
-            st.markdown("### Result")
-            
-            # Display code
-            if st.session_state['show_code']:
-                with st.expander("Generated Python Code", expanded=True):
-                    st.code(code, language="python")
-            else:
-                if st.button("Show Code", key="show_code_button_double"):
-                    st.session_state['show_code'] = True
-                    st.rerun()
-            
-            # Display different result types appropriately
-            if isinstance(result, pd.DataFrame):
-                st.dataframe(result, use_container_width=True)
-            elif str(type(result)).find('matplotlib') != -1:
-                st.pyplot(result)
-            elif isinstance(result, (list, dict)):
-                st.json(result)
-            else:
-                st.write(result)
-            
-            # Voting buttons
-            if session_id:
-                vote_col1, vote_col2 = st.columns(2)
-                with vote_col1:
-                    if st.button("👍 Helpful", key="double_upvote"):
-                        update_vote(session_id, 1)
-                        st.success("Thanks for your feedback!")
-                
-                with vote_col2:
-                    if st.button("👎 Not Helpful", key="double_downvote"):
-                        update_vote(session_id, -1)
-                        st.success("Thanks for your feedback!")
+        # Process the query for data transformation
+        if submit and query and sqlite_conn:
+            with st.spinner("Processing transformation..."):
+                try:
+                    # Process query with context awareness
+                    code, result, session_id = tablellm.process_sequential_query(
+                        query, 
+                        object_id, 
+                        segment_id, 
+                        project_id,
+                        st.session_state['transformation_session_id']
+                    )
+                    
+                    # Update session ID if this is a new session
+                    if not st.session_state['transformation_session_id']:
+                        st.session_state['transformation_session_id'] = session_id
+                    
+                    # Get updated session info
+                    session_info = tablellm.get_session_info(session_id)
+                    
+                    # Add to history
+                    st.session_state['transformation_history'].append({
+                        'query': query,
+                        'code': code,
+                        'timestamp': datetime.now().isoformat(),
+                        'description': session_info['transformation_history'][-1]['description'] 
+                            if session_info['transformation_history'] else "Unknown transformation"
+                    })
+                    
+                    # Display results
+                    st.success("Transformation complete!")
+                    
+                    # Display the transformation results
+                    st.markdown("### Result")
+                    
+                    # Display code
+                    if st.session_state['show_code']:
+                        with st.expander("Generated Python Code", expanded=True):
+                            st.code(code, language="python")
+                    
+                    # Display different result types appropriately
+                    if isinstance(result, pd.DataFrame):
+                        st.dataframe(result, use_container_width=True)
+                    elif str(type(result)).find('matplotlib') != -1:
+                        st.pyplot(result)
+                    elif isinstance(result, (list, dict)):
+                        st.json(result)
+                    else:
+                        st.write(result)
+                    
+                    # Display summary of what happened
+                    latest_tx = session_info['transformation_history'][-1] if session_info['transformation_history'] else {}
+                    st.markdown(f"""
+                    <div class="context-info">
+                        <strong>Transformation Summary:</strong><br>
+                        {latest_tx.get('description', 'Transformation completed')}<br>
+                        <strong>Fields Modified:</strong> {', '.join(latest_tx.get('fields_modified', []))}<br>
+                        <strong>Filter Conditions:</strong> {json.dumps(latest_tx.get('filter_conditions', {}))}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                except Exception as e:
+                    st.error(f"Error processing transformation: {e}")
         
-        # Example queries
-        with st.expander("Example Queries"):
+        # Display previous transformations in this session
+        if st.session_state['transformation_history']:
+            st.markdown("### Previous Transformations")
+            for i, tx in enumerate(st.session_state['transformation_history']):
+                with st.expander(f"Transformation #{i+1}: {tx['description']}", expanded=False):
+                    st.write(f"Query: {tx['query']}")
+                    st.code(tx['code'], language="python")
+        
+        # Example transformation queries
+        with st.expander("Example Transformation Queries"):
             example_queries = [
-                "Merge these tables on common column names",
-                "Join the tables and show all records from both tables",
-                "Count the total records after merging the tables",
-                "What are the common columns between these tables?",
-                "Compare summary statistics between both tables"
+                "Bring Material Number with Material Type = ROH from MARA Table",
+                "Insert Material Description where Material Number already exists",
+                "Fill Material Group where Material Type = FERT",
+                "Add Plant = 1000 to materials with group CHEM",
+                "Set Status = Active for all plants with Region = EU"
             ]
             
             for i, query in enumerate(example_queries):
-                if st.button(query, key=f"double_example_{i}"):
-                    st.session_state["double_query"] = query
+                if st.button(query, key=f"example_tx_{i}"):
+                    st.session_state["transformation_query"] = query
                     st.rerun()
 
 # Sidebar for settings
@@ -490,23 +443,49 @@ with st.sidebar:
     # Code visibility toggle
     st.session_state['show_code'] = st.checkbox("Show generated code by default", value=st.session_state['show_code'])
     
+    # Context information
+    if st.session_state['transformation_session_id']:
+        st.markdown("---")
+        st.markdown("### Context Information")
+        session_info = tablellm.get_session_info(st.session_state['transformation_session_id'])
+        
+        # Display target table state
+        st.markdown("#### Target Table State")
+        table_state = session_info['target_table_state']
+        st.markdown(f"**Populated Fields:** {', '.join(table_state.get('populated_fields', ['None']))}")
+        st.markdown(f"**Remaining Fields:** {', '.join(table_state.get('remaining_mandatory_fields', ['None']))}")
+        
+        # Display token usage if available
+        try:
+            from token_tracker import get_token_usage_stats
+            token_stats = get_token_usage_stats()
+            
+            st.markdown("---")
+            st.markdown("### Token Usage")
+            st.markdown(f"**Total API Calls:** {token_stats['total_api_calls']}")
+            st.markdown(f"**Input Tokens:** {token_stats['total_input_tokens']:,}")
+            st.markdown(f"**Output Tokens:** {token_stats['total_output_tokens']:,}")
+            st.markdown(f"**Total Tokens:** {token_stats['total_tokens']:,}")
+        except:
+            pass
+    
     # About section
     st.markdown("---")
-    st.markdown("### About TableLLM")
+    st.markdown("### About Context-Aware Transformations")
     st.markdown("""
-    TableLLM enables table data analysis through natural language.
+    This system maintains context across sequential data transformations to:
     
-    **Features:**
-    - Upload CSV, Excel, or DOCX files
-    - Query your data using natural language
-    - Automatic code generation and execution
-    - Support for table merging and comparison
+    - Preserve previously populated data
+    - Track transformation history
+    - Understand relationships between transformations
+    - Maintain consistency in the target dataset
     """)
-    
-    # Add information about the LLM being used
-    st.markdown("---")
-    st.markdown("### Model Information")
-    if tablellm.use_gemini:
-        st.markdown("Using **Google Gemini** for code generation")
-    else:
-        st.markdown(f"Using Ollama for code generation")
+
+# Cleanup connections when app is closed
+def cleanup():
+    if sqlite_conn:
+        sqlite_conn.close()
+
+# Register the cleanup function
+import atexit
+atexit.register(cleanup)
