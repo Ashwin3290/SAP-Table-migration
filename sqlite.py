@@ -104,7 +104,8 @@ def fetch_data_by_ids(db_path, object_id, segment_id, project_id):
     ```
 """
 
-    table_desc = pd.read_csv("joined_data.csv")   
+    # table_desc = pd.read_csv("joined_data.csv")   
+    table_desc = joined_df
     prompt = prompt.format(question = "Extract the description and Product number where the product numeber starts with S",table_desc = table_desc.to_csv(index=False))
     api_key = os.environ.get('GEMINI_API_KEY')
     client = genai.Client(api_key = api_key)
@@ -157,8 +158,10 @@ if __name__ == "__main__":
 
     print("\nJoined Data DataFrame:")
     print(joined_df.head())
+    print("\nJSON Data:")
+    with open("resolved_query.json", 'r') as file:
+        json_data = json.load(file)
+        print(json.dumps(json_data, indent=2))
 
-    joined_df.to_csv('joined_data.csv', index=False)
+    # joined_df.to_csv('joined_data.csv', index=False)
  
-
-
