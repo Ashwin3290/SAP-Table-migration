@@ -28,6 +28,24 @@ REQUIREMENTS:
 7. Include comments inside your code
 """
 
+DOUBLE_TABLE_TEMPLATE_PRE = """
+I need ONLY Restructured user question - DO NOT include any explanations, markdown, or comments outside the code. 
+
+Consider the following to format the question:
+1. CSV 1 Header and First rows:{csv_data1}
+2. CSV 2 Header and First rows:{csv_data2}
+
+Question : {question}
+
+Resolve the columns of the prompt given from the given table descriptions.
+{table_desc}
+
+Your Result should be in the following format:
+1. Resolved Column names that will be used in the questions.
+2. Structured question with resolved columns.
+
+Final Result should only be the structured prompt and NOTHING else"""
+
 DOUBLE_TABLE_TEMPLATE = """
 I need ONLY Python code - DO NOT include any explanations, markdown, or comments outside the code.
 

@@ -1,0 +1,19 @@
+{
+  "query_terms_matched": [
+    "Material Number",
+    "Material Type"
+  ],
+  "target_sap_fields": [
+    "PRODUCT",
+    "MTART"
+  ],
+  "table_name": "t_24_Product_Basic_Data_mandatory",
+  "sap_structure": "S_MARA",
+  "source_field_names": [
+    "MATNR",
+    "MTART"
+  ],
+  "target_sap_table": "S_MARA",
+  "segment_name": "Basic Data (mandatory)",
+  "restructured_question": "Bring PRODUCT with MTART = ROH from MARA Table"
+}
