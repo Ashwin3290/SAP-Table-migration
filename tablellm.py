@@ -74,14 +74,7 @@ class TableLLM:
             csv_data2=f"{header2}\n{sample_rows2}",
             question=question
         )
-    
-    def _format_qa_prompt(self, question, table, description=''):
-        """Format a QA prompt"""
-        return QA_TEMPLATE.format(
-            table_descriptions=description,
-            table_in_csv=table,
-            question=question
-        )
+
     
     def _generate_with_gemini(self, prompt):
         """Generate response using Gemini API"""

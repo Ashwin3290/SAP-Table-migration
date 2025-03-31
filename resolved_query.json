@@ -7,7 +7,8 @@
     "PRODUCT",
     "MTART"
   ],
-  "table_name": "t_24_Product_Basic_Data_mandatory",
+  "target_table_name": "t_24_Product_Basic_Data_mandatory",
+  "source_table_name": "MARA",
   "sap_structure": "S_MARA",
   "source_field_names": [
     "MATNR",

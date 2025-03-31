@@ -29,7 +29,8 @@ Task:
 2. Extract Information: Extract the following details precisely from the corresponding columns in the `Table Description` and consolidate them into a single JSON object:
    * `query_terms_matched`: List of all descriptive terms from the query that were matched
    * `target_sap_fields`: List of values from the `target_sap_field` column for all matched terms
-   * `table_name`: The value from the `table_name` column
+   * `target_table_name`: The value from the `table_name` column
+   * `source_table_name`: The value from the `source_table` column
    * `sap_structure`: The value from the `sap_structure` column
    * `source_field_names`: List of values from the `source_field_name` column for all matched terms
    * `target_sap_table`: The value from the `target_sap_table` column
@@ -48,7 +49,8 @@ Example JSON Output Structure:
 {{
   "query_terms_matched": ["Material Number", "Material Type"],
   "target_sap_fields": ["PRODUCT", "MTART"],
-  "table_name": "t_24_Product_Basic_Data_mandatory",
+  "target_table_name": "t_24_Product_Basic_Data_mandatory",
+  "Source_table_name": "MARA",
   "sap_structure": "S_MARA",
   "source_field_names": ["MATNR", "MTART"],
   "target_sap_table": "S_MARA",
