@@ -1,0 +1,19 @@
+{
+  "query_terms_matched": [
+    "product number",
+    "description"
+  ],
+  "target_sap_fields": [
+    "PRODUCT",
+    "MAKTX"
+  ],
+  "table_name": "t_24_Product_Basic_Data_mandatory",
+  "sap_structure": "S_MARA",
+  "source_field_names": [
+    "MATNR",
+    "MAKTX"
+  ],
+  "target_sap_table": "S_MARA",
+  "segment_name": "Basic Data (mandatory)",
+  "rewritten_query": "Extract the MAKTX and PRODUCT where the PRODUCT starts with S"
+}
