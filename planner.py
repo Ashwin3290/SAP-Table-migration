@@ -10,6 +10,7 @@ from datetime import datetime
 from google import genai
 from google.genai import types
 from token_tracker import track_token_usage, get_token_usage_stats
+from pathlib import Path
 
 load_dotenv()
 
@@ -121,8 +122,37 @@ def fetch_data_by_ids(object_id, segment_id, project_id, conn):
     params = [object_id, segment_id, project_id] * 3
     joined_df = pd.read_sql_query(joined_query, conn, params=params)
 
+
     return joined_df
 
+
+def missing_values_handling(df):
+    """Handle missing values in the dataframe"""
+    # Debug: Show initial state
+    if 'source_table' in df.columns:
+    # Convert empty strings and whitespace-only to NaN first
+        df['source_table'] = df['source_table'].replace(r'^\s*$', pd.NA, regex=True)
+    
+    # Now handle both original NaNs and newly converted ones
+    if not df['source_table'].dropna().empty:
+        fill_value = df['source_table'].dropna().iloc[0]
+        df['source_table'] = df['source_table'].fillna(fill_value)
+        print(f"\nFilled {df['source_table'].isna().sum()} nulls in source_table with '{fill_value}'")
+
+    # Handle source_field_name
+    if 'source_field_name' in df.columns and 'target_sap_field' in df.columns:
+        # Convert empty strings to NaN first
+        df['source_field_name'] = df['source_field_name'].replace(r'^\s*$', pd.NA, regex=True)
+        
+        null_count = df['source_field_name'].isna().sum()
+        if null_count > 0:
+            # Ensure we don't propagate empty strings from target_sap_field
+            valid_targets = df['target_sap_field'].replace(r'^\s*$', pd.NA, regex=True).notna()
+            df.loc[df['source_field_name'].isna() & valid_targets, 'source_field_name'] = \
+                df.loc[df['source_field_name'].isna() & valid_targets, 'target_sap_field']
+            print(f"Filled {null_count} nulls in source_field_name from target_sap_field")
+    
+    return df
 
 @track_token_usage(log_to_file=True, log_path='gemini_planner_usage.log')
 def parse_data_with_context(joined_df, query, previous_context=None):
@@ -222,7 +252,7 @@ def parse_data_with_context(joined_df, query, previous_context=None):
     context_str = "None" if previous_context is None else json.dumps(previous_context, indent=2)
     
     # Format the prompt with all inputs
-    joined_df.to_csv("joined_data.csv", index=False) 
+    # joined_df.to_csv("joined_data.csv", index=False) 
     table_desc = joined_df
     formatted_prompt = prompt.format(
         question=query,
@@ -336,6 +366,10 @@ def process_query(object_id, segment_id, project_id, query, session_id=None):
     
     # Fetch mapping data
     joined_df = fetch_data_by_ids(object_id, segment_id, project_id, conn)
+    # Handle missing values in the dataframe
+    joined_df = missing_values_handling(joined_df)
+    # Check if joined_df is emptys
+    joined_df.to_csv("joined_data.csv", index=False)
     # Process query with context awareness
     resolved_data = parse_data_with_context(
         joined_df, 

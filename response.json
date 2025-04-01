@@ -1,29 +1,31 @@
 {
   "query_terms_matched": [
-    "Product Number",
-    "Base Unit of Measure (ISO Format)"
+    "Material Number",
+    "Product Type"
   ],
   "target_sap_fields": [
     "PRODUCT",
-    "MEINS"
+    "MTART"
   ],
   "target_table_name": "t_24_Product_Basic_Data_mandatory",
   "source_table_name": "MARA",
   "sap_structure": "S_MARA",
   "source_field_names": [
     "MATNR",
-    "MEINS"
+    "MTART"
   ],
   "target_sap_table": "S_MARA",
   "segment_name": "Basic Data (mandatory)",
-  "filtering_fields": [],
+  "filtering_fields": [
+    "MTART"
+  ],
   "insertion_fields": [
     {
-      "source_field": "MEINS",
-      "target_field": "MEINS"
+      "source_field": "MATNR",
+      "target_field": "PRODUCT"
     }
   ],
-  "restructured_question": "Check Materials in MARA_500 table. If matching entries found, bring MEINS from MARA_500 to the Target Table. ELSE, If no entries found in MARA_500, then check ROH Material in MARA_700 Table and bring the MEINS. ELSE, If no entries found in MARA_700, then bring the MEINS from MARA table",
+  "restructured_question": "Bring MATNR with MTART = ROH from MARA Table",
   "context": {
     "transformation_history": [
       {
@@ -34,32 +36,20 @@
         "filter_conditions": {
           "MTART": "ROH"
         }
-      },
-      {
-        "description": "Extracted Unit of Measure (MEINS) from MARA_500, MARA_700, and MARA tables based on material number lookup.",
-        "fields_modified": [
-          "MEINS"
-        ],
-        "filter_conditions": {},
-        "source_tables": [
-          "MARA_500",
-          "MARA_700",
-          "MARA"
-        ]
       }
     ],
     "target_table_state": {
       "populated_fields": [
-        "PRODUCT",
-        "MEINS"
+        "PRODUCT"
       ],
       "remaining_mandatory_fields": [
         "MTART",
         "MAKTX",
-        "SPRAS"
+        "SPRAS",
+        "MEINS"
       ],
-      "total_rows": null,
-      "rows_with_data": null
+      "total_rows": 0,
+      "rows_with_data": 0
     }
   }
 }
