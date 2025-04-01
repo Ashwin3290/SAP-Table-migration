@@ -187,7 +187,7 @@ def parse_data_with_context(joined_df, query, previous_context=None):
 
     Example JSON Output Structure:
     ```json
-    {
+    {{
       "query_terms_matched": ["Material Number", "Material Type"],
       "target_sap_fields": ["PRODUCT", "MTART"],
       "target_table_name": "t_24_Product_Basic_Data_mandatory",
@@ -197,24 +197,24 @@ def parse_data_with_context(joined_df, query, previous_context=None):
       "target_sap_table": "S_MARA",
       "segment_name": "Basic Data (mandatory)",
       "filtering_fields": ["MTART"],
-      "insertion_fields": [{"source_field": "MATNR", "target_field": "PRODUCT"}],
+      "insertion_fields": [{{"source_field": "MATNR", "target_field": "PRODUCT"}}],
       "restructured_question": "Select MATNR from source table where MTART = 'ROH' and insert into PRODUCT field of target table",
-      "context": {
+      "context": {{
         "transformation_history": [
-          {
+          {{
             "description": "Populated PRODUCT with MATNR values where MTART = 'ROH'",
             "fields_modified": ["PRODUCT"],
-            "filter_conditions": {"MTART": "ROH"}
-          }
+            "filter_conditions": {{"MTART": "ROH"}}
+          }}
         ],
-        "target_table_state": {
+        "target_table_state": {{
           "populated_fields": ["PRODUCT"],
           "remaining_mandatory_fields": ["MTART", "WERKS"],
           "total_rows": 1250,
           "rows_with_data": 42
-        }
-      }
-    }
+        }}
+      }}
+    }}
     ```
     """
     
@@ -240,7 +240,6 @@ def parse_data_with_context(joined_df, query, previous_context=None):
             contents=formatted_prompt,
             config=types.GenerateContentConfig(
                 temperature=0.5,
-                max_output_tokens=2048,
                 top_p=0.95,
                 top_k=40
             )
@@ -256,7 +255,7 @@ def parse_data_with_context(joined_df, query, previous_context=None):
                 parsed_data = json.loads(json_str.group(1).strip())
             else:
                 parsed_data = json.loads(response.text.strip())
-            
+            json.dump(parsed_data,open('response.json',"w"), indent=2)
             return parsed_data
         except json.JSONDecodeError as e:
             print(f"Error parsing JSON response: {e}")
@@ -301,6 +300,8 @@ def process_info(resolved_data, conn):
         "insertion_fields": resolved_data['insertion_fields'],
         "target_table_name": resolved_data['target_table_name'],
         "source_table_name": resolved_data['source_table_name'],
+        "target_sap_fields": resolved_data['target_sap_fields'],
+        "source_field_names": resolved_data['source_field_names'],
         "context": resolved_data.get('context', {})
     }
 
@@ -334,7 +335,6 @@ def process_query(object_id, segment_id, project_id, query, session_id=None):
     
     # Fetch mapping data
     joined_df = fetch_data_by_ids(object_id, segment_id, project_id, conn)
-    
     # Process query with context awareness
     resolved_data = parse_data_with_context(
         joined_df, 
@@ -345,10 +345,8 @@ def process_query(object_id, segment_id, project_id, query, session_id=None):
     if not resolved_data:
         conn.close()
         return None
-    
     # Process the resolved data to get table information
     results = process_info(resolved_data, conn)
-    
     # Update the context in our session manager
     context_manager.update_context(session_id, resolved_data)
     
@@ -387,11 +385,11 @@ def get_or_create_session_target_df(session_id, target_table, target_fields, con
     DataFrame: The target dataframe
     """
     session_path = f"sessions/{session_id}"
-    target_path = f"{session_path}/target_latest.parquet"
+    target_path = f"{session_path}/target_latest.csv"
     
     if os.path.exists(target_path):
         # Load existing target data
-        target_df = pd.read_parquet(target_path)
+        target_df = pd.read_csv(target_path)
     else:
         # Get fresh target data from the database
         target_df = pd.read_sql_query(f"SELECT * FROM {target_table}", conn)[target_fields]
@@ -399,7 +397,7 @@ def get_or_create_session_target_df(session_id, target_table, target_fields, con
     return target_df
 
 
-def save_session_target_df(session_id, target_df):
+def save_session_target_df(session_id, target_df:pd.DataFrame):
     """
     Save the updated target dataframe for a session
     
@@ -412,8 +410,7 @@ def save_session_target_df(session_id, target_df):
     """
     session_path = f"sessions/{session_id}"
     os.makedirs(session_path, exist_ok=True)
-    
-    target_path = f"{session_path}/target_latest.parquet"
-    target_df.to_parquet(target_path)
+    target_path = f"{session_path}/target_latest.csv"
+    target_df.to_csv(target_path)
     
     return True

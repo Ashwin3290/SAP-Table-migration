@@ -26,6 +26,7 @@ load_dotenv()
 api_key = os.environ.get('GEMINI_API_KEY')
 client = genai.Client(api_key=api_key)
 
+
 # Load configuration
 try:
     with open('config.json', 'r') as f:
@@ -47,7 +48,6 @@ class TableLLM:
         self.use_gemini = False
         if 'GEMINI_API_KEY' in os.environ:
             try:
-                genai.configure(api_key=os.environ['GEMINI_API_KEY'])
                 self.use_gemini = True
                 logger.info("Using Gemini API for code generation")
             except Exception as e:
@@ -125,14 +125,12 @@ Target column where data will be inserted:
 
 Question: {resolved_data['restructured_question']}
 
-I'll place your code inside this function template:
+I want your code in this exact function template:
 df1 will be the source table and df2 will be the target table.
 The function must update df2 (target table) WITHOUT replacing any previously populated data.
 
 def analyze_data(df1, df2):
-    # CODE STARTS HERE
-    
-    # CODE ENDS HERE, must set 'result' variable to the updated target dataframe
+    # Your Code comes here
     return result
 
 REQUIREMENTS:
@@ -143,6 +141,9 @@ REQUIREMENTS:
 5. NEVER use print() statements
 6. NEVER reference file paths
 7. Include comments inside your code
+8. Use the latest Python syntax and libraries
+9. Use efficient data processing techniques
+10. Return only those columns where the data was inserted i.e. the target column
 """
         
         return prompt
@@ -210,7 +211,6 @@ REQUIREMENTS:
         """
         # Process query with context awareness
         resolved_data = planner_process_query(object_id, segment_id, project_id, query, session_id)
-        
         if not resolved_data:
             return None, "Failed to resolve query", session_id
         
@@ -219,7 +219,7 @@ REQUIREMENTS:
         
         # Connect to database
         conn = sqlite3.connect('db.sqlite3')
-        
+        print(resolved_data)
         # Extract table names and field names
         source_table = resolved_data['source_table_name']
         target_table = resolved_data['target_table_name']
@@ -261,7 +261,8 @@ REQUIREMENTS:
         result = execute_code(code_file, (source_df, target_df), is_double=True)
         
         # Save the updated target dataframe
-        save_session_target_df(session_id, result)
+        if isinstance(result, pd.DataFrame):
+            save_session_target_df(session_id, result)
         
         conn.close()
         return code_content, result, session_id

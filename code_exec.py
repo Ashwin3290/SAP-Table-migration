@@ -91,7 +91,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 {code_content}
-    
+
 """
     
     # Fill in the template
@@ -147,6 +147,7 @@ def execute_code_from_resolved_data(file_path, resolved_data):
         conn = sqlite3.connect('db.sqlite3')
         
         # Extract table names and field names
+        print("Resolved data:", resolved_data)
         source_table = resolved_data['source_table_name']
         target_table = resolved_data['target_table_name']
         source_fields = resolved_data['source_field_names']
