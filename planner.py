@@ -176,8 +176,8 @@ def parse_data_with_context(joined_df, query, previous_context=None):
        * `insertion_fields`: List of field pairs as {{source_field: "X", target_field: "Y"}} that represent data to be inserted
        * `restructured_question`: The original question with descriptive terms replaced by their technical field names
        * `context`: Updated context information including:
-         - transformation_history: List of previous transformations plus this one
-         - target_table_state: Updated state information about populated fields
+       * - transformation_history: List of previous transformations plus this one
+       * - target_table_state: Updated state information about populated fields
 
     Output Format:
     * Present all extracted information in a single, consolidated JSON object
