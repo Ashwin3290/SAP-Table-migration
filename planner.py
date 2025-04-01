@@ -279,6 +279,7 @@ def process_info(resolved_data, conn):
         f"SELECT * FROM {resolved_data['target_table_name']} LIMIT 5", 
         conn
     )[resolved_data['target_sap_fields']]
+
     
     # Capture source info
     source_info_buffer = StringIO()
