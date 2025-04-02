@@ -1,35 +1,31 @@
 {
   "query_terms_matched": [
     "Product Number",
-    "Base Unit of Measure (ISO Format)"
+    "Product Type"
   ],
   "target_sap_fields": [
     "PRODUCT",
-    "MEINS"
+    "MTART"
   ],
   "target_table_name": "t_24_Product_Basic_Data_mandatory",
   "source_table_name": "MARA",
-  "Additional_source_table": [
-    "MARA_500",
-    "MARA_700"
-  ],
   "sap_structure": "S_MARA",
   "source_field_names": [
     "MATNR",
-    "MEINS"
+    "MTART"
   ],
   "target_sap_table": "S_MARA",
   "segment_name": "Basic Data (mandatory)",
   "filtering_fields": [
-    "MATNR"
+    "MTART"
   ],
   "insertion_fields": [
     {
-      "source_field": "MEINS",
-      "target_field": "MEINS"
+      "source_field": "MATNR",
+      "target_field": "PRODUCT"
     }
   ],
-  "restructured_question": "Check Materials (MATNR) in MARA_500 table. If matching entries found, then bring Base Unit of Measure (MEINS) field from MARA_500 table to the Target Table. ELSE, If no entries found in MARA_500, then check ROH Material (found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure. ELSE, If no entries found in MARA_700, then bring the Unit of measure from MARA table",
+  "restructured_question": "Bring MATNR with MTART = ROH from MARA Table",
   "context": {
     "transformation_history": [
       {
@@ -40,26 +36,17 @@
         "filter_conditions": {
           "MTART": "ROH"
         }
-      },
-      {
-        "description": "Get Base Unit of Measure (MEINS) from MARA_500, MARA_700 or MARA table based on Material Number (MATNR)",
-        "fields_modified": [
-          "MEINS"
-        ],
-        "filter_conditions": {
-          "MATNR": "Value from Previous Transformation"
-        }
       }
     ],
     "target_table_state": {
       "populated_fields": [
-        "PRODUCT",
-        "MEINS"
+        "PRODUCT"
       ],
       "remaining_mandatory_fields": [
         "MTART",
         "MAKTX",
-        "SPRAS"
+        "SPRAS",
+        "MEINS"
       ]
     }
   }

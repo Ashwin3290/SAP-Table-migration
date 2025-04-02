@@ -314,17 +314,6 @@ def process_info(resolved_data, conn):
         conn
     )[resolved_data['target_sap_fields']]
 
-    
-    # Capture source info
-    source_info_buffer = StringIO()
-    source_df.info(buf=source_info_buffer)
-    source_info = source_info_buffer.getvalue()
-    
-    # Capture target info
-    target_info_buffer = StringIO()
-    target_df.info(buf=target_info_buffer)
-    target_info = target_info_buffer.getvalue()
-
     if "Additional_source_table" in resolved_data:
         additional_source_table = resolved_data["Additional_source_table"]
         if additional_source_table != "None":
@@ -343,8 +332,8 @@ def process_info(resolved_data, conn):
                     "describe": additional_source_tables[table].describe()
                 }    
     return {
-        "source_info": source_info,
-        "target_info": target_info,
+        "source_info": source_df,
+        "target_info": target_df,
         "source_describe": source_df.describe(),
         "target_describe": target_df.describe(),
         "restructured_question": resolved_data['restructured_question'],
@@ -432,7 +421,7 @@ def get_session_context(session_id):
     return context_manager.get_context(session_id)
 
 
-def get_or_create_session_target_df(session_id, target_table, target_fields, conn):
+def get_or_create_session_target_df(session_id, target_table, conn):
     """
     Get existing target dataframe for a session or create a new one
     
@@ -453,7 +442,7 @@ def get_or_create_session_target_df(session_id, target_table, target_fields, con
         target_df = pd.read_csv(target_path)
     else:
         # Get fresh target data from the database
-        target_df = pd.read_sql_query(f"SELECT * FROM {target_table}", conn)[target_fields]
+        target_df = pd.read_sql_query(f"SELECT * FROM {target_table}", conn)
     
     return target_df
 

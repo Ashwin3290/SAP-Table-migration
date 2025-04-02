@@ -107,7 +107,7 @@ import seaborn as sns
     return filename
 
 
-def execute_code(file_path, dataframes, is_double=False):
+def execute_code(file_path, dataframes,additional_tables=None, is_double=False):
     """Execute a Python file and return the result"""
     try:
         # Import the module
@@ -121,7 +121,7 @@ def execute_code(file_path, dataframes, is_double=False):
             df1, df2 = dataframes
             result = module.analyze_data(df1, df2)
         else:
-            result = module.analyze_data(dataframes)
+            result = module.analyze_data(dataframes, additional_tables=additional_tables)
             
         return result
     except Exception as e:

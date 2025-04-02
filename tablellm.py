@@ -110,9 +110,7 @@ Source table info and description:
 
 
 {"There can also be more than one source table. In that case these are the Additional source table info and description:" if resolved_data["additional_source_table"] else ""}
-{resolved_data['additional_source_info'] if resolved_data["additional_source_table"] else ""}
-{resolved_data['additional_source_describe'] if resolved_data["additional_source_table"] else ""}
-
+{resolved_data["additional_source_tables"] if resolved_data["additional_source_table"] else ""}
 
 Target table info and description:
 {resolved_data['target_info']}
@@ -134,7 +132,10 @@ I want your code in this exact function template:
 df1 will be the source table and df2 will be the target table.
 The function must update df2 (target table) WITHOUT replacing any previously populated data.
 
-def analyze_data(df1, df2):
+{"If we have additional tables then you will find them in additional_tables dictionary with the table names as the keys. df1 has the " + resolved_data['source_table_name'] if resolved_data["additional_source_table"] else ""}
+
+
+def analyze_data(df1, df2, additional_tables=None):
     # Your Code comes here
     return result
 
@@ -148,10 +149,11 @@ REQUIREMENTS:
 7. Include comments inside your code
 8. Use the latest Python syntax and libraries
 9. Use efficient data processing techniques
-10. Return only those columns where the data was inserted i.e. the target column
+10. Insert Data into the target table while keeping the rest of the columns and data constant, so if there are any other columns already in the data then make sure to maintain the relationship that existed in the source table like the id mapping
 11. When having context, make sure to use the context information in the code generation
 12. Use the schema of the target table to properly add the data to the target table
 13. Use the schema of the source table to properly filter the data from the source table
+14. Based on the current df1 table add the values while keeping the current structure constant, you would have to use key matching to accurately add the data
 """
         
         return prompt
@@ -161,7 +163,7 @@ REQUIREMENTS:
         """Generate response using Gemini API"""
         try:
             response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-pro-exp-03-25",
             contents = prompt,
         )
             # Log token usage statistics after call
@@ -233,13 +235,24 @@ REQUIREMENTS:
         target_table = resolved_data['target_table_name']
         source_fields = resolved_data['source_field_names']
         target_fields = resolved_data['target_sap_fields']
+        additional_tables = resolved_data['additional_source_table']
+        
         
         # Get source dataframe
-        source_df = pd.read_sql_query(f"SELECT * FROM {source_table}", conn)[source_fields]
+        source_df = pd.read_sql_query(f"SELECT * FROM {source_table}", conn)
         
         # Get target dataframe (either existing or new)
-        target_df = get_or_create_session_target_df(session_id, target_table, target_fields, conn)
+        target_df = get_or_create_session_target_df(session_id, target_table , conn)
         
+        if additional_tables:
+            additional_source_tables = {}
+            for table in additional_tables:
+                additional_source_tables[table] = pd.read_sql_query(f"SELECT * FROM {table}", conn)
+        
+        else:
+            additional_source_tables = None
+        
+
         # Generate code with context awareness
         code_prompt = self._format_context_aware_prompt(resolved_data)
         code = self.generate(code_prompt)
@@ -266,7 +279,7 @@ REQUIREMENTS:
         code_file = create_code_file(code_content, query, is_double=True)
         
         # Execute code
-        result = execute_code(code_file, (source_df, target_df), is_double=True)
+        result = execute_code(code_file, (source_df, target_df),additional_tables=additional_source_tables, is_double=True)
         
         # Save the updated target dataframe
         if isinstance(result, pd.DataFrame):
