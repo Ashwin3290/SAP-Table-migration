@@ -108,6 +108,12 @@ Source table info and description:
 {resolved_data['source_info']}
 {resolved_data['source_describe']}
 
+
+{"There can also be more than one source table. In that case these are the Additional source table info and description:" if resolved_data["additional_source_table"] else ""}
+{resolved_data['additional_source_info'] if resolved_data["additional_source_table"] else ""}
+{resolved_data['additional_source_describe'] if resolved_data["additional_source_table"] else ""}
+
+
 Target table info and description:
 {resolved_data['target_info']}
 {resolved_data['target_describe']}
@@ -120,7 +126,6 @@ Source column from where data has to be picked:
 
 Target column where data will be inserted:
 {target_field_str}
-
 {context_section}
 
 Question: {resolved_data['restructured_question']}
@@ -144,6 +149,9 @@ REQUIREMENTS:
 8. Use the latest Python syntax and libraries
 9. Use efficient data processing techniques
 10. Return only those columns where the data was inserted i.e. the target column
+11. When having context, make sure to use the context information in the code generation
+12. Use the schema of the target table to properly add the data to the target table
+13. Use the schema of the source table to properly filter the data from the source table
 """
         
         return prompt

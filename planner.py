@@ -209,6 +209,11 @@ def parse_data_with_context(joined_df, query, previous_context=None):
        * - transformation_history: List of previous transformations plus this one
        * - target_table_state: Updated state information about populated fields
 
+    Note:
+    * Incase you encounter any other tables used as source tables then in that case add the following fields:
+    * `source_table_name`: The name of the base source table identified from the table description
+    * `Additional_source_table`: List of the names of the additional source table identified from the table description
+
     Output Format:
     * Present all extracted information in a single, consolidated JSON object
     * If no match is found for any term in the query, explicitly state that
@@ -228,6 +233,7 @@ def parse_data_with_context(joined_df, query, previous_context=None):
       "segment_name": "Basic Data (mandatory)",
       "filtering_fields": ["MTART"],
       "insertion_fields": [{{"source_field": "MATNR", "target_field": "PRODUCT"}}],
+      "additional_source_table": ["None"],
       "restructured_question": "Select MATNR from source table where MTART = 'ROH' and insert into PRODUCT field of target table",
       "context": {{
         "transformation_history": [
@@ -240,8 +246,6 @@ def parse_data_with_context(joined_df, query, previous_context=None):
         "target_table_state": {{
           "populated_fields": ["PRODUCT"],
           "remaining_mandatory_fields": ["MTART", "WERKS"],
-          "total_rows": 1250,
-          "rows_with_data": 42
         }}
       }}
     }}
@@ -320,7 +324,24 @@ def process_info(resolved_data, conn):
     target_info_buffer = StringIO()
     target_df.info(buf=target_info_buffer)
     target_info = target_info_buffer.getvalue()
-    
+
+    if "Additional_source_table" in resolved_data:
+        additional_source_table = resolved_data["Additional_source_table"]
+        if additional_source_table != "None":
+            additional_source_tables = {}
+            for table in additional_source_table:
+                additional_source_tables[table] = pd.read_sql_query(
+                    f"SELECT * FROM {table} LIMIT 5", 
+                    conn
+                )
+                additional_source_tables[table] = additional_source_tables[table][resolved_data['source_field_names']]
+                additional_source_info_buffer = StringIO()
+                additional_source_tables[table].info(buf=additional_source_info_buffer)
+                additional_source_info = additional_source_info_buffer.getvalue()
+                additional_source_tables[table] = {
+                    "info": additional_source_info,
+                    "describe": additional_source_tables[table].describe()
+                }    
     return {
         "source_info": source_info,
         "target_info": target_info,
@@ -333,7 +354,10 @@ def process_info(resolved_data, conn):
         "source_table_name": resolved_data['source_table_name'],
         "target_sap_fields": resolved_data['target_sap_fields'],
         "source_field_names": resolved_data['source_field_names'],
-        "context": resolved_data.get('context', {})
+        "context": resolved_data.get('context', {}),
+        "additional_source_table": resolved_data.get('Additional_source_table', []),
+        "additional_source_tables": additional_source_tables if "Additional_source_table" in resolved_data else None,
+
     }
 
 
@@ -369,6 +393,7 @@ def process_query(object_id, segment_id, project_id, query, session_id=None):
     # Handle missing values in the dataframe
     joined_df = missing_values_handling(joined_df)
     # Check if joined_df is emptys
+
     joined_df.to_csv("joined_data.csv", index=False)
     # Process query with context awareness
     resolved_data = parse_data_with_context(
@@ -381,6 +406,7 @@ def process_query(object_id, segment_id, project_id, query, session_id=None):
         conn.close()
         return None
     # Process the resolved data to get table information
+    json.dump(resolved_data,open('resolved_data.json',"w"), indent=2)
     results = process_info(resolved_data, conn)
     # Update the context in our session manager
     context_manager.update_context(session_id, resolved_data)
@@ -449,3 +475,23 @@ def save_session_target_df(session_id, target_df:pd.DataFrame):
     target_df.to_csv(target_path)
     
     return True
+
+if __name__ == "__main__":
+    # Example usage
+    conn = sqlite3.connect('db.sqlite3')
+    object_id = 29
+    segment_id = 336
+    project_id = 24
+    query = """Check Materials which you have got from Transaofmration rule In MARA_500 table and
+IF
+matching Entries found, then bring Unit of Measure   field from MARA_500 table to the Target Table
+ELSE,
+If no entries found in MARA_500, then check ROH  Material  ( found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure
+ELSE,
+If no entries found in MARA_700, then bring the Unit of measure from MARA table
+
+"""
+    
+    # Process the query and get results
+    results = process_query(object_id, segment_id, project_id, query)
+    print(results)
