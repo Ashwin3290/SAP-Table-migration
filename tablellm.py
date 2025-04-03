@@ -1,17 +1,15 @@
 import os
-import uuid
 import logging
 import json
-import requests
 import pandas as pd
+import numpy as np
 import sqlite3
-from io import StringIO
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from token_tracker import track_token_usage, get_token_usage_stats
 
-# Import planner functions 
+# Import planner functions (keeping these since they work well)
 from planner import process_query as planner_process_query
 from planner import get_session_context, get_or_create_session_target_df, save_session_target_df
 from code_exec import create_code_file, execute_code
@@ -23,191 +21,439 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-api_key = os.environ.get('GEMINI_API_KEY')
-client = genai.Client(api_key=api_key)
-
-
-# Load configuration
-try:
-    with open('config.json', 'r') as f:
-        config = json.load(f)
-    OLLAMA_URL = config.get('model_url', 'http://localhost:11434/api/generate')
-    OLLAMA_MODEL = config.get('model_name', 'llama3')
-except Exception as e:
-    logger.warning(f"Error loading config: {e}. Using default values.")
-    OLLAMA_URL = 'http://localhost:11434/api/generate'
-    OLLAMA_MODEL = 'llama3'
-
-
 class TableLLM:
-    """TableLLM handles generating and executing code for table analysis with context awareness"""
+    """Improved TableLLM with optimized code generation and better information flow"""
     
     def __init__(self):
         """Initialize the TableLLM instance"""
-        # Configure Gemini if API key is available
-        self.use_gemini = False
-        if 'GEMINI_API_KEY' in os.environ:
-            try:
-                self.use_gemini = True
-                logger.info("Using Gemini API for code generation")
-            except Exception as e:
-                logger.warning(f"Error configuring Gemini: {e}. Falling back to Ollama.")
-    
-    def _format_single_table_prompt(self, question, table):
-        """Format a single table prompt"""
-        # Implementation remains the same
-        pass
-    
-    def _format_context_aware_prompt(self, resolved_data):
-        """Format a code generation prompt that includes context"""
+        # Configure Gemini
+        api_key = os.environ.get('GEMINI_API_KEY')
+        self.client = genai.Client(api_key=api_key)
         
-        # Extract context information
-        context = resolved_data.get("context", {})
-        history = context.get("transformation_history", [])
-        table_state = context.get("target_table_state", {})
+        # Load code templates
+        self.code_templates = self._initialize_templates()
         
-        # Build context section for the prompt
-        context_section = """
-Previous Transformations:
-"""
-        if not history:
-            context_section += "None (this is the first transformation)"
-        else:
-            for i, tx in enumerate(history):
-                context_section += f"""
-{i+1}. {tx.get('description', 'Unknown transformation')}
-   - Fields modified: {', '.join(tx.get('fields_modified', []))}
-   - Filter conditions: {json.dumps(tx.get('filter_conditions', {}))}
-"""
-        
-        context_section += f"""
-Current Target Table State:
-- Populated fields: {', '.join(table_state.get('populated_fields', []))}
-- Remaining mandatory fields: {', '.join(table_state.get('remaining_mandatory_fields', []))}
-"""
-        
-        # Handle insertion fields - ensure it's properly formatted
-        insertion_fields_str = ""
-        if "insertion_fields" in resolved_data and resolved_data["insertion_fields"]:
-            if isinstance(resolved_data["insertion_fields"], list) and len(resolved_data["insertion_fields"]) > 0:
-                insertion_fields_str = resolved_data["insertion_fields"][0]["source_field"]
-                target_field_str = resolved_data["insertion_fields"][0]["target_field"]
-            else:
-                logger.warning(f"Unexpected insertion_fields format: {resolved_data['insertion_fields']}")
-                insertion_fields_str = str(resolved_data["insertion_fields"])
-                target_field_str = "Unknown"
-        else:
-            insertion_fields_str = "None"
-            target_field_str = "None"
+        # Current session context
+        self.current_context = None
+
+    def _extract_planner_info(self, resolved_data):
+        """
+        Extract and organize all relevant information from planner's resolved data
+        to make it easily accessible in all prompting phases
+        """
+        # Create a comprehensive context object
+        planner_info = {
+            # Table information
+            "source_table": resolved_data.get('source_table_name'),
+            "target_table": resolved_data.get('target_table_name'),
+            "additional_sources": resolved_data.get('additional_source_table', []),
             
-        # Combine with the regular prompt
-        prompt = f"""
-I need ONLY Python code - DO NOT include any explanations, markdown, or comments outside the code.
-
-Source table info and description:
-{resolved_data['source_info']}
-{resolved_data['source_describe']}
-
-
-{"There can also be more than one source table. In that case these are the Additional source table info and description:" if resolved_data["additional_source_table"] else ""}
-{resolved_data["additional_source_tables"] if resolved_data["additional_source_table"] else ""}
-
-Target table info and description:
-{resolved_data['target_info']}
-{resolved_data['target_describe']}
-
-Columns that will be used for filtering:
-{resolved_data['filtering_fields']}
-
-Source column from where data has to be picked:
-{insertion_fields_str}
-
-Target column where data will be inserted:
-{target_field_str}
-{context_section}
-
-Question: {resolved_data['restructured_question']}
-
-I want your code in this exact function template:
-df1 will be the source table and df2 will be the target table.
-The function must update df2 (target table) WITHOUT replacing any previously populated data.
-
-{"If we have additional tables then you will find them in additional_tables dictionary with the table names as the keys. df1 has the " + resolved_data['source_table_name'] if resolved_data["additional_source_table"] else ""}
-
-
-def analyze_data(df1, df2, additional_tables=None):
-    # Your Code comes here
-    return result
-
-REQUIREMENTS:
-1. Output ONLY the code that goes between the comments
-2. Assign your final output to a variable named 'result'
-3. PRESERVE any existing data in df2 that was populated by previous transformations
-4. Handle data errors and empty dataframes
-5. NEVER use print() statements
-6. NEVER reference file paths
-7. Include comments inside your code
-8. Use the latest Python syntax and libraries
-9. Use efficient data processing techniques
-10. Insert Data into the target table while keeping the rest of the columns and data constant, so if there are any other columns already in the data then make sure to maintain the relationship that existed in the source table like the id mapping
-11. When having context, make sure to use the context information in the code generation
-12. Use the schema of the target table to properly add the data to the target table
-13. Use the schema of the source table to properly filter the data from the source table
-14. Based on the current df1 table add the values while keeping the current structure constant, you would have to use key matching to accurately add the data
-"""
+            # Field information
+            "source_fields": resolved_data.get('source_field_names', []),
+            "target_fields": resolved_data.get('target_sap_fields', []),
+            "filtering_fields": resolved_data.get('filtering_fields', []),
+            "insertion_fields": resolved_data.get('insertion_fields', []),
+            
+            # Data samples
+            "source_data": {
+                "sample": resolved_data.get('source_info', pd.DataFrame()).head(3).to_dict('records'),
+                "describe": resolved_data.get('source_describe', {})
+            },
+            "target_data": {
+                "sample": resolved_data.get('target_info', pd.DataFrame()).head(3).to_dict('records'),
+                "describe": resolved_data.get('target_describe', {})
+            },
+            
+            # Query understanding
+            "original_query": resolved_data.get('original_query', ''),
+            "restructured_query": resolved_data.get('restructured_question', ''),
+            
+            # Transformation history and context
+            "transformation_history": resolved_data.get('context', {}).get('transformation_history', []),
+            "target_table_state": resolved_data.get('context', {}).get('target_table_state', {}),
+            
+            # Session information
+            "session_id": resolved_data.get('session_id')
+        }
         
-        return prompt
+        # Extract specific filtering conditions from the restructured query
+        query_text = planner_info["restructured_query"]
+        conditions = {}
+        
+        # Look for common filter patterns in the restructured query
+        if "=" in query_text:
+            for field in planner_info["filtering_fields"]:
+                pattern = f"{field}\\s*=\\s*['\"](.*?)['\"]"
+                import re
+                matches = re.findall(pattern, query_text)
+                if matches:
+                    conditions[field] = matches[0]
+        
+        # Look for IN conditions
+        if " in " in query_text.lower():
+            for field in planner_info["filtering_fields"]:
+                pattern = f"{field}\\s+in\\s+\\(([^)]+)\\)"
+                import re
+                matches = re.findall(pattern, query_text, re.IGNORECASE)
+                if matches:
+                    # Parse the values in the parentheses
+                    values_str = matches[0]
+                    values = [v.strip().strip("'\"") for v in values_str.split(',')]
+                    conditions[field] = values
+        
+        # Add specific conditions
+        planner_info["extracted_conditions"] = conditions
+        
+        # Store context for use in all prompting phases
+        self.current_context = planner_info
+        return planner_info
+
+    @track_token_usage()
+    def _classify_query(self, query, planner_info):
+        """
+        Classify the query type to determine code generation approach
+        Uses extracted planner information for better context
+        """
+        # Create a comprehensive prompt with detailed context
+        prompt = f"""
+Classify this data transformation query into ONE of these categories:
+- FILTER_AND_EXTRACT: Filtering records from source and extracting specific fields
+- UPDATE_EXISTING: Updating values in existing target records only
+- CONDITIONAL_MAPPING: Applying if/else logic to determine values
+- EXTRACTION: Extracting data from source to target without complex filtering
+- TIERED_LOOKUP: Looking up data in multiple tables in a specific order
+- AGGREGATION: Performing calculations or aggregations on source data
+
+QUERY INFORMATION:
+Original query: {query}
+Restructured query: {planner_info['restructured_query']}
+Source fields: {planner_info['source_fields']}
+Target fields: {planner_info['target_fields']}
+Filter fields: {planner_info['filtering_fields']}
+Insertion fields: {planner_info['insertion_fields']}
+
+
+TRANSFORMATION CONTEXT:
+Previously populated fields: {planner_info['target_table_state'].get('populated_fields', [])}
+Previously completed transformations: {len(planner_info['transformation_history'])}
+
+EXTRACTED CONDITIONS:
+{json.dumps(planner_info['extracted_conditions'], indent=2)}
+
+Return ONLY the classification name with no explanation.
+"""
+        response = self.client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt
+        )
+        
+        # Return the classification
+        return response.text.strip()
     
     @track_token_usage()
-    def _generate_with_gemini(self, prompt):
-        """Generate response using Gemini API"""
-        try:
-            response = client.models.generate_content(
-            model="gemini-2.5-pro-exp-03-25",
-            contents = prompt,
+    def _generate_simple_plan(self, query_type, planner_info):
+        """
+        Generate a simple, step-by-step plan in natural language
+        Uses comprehensive planner information
+        """
+        # Extract key fields
+        source_fields = planner_info["source_fields"]
+        source_field = source_fields[0] if isinstance(source_fields, list) and len(source_fields) > 0 else "SOURCE_FIELD"
+        
+        target_fields = planner_info["target_fields"]
+        target_field = target_fields[0] if isinstance(target_fields, list) and len(target_fields) > 0 else "TARGET_FIELD"
+        
+        # Extract filtering conditions
+        conditions_str = "No specific conditions found"
+        if planner_info["extracted_conditions"]:
+            conditions_str = json.dumps(planner_info["extracted_conditions"], indent=2)
+        
+        # Add context from transformation history
+        history_context = ""
+        if planner_info["transformation_history"]:
+            last_transform = planner_info["transformation_history"][-1]
+            history_context = f"""
+Last transformation: {last_transform.get('description', 'Unknown')}
+Fields modified: {last_transform.get('fields_modified', [])}
+Filter conditions used: {json.dumps(last_transform.get('filter_conditions', {}))}
+"""
+        print(planner_info)
+        # Generate prompt with different templates based on query type
+        base_prompt = f"""
+Create a simplified step-by-step plan for code that will perform a {query_type} operation.
+
+QUERY DETAILS:
+User's intent: {planner_info['restructured_query']}
+Source table: {planner_info['source_table']}
+Target table: {planner_info['target_table']}
+Source field(s): {source_fields}
+Target field(s): {target_fields}
+Filtering field(s): {planner_info['filtering_fields']}
+Filtering conditions: {conditions_str}
+Insertion field(s): {planner_info['insertion_fields']}
+
+TRANSFORMATION CONTEXT:
+{history_context}
+
+
+Current state of target table:
+- Populated fields: {planner_info['target_table_state'].get('populated_fields', [])}
+- Remaining fields: {planner_info['target_table_state'].get('remaining_mandatory_fields', [])}
+
+Note:
+1. Only update a the Insertion field in the target table do not add anything else
+2. Use the source table for the initial data 
+3. Do not add any additional fields to the target table
+
+SAMPLE DATA:
+Source data sample: {json.dumps(planner_info['source_data']['sample'][:2], indent=2)}
+Target data sample: {json.dumps(planner_info['target_data']['sample'][:2], indent=2)}
+"""
+
+        # Add query-type specific prompting
+        if query_type == "CONDITIONAL_MAPPING":
+            base_prompt += """
+For CONDITIONAL_MAPPING, include steps that:
+1. Identify all the conditions mentioned in the query
+2. Define a clear mapping from conditions to output values
+3. Explain how to apply the conditions in the right order
+4. Handle the default case
+"""
+        elif query_type == "TIERED_LOOKUP":
+            base_prompt += """
+For TIERED_LOOKUP, include steps that:
+1. Define the lookup order across multiple tables
+2. Specify what to do when a match is found in each table
+3. Handle the case when no matches are found in any table
+"""
+        
+        base_prompt += """
+Write ONLY simple, clear steps that a code generator must follow exactly, like this example:
+1. Make copy of the source dataframe 
+2. Filter rows where MTART value is ROH
+3. Take only MATNR column from filtered source data
+4. Check if target dataframe is empty
+5. If empty, create new dataframe with MATNR as target field
+6. If not empty, update the target field with source field values
+7. Return the updated target dataframe
+
+Your steps (numbered, 5-10 steps maximum):
+"""
+        
+        response = self.client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=base_prompt
         )
-            # Log token usage statistics after call
-            logger.info(f"Current token usage: {get_token_usage_stats()}")
+        
+        return response.text.strip()
+
+    @track_token_usage()
+    def _generate_code_from_simple_plan(self, simple_plan, planner_info):
+        """
+        Generate code based on a simple, step-by-step plan
+        With improved context from planner
+        """
+        # Extract key information
+        source_fields = planner_info["source_fields"]
+        source_field = source_fields[0] if isinstance(source_fields, list) and len(source_fields) > 0 else "SOURCE_FIELD"
+        
+        target_fields = planner_info["target_fields"]
+        target_field = target_fields[0] if isinstance(target_fields, list) and len(target_fields) > 0 else "TARGET_FIELD"
+        
+        # Extract filtering conditions
+        filter_conditions = []
+        if planner_info["extracted_conditions"]:
+            # Convert the extracted conditions to pandas filter syntax
+            for field, value in planner_info["extracted_conditions"].items():
+                if isinstance(value, list):
+                    conditions = [f"df1['{field}'] == '{v}'" for v in value]
+                    filter_conditions.append(f"({' | '.join(conditions)})")
+                else:
+                    filter_conditions.append(f"df1['{field}'] == '{value}'")
+        
+        # Use a default condition if none found
+        if not filter_conditions:
+            filter_conditions = ["df1[df1.columns[0]] != ''"]  # Default condition that selects all rows
+        
+        filter_condition_str = " & ".join(filter_conditions)
+        
+        # Determine if there are multiple source tables to handle
+        additional_tables = planner_info.get("additional_sources", [])
+        additional_tables_handling = ""
+        if additional_tables and isinstance(additional_tables, list) and len(additional_tables) > 0:
+            additional_tables_handling = f"""
+# The additional_tables parameter contains these tables: {additional_tables}
+# Access them like this: additional_tables['{additional_tables[0]}']
+# Make sure to check if they exist before using them:
+if additional_tables and '{additional_tables[0]}' in additional_tables:
+    secondary_table = additional_tables['{additional_tables[0]}']
+    # Use the secondary table for lookups
+"""
+
+        # Create template with the simple plan as a guide and extensive context
+        prompt = f"""
+Write Python code that follows these EXACT steps:
+
+{simple_plan}
+
+DETAILED INFORMATION:
+- Source table: {planner_info['source_table']}
+- Target table: {planner_info['target_table']}
+- Source field(s): {source_fields}
+- Target field(s): {target_fields}
+- Filter condition to use: {filter_condition_str}
+{additional_tables_handling}
+
+SAMPLE DATA:
+Source data sample: {json.dumps(planner_info['source_data']['sample'][:2], indent=2)}
+Target data sample: {json.dumps(planner_info['target_data']['sample'][:2], indent=2)}
+
+REQUIREMENTS:
+1. Follow the steps PRECISELY in order
+2. Handle both empty and non-empty target dataframes
+3. Handle additional tables correctly if they're provided
+4. Return the modified target dataframe (df2)
+5. Use numpy for conditional logic if needed (already imported as np)
+
+Complete this function:
+```python
+def analyze_data(df1, df2, additional_tables=None):
+    # Your implementation of the steps above
+    
+    # Make sure to return the modified df2
+    return df2
+```
+
+Return ONLY the complete Python function:
+"""
+        
+        response = self.client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt
+        )
+        
+        # Extract the code
+        import re
+        code_match = re.search(r'```python\s*(.*?)\s*```', response.text, re.DOTALL)
+        if code_match:
+            return code_match.group(1)
+        else:
+            # If no code block, try to extract the function
+            function_match = re.search(r'def analyze_data.*?return', response.text, re.DOTALL)
+            if function_match:
+                return function_match.group(0) + " df2"  # Add return value if missing
             return response.text
-        except Exception as e:
-            logger.error(f"Error with Gemini: {e}")
-            return None
+
+    def _initialize_templates(self):
+        """Initialize code templates for common operations"""
+        return {
+            "filter": """
+# Filter source data based on condition
+mask = {filter_condition}
+filtered_df = df1[mask].copy()
+""",
+            "update": """
+# Create a copy of df2 to avoid modifying the original
+result = df2.copy()
+
+# Check if target table is empty
+if len(result) == 0:
+    # For empty target, create a new dataframe with necessary columns
+    # and only the data we need from source
+    key_data = df1[['{key_field}']].copy()
+    key_data['{target_field}'] = df1['{source_field}']
+    return key_data
+else:
+    # For non-empty target, update only the target field
+    # Find matching rows using the key field
+    for idx, row in df1.iterrows():
+        # Get the key value
+        key_value = row['{key_field}']
+        
+        # Find matching rows in the target
+        target_indices = result[result['{key_field}'] == key_value].index
+        
+        # Update the target field for matching rows
+        if len(target_indices) > 0:
+            result.loc[target_indices, '{target_field}'] = row['{source_field}']
+        
+    return result
+""",
+            "conditional_mapping": """
+# Create a copy of df2 to avoid modifying the original
+result = df2.copy()
+
+# Check if target table is empty
+if len(result) == 0:
+    # For empty target, we need to create initial structure with key fields
+    # and apply our conditional logic directly to the source data
+    key_data = df1[['{key_field}']].copy()
     
-    def _generate_with_ollama(self, prompt):
-        """Generate response using Ollama API"""
-        try:
-            data = {
-                'model': OLLAMA_MODEL,
-                'prompt': prompt,
-                'stream': False,
-                'temperature': 0.2,  # Lower temperature for more deterministic code
-                'top_p': 0.95,
-                'max_tokens': 2048
-            }
-            
-            response = requests.post(url=OLLAMA_URL, json=data, timeout=60)
-            if response.status_code == 200:
-                return response.json()['response']
-            else:
-                logger.error(f"Error from Ollama API: {response.status_code}")
-                return f"Error from LLM service. Status code: {response.status_code}"
-        except Exception as e:
-            logger.error(f"Error connecting to Ollama: {e}")
-            return f"Error connecting to LLM service: {str(e)}"
+    # Define conditions and choices
+    conditions = [
+        {conditions}
+    ]
+    choices = [
+        {choices}
+    ]
+    default = '{default_value}'
     
-    def generate(self, prompt):
-        """Generate a response using the available LLM service"""
-        if self.use_gemini:
-            response = self._generate_with_gemini(prompt)
-            if response:
-                return response
-            
-        # Fall back to Ollama if Gemini fails or isn't configured
-        return self._generate_with_ollama(prompt)
+    # Apply conditional mapping to create the target field
+    key_data['{target_field}'] = np.select(conditions, choices, default=default)
+    return key_data
+else:
+    # Define conditions and choices
+    conditions = [
+        {conditions}
+    ]
+    choices = [
+        {choices}
+    ]
+    default = '{default_value}'
     
+    # Create temporary mapping from source data
+    source_mapping = pd.Series(index=df1['{key_field}'], data=np.select(conditions, choices, default=default))
+    
+    # Apply mapping to target based on key field
+    for idx, row in result.iterrows():
+        key_value = row['{key_field}']
+        if key_value in source_mapping.index:
+            result.loc[idx, '{target_field}'] = source_mapping[key_value]
+    
+    return result
+"""
+        }
+    
+    def post_proccess_result(self, result):
+        """
+        Post-process the result DataFrame to remove any columns added due to reindexing
+        
+        Parameters:
+        result (DataFrame): The result DataFrame to clean
+        
+        Returns:
+        DataFrame: The cleaned DataFrame
+        """
+        if not isinstance(result, pd.DataFrame):
+            return result
+        
+        # Create a copy to avoid modifying the original
+        cleaned_df = result.copy()
+        
+        # Find columns that match the pattern "Unnamed: X" where X is a number
+        unnamed_cols = [col for col in cleaned_df.columns if 'unnamed' in str(col).lower() and ':' in str(col)]
+        
+        # Drop these columns
+        if unnamed_cols:
+            cleaned_df = cleaned_df.drop(columns=unnamed_cols)
+            logger.info(f"Removed {len(unnamed_cols)} unnamed columns: {unnamed_cols}")
+        
+        return cleaned_df
+
     def process_sequential_query(self, query, object_id=29, segment_id=336, project_id=24, session_id=None):
         """
         Process a query as part of a sequential transformation
+        With improved information flow from planner
         
         Parameters:
         query (str): The user's query
@@ -219,142 +465,64 @@ REQUIREMENTS:
         Returns:
         tuple: (code, result, session_id)
         """
-        # Process query with context awareness
+        # 1. Process query with the planner
         resolved_data = planner_process_query(object_id, segment_id, project_id, query, session_id)
         if not resolved_data:
             return None, "Failed to resolve query", session_id
         
+        # 2. Extract and organize all relevant information from the planner
+        resolved_data['original_query'] = query  # Add original query for context
+        planner_info = self._extract_planner_info(resolved_data)
+        
         # Get session ID from the results
-        session_id = resolved_data.get("session_id")
+        session_id = planner_info["session_id"]
         
-        # Connect to database
+        # 3. Connect to database
         conn = sqlite3.connect('db.sqlite3')
-        print(resolved_data)
-        # Extract table names and field names
-        source_table = resolved_data['source_table_name']
-        target_table = resolved_data['target_table_name']
-        source_fields = resolved_data['source_field_names']
-        target_fields = resolved_data['target_sap_fields']
-        additional_tables = resolved_data['additional_source_table']
         
+        # 4. Extract table names
+        source_table = planner_info['source_table']
+        target_table = planner_info['target_table']
+        additional_tables = planner_info.get('additional_sources', [])
         
-        # Get source dataframe
+        # 5. Get source and target dataframes
         source_df = pd.read_sql_query(f"SELECT * FROM {source_table}", conn)
+        target_df = get_or_create_session_target_df(session_id, target_table, conn)
         
-        # Get target dataframe (either existing or new)
-        target_df = get_or_create_session_target_df(session_id, target_table , conn)
-        
+        # 6. Prepare additional tables if present
+        additional_source_tables = None
         if additional_tables:
             additional_source_tables = {}
             for table in additional_tables:
-                additional_source_tables[table] = pd.read_sql_query(f"SELECT * FROM {table}", conn)
+                if table and table.lower() != "none":
+                    additional_source_tables[table] = pd.read_sql_query(f"SELECT * FROM {table}", conn)
         
-        else:
-            additional_source_tables = None
+        # 7. Generate query classification with context
+        query_type = self._classify_query(query, planner_info)
+        logger.info(f"Query classified as: {query_type}")
         
-
-        # Generate code with context awareness
-        code_prompt = self._format_context_aware_prompt(resolved_data)
-        code = self.generate(code_prompt)
+        # 8. Generate a simple, step-by-step plan in natural language
+        simple_plan = self._generate_simple_plan(query_type, planner_info)
+        logger.info(f"Simple plan generated: {simple_plan}")
         
-        # Clean the code
-        if "# CODE STARTS HERE" in code and "# CODE ENDS HERE" in code:
-            start_marker = "# CODE STARTS HERE"
-            end_marker = "# CODE ENDS HERE"
-            start_idx = code.find(start_marker) + len(start_marker)
-            end_idx = code.find(end_marker)
-            if start_idx != -1 and end_idx != -1:
-                code_content = code[start_idx:end_idx].strip()
-            else:
-                code_content = code
-        else:
-            code_content = code
-
-        if "```python" in code_content:
-            code_content = code_content.replace("```python", "").replace("```", "")
-        if "```" in code_content:
-            code_content = code_content.replace("```", "")
+        # 9. Generate code from the simple plan with full context
+        code_content = self._generate_code_from_simple_plan(simple_plan, planner_info)
+        logger.info(f"Code generated with context: {len(code_content)} chars")
         
-        # Create code file
+        # 10. Execute the generated code
         code_file = create_code_file(code_content, query, is_double=True)
+        result = execute_code(code_file, (source_df, target_df), additional_tables=additional_source_tables, is_double=True)
         
-        # Execute code
-        result = execute_code(code_file, (source_df, target_df),additional_tables=additional_source_tables, is_double=True)
-        
-        # Save the updated target dataframe
+        # 11. Save the updated target dataframe if it's a DataFrame
         if isinstance(result, pd.DataFrame):
+            result = self.post_proccess_result(result)
             save_session_target_df(session_id, result)
         
         conn.close()
         return code_content, result, session_id
     
-    def process_query(self, question, tables, dataframes, mode='Code', session_id=None):
-        """Process a query and execute code or generate QA response"""
-        
-        is_double = isinstance(tables, tuple) and len(tables) == 2
-        
-        # Generate the appropriate prompt
-        if mode == 'QA':
-            description = ''
-            if isinstance(tables, dict) and 'description' in tables:
-                description = tables['description']
-            prompt = self._format_qa_prompt(question, tables, description)
-            response = self.generate(prompt)
-            return response, None  # No code to execute for QA
-        
-        elif mode == 'Code':
-            if is_double:
-                # Use the context-aware sequential processing
-                return self.process_sequential_query(question, session_id=session_id)
-            else:
-                # Single table case remains the same
-                prompt = self._format_single_table_prompt(question, tables)
-                
-                logger.info(f"Generating code for query: {question}")
-                
-                # Generate code content and extract only the body
-                raw_code = self.generate(prompt)
-                
-                # Clean the code - extract only what would go inside the function
-                if "# CODE STARTS HERE" in raw_code and "# CODE ENDS HERE" in raw_code:
-                    start_marker = "# CODE STARTS HERE"
-                    end_marker = "# CODE ENDS HERE"
-                    start_idx = raw_code.find(start_marker) + len(start_marker)
-                    end_idx = raw_code.find(end_marker)
-                    if start_idx != -1 and end_idx != -1:
-                        code_content = raw_code[start_idx:end_idx].strip()
-                    else:
-                        code_content = raw_code
-                else:
-                    code_content = raw_code
-
-                
-                if "```python" in code_content:
-                    code_content = code_content.replace("```python", "").replace("```", "")
-                if "```" in code_content:
-                    code_content = code_content.replace("```", "")
-                
-                # Create a code file with the generated content
-                code_file = create_code_file(code_content, question, is_double=is_double)
-                
-                # Execute the code
-                result = execute_code(code_file, dataframes, is_double=is_double)
-                
-                return code_content, result
-        
-        else:
-            return f"Unknown mode: {mode}", None
-    
     def get_session_info(self, session_id):
-        """
-        Get information about a session
-        
-        Parameters:
-        session_id (str): The session ID
-        
-        Returns:
-        dict: Session information
-        """
+        """Get information about a session"""
         context = get_session_context(session_id)
         return {
             "session_id": session_id,
@@ -362,23 +530,3 @@ REQUIREMENTS:
             "transformation_history": context.get("context", {}).get("transformation_history", []) if context else [],
             "target_table_state": context.get("context", {}).get("target_table_state", {}) if context else {}
         }
-            
-    def save_interaction(self, question, code, result, file_details, db_client=None):
-        """Save the interaction to database if a client is provided"""
-        if not db_client:
-            return None
-            
-        session_id = str(uuid.uuid4())
-        try:
-            db_client.chat.insert_one({
-                'session_id': session_id,
-                'question': question,
-                'code': code,
-                'result': str(result)[:1000],  # Limit result size
-                'file_details': file_details,
-                'vote': 0
-            })
-            return session_id
-        except Exception as e:
-            logger.error(f"Error saving to database: {e}")
-            return None

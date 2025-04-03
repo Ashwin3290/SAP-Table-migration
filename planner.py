@@ -331,6 +331,14 @@ def process_info(resolved_data, conn):
                     "info": additional_source_info,
                     "describe": additional_source_tables[table].describe()
                 }    
+    if isinstance(resolved_data['insertion_fields'] , list):
+        if resolved_data["insertion_fields"]:
+            insertion_fields = resolved_data['insertion_fields'][0]["target_field"]
+        else:
+            insertion_fields = "None identified yet try to identify the insertion fields"
+    
+    elif isinstance(resolved_data['insertion_fields'] , None):
+        insertion_fields = "None identified yet try to identify the insertion fields"
     return {
         "source_info": source_df,
         "target_info": target_df,
@@ -338,7 +346,7 @@ def process_info(resolved_data, conn):
         "target_describe": target_df.describe(),
         "restructured_question": resolved_data['restructured_question'],
         "filtering_fields": resolved_data['filtering_fields'],
-        "insertion_fields": resolved_data['insertion_fields'],
+        "insertion_fields": insertion_fields,
         "target_table_name": resolved_data['target_table_name'],
         "source_table_name": resolved_data['source_table_name'],
         "target_sap_fields": resolved_data['target_sap_fields'],
@@ -465,22 +473,22 @@ def save_session_target_df(session_id, target_df:pd.DataFrame):
     
     return True
 
-if __name__ == "__main__":
-    # Example usage
-    conn = sqlite3.connect('db.sqlite3')
-    object_id = 29
-    segment_id = 336
-    project_id = 24
-    query = """Check Materials which you have got from Transaofmration rule In MARA_500 table and
-IF
-matching Entries found, then bring Unit of Measure   field from MARA_500 table to the Target Table
-ELSE,
-If no entries found in MARA_500, then check ROH  Material  ( found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure
-ELSE,
-If no entries found in MARA_700, then bring the Unit of measure from MARA table
+# if __name__ == "__main__":
+#     # Example usage
+#     conn = sqlite3.connect('db.sqlite3')
+#     object_id = 29
+#     segment_id = 336
+#     project_id = 24
+#     query = """Check Materials which you have got from Transaofmration rule In MARA_500 table and
+# IF
+# matching Entries found, then bring Unit of Measure   field from MARA_500 table to the Target Table
+# ELSE,
+# If no entries found in MARA_500, then check ROH  Material  ( found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure
+# ELSE,
+# If no entries found in MARA_700, then bring the Unit of measure from MARA table
 
-"""
+# """
     
-    # Process the query and get results
-    results = process_query(object_id, segment_id, project_id, query)
-    print(results)
+#     # Process the query and get results
+#     results = process_query(object_id, segment_id, project_id, query)
+#     print(results)

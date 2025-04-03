@@ -18,11 +18,11 @@ st.set_page_config(
 
 # Initialize SQLite connection for data access
 sqlite_conn = None
-try:
-    sqlite_conn = sqlite3.connect('db.sqlite3')
-    st.sidebar.success("Connected to SQLite database")
-except Exception as e:
-    st.sidebar.warning(f"SQLite connection failed: {e}")
+# try:
+sqlite_conn = sqlite3.connect('db.sqlite3')
+#     st.sidebar.success("Connected to SQLite database")
+# except Exception as e:
+#     st.sidebar.warning(f"SQLite connection failed: {e}")
 
 # Initialize TableLLM
 tablellm = TableLLM()
@@ -121,8 +121,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Main app header
-st.markdown('<p class="main-header">TableLLM: Context-Aware Data Transformations</p>', unsafe_allow_html=True)
-st.markdown("Process sequential data transformations with context awareness, preserving state between queries.")
+st.markdown('<p class="main-header">Gen-AI Data Migration Tool</p>', unsafe_allow_html=True)
+# st.markdown("Process sequential data transformations with context awareness, preserving state between queries.")
 
 col1, col2 = st.columns([1, 1.5])
 
@@ -193,7 +193,8 @@ with col1:
                         sample_df = pd.read_sql_query(f"SELECT * FROM '{table[0]}' LIMIT 5", sqlite_conn)
                         st.dataframe(sample_df)
             except Exception as e:
-                st.error(f"Error fetching tables: {e}")
+                # st.error(f"Error fetching tables: {e}")
+                pass
     else:
         st.warning("SQLite database connection is required for data transformations")
 
@@ -216,66 +217,67 @@ with col2:
     # Process the query for data transformation
     if submit and query and sqlite_conn:
         with st.spinner("Processing transformation..."):
-            try:
-                # Process query with context awareness
-                code, result, session_id = tablellm.process_sequential_query(
-                    query, 
-                    object_id, 
-                    segment_id, 
-                    project_id,
-                    st.session_state['transformation_session_id']
-                )
+            # try:
+            # Process query with context awareness
+            code, result, session_id = tablellm.process_sequential_query(
+                query, 
+                object_id, 
+                segment_id, 
+                project_id,
+                st.session_state['transformation_session_id']
+            )
+            
+            # Update session ID if this is a new session
+            if not st.session_state['transformation_session_id']:
+                st.session_state['transformation_session_id'] = session_id
+            
+            # Get updated session info
+            session_info = tablellm.get_session_info(session_id)
+            
+            # Add to history
+            st.session_state['transformation_history'].append({
+                'query': query,
+                'code': code,
+                'timestamp': datetime.now().isoformat(),
+                'description': session_info['transformation_history'][-1]['description'] 
+                    if session_info['transformation_history'] else "Unknown transformation"
+            })
+            
+            # Display results
+            st.success("Transformation complete!")
+            
+            # Display the transformation results
+            st.markdown("### Result")
+            
+            # Display code
+            if st.session_state['show_code']:
+                with st.expander("Generated Python Code", expanded=True):
+                    st.code(code, language="python")
+            
+            # Display different result types appropriately
+            if isinstance(result, pd.DataFrame):
+                st.dataframe(result, use_container_width=True)
+            elif str(type(result)).find('matplotlib') != -1:
+                st.pyplot(result)
+            elif isinstance(result, (list, dict)):
+                st.json(result)
+            else:
+                st.write(result)
+            
+            # Display summary of what happened
+            latest_tx = session_info['transformation_history'][-1] if session_info['transformation_history'] else {}
+            st.markdown(f"""
+            <div class="context-info">
+                <strong>Transformation Summary:</strong><br>
+                {latest_tx.get('description', 'Transformation completed')}<br>
+                <strong>Fields Modified:</strong> {', '.join(latest_tx.get('fields_modified', []))}<br>
+                <strong>Filter Conditions:</strong> {json.dumps(latest_tx.get('filter_conditions', {}))}
+            </div>
+            """, unsafe_allow_html=True)
                 
-                # Update session ID if this is a new session
-                if not st.session_state['transformation_session_id']:
-                    st.session_state['transformation_session_id'] = session_id
-                
-                # Get updated session info
-                session_info = tablellm.get_session_info(session_id)
-                
-                # Add to history
-                st.session_state['transformation_history'].append({
-                    'query': query,
-                    'code': code,
-                    'timestamp': datetime.now().isoformat(),
-                    'description': session_info['transformation_history'][-1]['description'] 
-                        if session_info['transformation_history'] else "Unknown transformation"
-                })
-                
-                # Display results
-                st.success("Transformation complete!")
-                
-                # Display the transformation results
-                st.markdown("### Result")
-                
-                # Display code
-                if st.session_state['show_code']:
-                    with st.expander("Generated Python Code", expanded=True):
-                        st.code(code, language="python")
-                
-                # Display different result types appropriately
-                if isinstance(result, pd.DataFrame):
-                    st.dataframe(result, use_container_width=True)
-                elif str(type(result)).find('matplotlib') != -1:
-                    st.pyplot(result)
-                elif isinstance(result, (list, dict)):
-                    st.json(result)
-                else:
-                    st.write(result)
-                
-                # Display summary of what happened
-                latest_tx = session_info['transformation_history'][-1] if session_info['transformation_history'] else {}
-                st.markdown(f"""
-                <div class="context-info">
-                    <strong>Transformation Summary:</strong><br>
-                    {latest_tx.get('description', 'Transformation completed')}<br>
-                    <strong>Fields Modified:</strong> {', '.join(latest_tx.get('fields_modified', []))}<br>
-                    <strong>Filter Conditions:</strong> {json.dumps(latest_tx.get('filter_conditions', {}))}
-                </div>
-                """, unsafe_allow_html=True)
-                
-            except Exception as e:
-                st.error(f"Error processing transformation: {e}")
+            # except Exception as e:
+                # st.error(f"Error processing transformation: {e}")
+
     
     # Display previous transformations in this session
     if st.session_state['transformation_history']:
@@ -301,36 +303,36 @@ with col2:
                 st.rerun()
 
 # Sidebar for settings
-with st.sidebar:
-    st.title("Settings")
+# with st.sidebar:
+#     st.title("Settings")
     
-    st.session_state['show_code'] = st.checkbox("Show generated code by default", value=st.session_state['show_code'])
+#     st.session_state['show_code'] = st.checkbox("Show generated code by default", value=st.session_state['show_code'])
     
-    # Context information
-    if st.session_state['transformation_session_id']:
-        st.markdown("---")
-        st.markdown("### Context Information")
-        session_info = tablellm.get_session_info(st.session_state['transformation_session_id'])
+#     # Context information
+#     if st.session_state['transformation_session_id']:
+#         st.markdown("---")
+#         st.markdown("### Context Information")
+#         session_info = tablellm.get_session_info(st.session_state['transformation_session_id'])
         
-        # Display target table state
-        st.markdown("#### Target Table State")
-        table_state = session_info['target_table_state']
-        st.markdown(f"**Populated Fields:** {', '.join(table_state.get('populated_fields', ['None']))}")
-        st.markdown(f"**Remaining Fields:** {', '.join(table_state.get('remaining_mandatory_fields', ['None']))}")
+#         # Display target table state
+#         st.markdown("#### Target Table State")
+#         table_state = session_info['target_table_state']
+#         st.markdown(f"**Populated Fields:** {', '.join(table_state.get('populated_fields', ['None']))}")
+#         st.markdown(f"**Remaining Fields:** {', '.join(table_state.get('remaining_mandatory_fields', ['None']))}")
         
-        # Display token usage if available
-        try:
-            from token_tracker import get_token_usage_stats
-            token_stats = get_token_usage_stats()
+#         # Display token usage if available
+#         try:
+#             from token_tracker import get_token_usage_stats
+#             token_stats = get_token_usage_stats()
             
-            st.markdown("---")
-            st.markdown("### Token Usage")
-            st.markdown(f"**Total API Calls:** {token_stats['total_api_calls']}")
-            st.markdown(f"**Input Tokens:** {token_stats['total_input_tokens']:,}")
-            st.markdown(f"**Output Tokens:** {token_stats['total_output_tokens']:,}")
-            st.markdown(f"**Total Tokens:** {token_stats['total_tokens']:,}")
-        except:
-            pass
+#             st.markdown("---")
+#             st.markdown("### Token Usage")
+#             st.markdown(f"**Total API Calls:** {token_stats['total_api_calls']}")
+#             st.markdown(f"**Input Tokens:** {token_stats['total_input_tokens']:,}")
+#             st.markdown(f"**Output Tokens:** {token_stats['total_output_tokens']:,}")
+#             st.markdown(f"**Total Tokens:** {token_stats['total_tokens']:,}")
+#         except:
+#             pass
 
 # Cleanup connections when app is closed
 def cleanup():

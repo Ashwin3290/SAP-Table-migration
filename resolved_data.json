@@ -1,6 +1,6 @@
 {
   "query_terms_matched": [
-    "Product Number",
+    "Material Number",
     "Product Type"
   ],
   "target_sap_fields": [
@@ -16,39 +16,34 @@
   ],
   "target_sap_table": "S_MARA",
   "segment_name": "Basic Data (mandatory)",
-  "filtering_fields": [],
+  "filtering_fields": [
+    "MTART"
+  ],
   "insertion_fields": [
     {
-      "source_field": "MTART",
-      "target_field": "MTART"
+      "source_field": "MATNR",
+      "target_field": "PRODUCT"
     }
   ],
-  "restructured_question": "Check ROH Material in MARA_500 table and IF matching Entries found, then bring MTART field from MARA_500 table to the Target Table ELSE, If no entries found in MARA_500, then check ROH Material ( found in Transformation 2 ) in MARA_700 Table and bring the MTART ELSE, bring the MTART from MARA table",
+  "restructured_question": "Bring MATNR with MTART = ROH from MARA Table",
   "context": {
     "transformation_history": [
       {
-        "description": "Extracted Material Number where Material Type is ROH",
+        "description": "Populated PRODUCT with MATNR values where MTART = 'ROH'",
         "fields_modified": [
           "PRODUCT"
         ],
         "filter_conditions": {
           "MTART": "ROH"
         }
-      },
-      {
-        "description": "Get Material Type from MARA_500 if ROH Material exists. Else, Get Material Type from MARA_700 if ROH Material exists. Else, Get Material Type from MARA table.",
-        "fields_modified": [
-          "MTART"
-        ],
-        "filter_conditions": {}
       }
     ],
     "target_table_state": {
       "populated_fields": [
-        "PRODUCT",
-        "MTART"
+        "PRODUCT"
       ],
       "remaining_mandatory_fields": [
+        "MTART",
         "MAKTX",
         "SPRAS",
         "MEINS"
