@@ -132,10 +132,10 @@ I want your code in this exact function template:
 df1 will be the source table and df2 will be the target table.
 The function must update df2 (target table) WITHOUT replacing any previously populated data.
 
-{"If we have additional tables then you will find them in additional_tables dictionary with the table names as the keys. df1 has the " + resolved_data['source_table_name'] if resolved_data["additional_source_table"] else ""}
+{"If we have additional tables then you will find them in additional_tables dictionary with the table names as the keys. df1 has the " + resolved_data['source_table_name']+ "table data" if resolved_data["additional_source_table"] else ""}
 
 
-def analyze_data(df1, df2, additional_tables=None):
+def analyze_data(df1, df2, additional_tables:dict = None):
     # Your Code comes here
     return result
 
@@ -159,13 +159,19 @@ REQUIREMENTS:
         return prompt
     
     @track_token_usage()
-    def _generate_with_gemini(self, prompt):
+    def _generate_with_gemini(self, prompt,code=False):
         """Generate response using Gemini API"""
         try:
-            response = client.models.generate_content(
-            model="gemini-2.5-pro-exp-03-25",
-            contents = prompt,
-        )
+            if code:
+                response = client.models.generate_content(
+                model="gemini-2.5-pro-exp-03-25",
+                contents = prompt,
+            )
+            else:
+                response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents = prompt,
+                )
             # Log token usage statistics after call
             logger.info(f"Current token usage: {get_token_usage_stats()}")
             return response.text
@@ -195,10 +201,10 @@ REQUIREMENTS:
             logger.error(f"Error connecting to Ollama: {e}")
             return f"Error connecting to LLM service: {str(e)}"
     
-    def generate(self, prompt):
+    def generate(self, prompt,code=False):
         """Generate a response using the available LLM service"""
         if self.use_gemini:
-            response = self._generate_with_gemini(prompt)
+            response = self._generate_with_gemini(prompt,code=code)
             if response:
                 return response
             
@@ -256,7 +262,7 @@ REQUIREMENTS:
 
         # Generate code with context awareness
         code_prompt = self._format_context_aware_prompt(resolved_data)
-        code = self.generate(code_prompt)
+        code = self.generate(code_prompt, code=True)
         
         # Clean the code
         if "# CODE STARTS HERE" in code and "# CODE ENDS HERE" in code:

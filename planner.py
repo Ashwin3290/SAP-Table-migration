@@ -213,6 +213,9 @@ def parse_data_with_context(joined_df, query, previous_context=None):
     * Incase you encounter any other tables used as source tables then in that case add the following fields:
     * `source_table_name`: The name of the base source table identified from the table description
     * `Additional_source_table`: List of the names of the additional source table identified from the table description
+    *  In queries where exact insertion and filtering fields are unfindable then use this pattern to help find these fields:
+        Fields can be found after the words
+        "after", "bring", "check", "fetch","get","use","if","from"
 
     Output Format:
     * Present all extracted information in a single, consolidated JSON object
@@ -331,6 +334,11 @@ def process_info(resolved_data, conn):
                     "info": additional_source_info,
                     "describe": additional_source_tables[table].describe()
                 }    
+    if isinstance(resolved_data["insertion_fields"], list) and len(resolved_data["insertion_fields"]) > 0:
+        target_field = resolved_data["insertion_fields"][0]["target_field"]
+    else:
+        target_field = "Need to identify the target field"
+    print(target_field)
     return {
         "source_info": source_df,
         "target_info": target_df,
@@ -338,7 +346,7 @@ def process_info(resolved_data, conn):
         "target_describe": target_df.describe(),
         "restructured_question": resolved_data['restructured_question'],
         "filtering_fields": resolved_data['filtering_fields'],
-        "insertion_fields": resolved_data['insertion_fields'],
+        "insertion_fields": target_field,
         "target_table_name": resolved_data['target_table_name'],
         "source_table_name": resolved_data['source_table_name'],
         "target_sap_fields": resolved_data['target_sap_fields'],
