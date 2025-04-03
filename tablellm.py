@@ -205,6 +205,7 @@ REQUIREMENTS:
         # Fall back to Ollama if Gemini fails or isn't configured
         return self._generate_with_ollama(prompt)
     
+    
     def process_sequential_query(self, query, object_id=29, segment_id=336, project_id=24, session_id=None):
         """
         Process a query as part of a sequential transformation
