@@ -1,0 +1,20 @@
+,fields,description,isMandatory,isKey,sap_structure,source_table,source_field_name,target_sap_table,target_sap_field,segement_name,table_name
+0,SALESORGANIZATION,Sales Organization,True,True,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+1,DISTRIBUTIONCHANNEL,Distribution Channel,True,True,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+2,CUSTOMER,Customer,True,True,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+3,MATERIAL,Product,True,True,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+4,MATERIALBYCUSTOMER,Material Number Used by Customer,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+5,MATERIALDESCRIPTIONBYCUSTOMER,Customer Description of Material,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+6,CUSTOMERMATERIALSEARCHTERM,Search Term,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+7,PLANT,Plant,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+8,DELIVERYPRIORITY,Delivery Priority,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+9,MINDELIVERYQTYINBASEUNIT,Minimum Delivery Quantity,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+10,PARTIALDELIVERYISALLOWED,Partial Delivery per Item,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+11,MAXNMBROFPARTIALDELIVERY,Maximum Partial Deliveries per Item,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+12,UNDERDELIVTOLRTDLMTRATIOINPCT,Underdelivery Tolerance Limit,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+13,OVERDELIVTOLRTDLMTRATIOINPCT,Overdelivery Tolerance Limit,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+14,UNLIMITEDOVERDELIVERYISALLOWED,Unlimited Tolerance,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+15,CUSTOMERMATERIALITEMUSAGE,Item Usage,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+16,SALESUNIT,Sales Unit,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+17,SALESQTYTOBASEQTYDNMNTR,Quantity in Sales Unit,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory
+18,SALESQTYTOBASEQTYNMRTR,Quantity in Base Unit,False,False,S_CUSTMAT,,,,,General Data (mandatory),t_25_Material_General_Data_mandatory

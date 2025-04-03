@@ -1,33 +1,33 @@
 {
   "query_terms_matched": [
-    "Product Number",
-    "Product Type"
+    "Product Type",
+    "ROH Material"
   ],
   "target_sap_fields": [
-    "PRODUCT",
     "MTART"
   ],
   "target_table_name": "t_24_Product_Basic_Data_mandatory",
   "source_table_name": "MARA",
   "sap_structure": "S_MARA",
   "source_field_names": [
-    "MATNR",
     "MTART"
   ],
   "target_sap_table": "S_MARA",
   "segment_name": "Basic Data (mandatory)",
-  "filtering_fields": [],
+  "filtering_fields": [
+    "MATNR"
+  ],
   "insertion_fields": [
     {
       "source_field": "MTART",
       "target_field": "MTART"
     }
   ],
-  "restructured_question": "Check ROH Material in MARA_500 table and IF matching Entries found, then bring MTART field from MARA_500 table to the Target Table ELSE, If no entries found in MARA_500, then check ROH Material ( found in Transformation 2 ) in MARA_700 Table and bring the MTART ELSE, bring the MTART from MARA table",
+  "restructured_question": "Check MARA.MATNR In MARA_500 table and IF matching Entries found, then bring MARA.MTART field from MARA_500 table to the Target Table ELSE, If no entries found in MARA_500, then check ROH Material ( found in Transformation 2 ) in MARA_700 Table and bring the MARA.MTART ELSE, bring the MARA.MTART from MARA table",
   "context": {
     "transformation_history": [
       {
-        "description": "Extracted Material Number where Material Type is ROH",
+        "description": "Populated PRODUCT with MATNR values where MTART = 'ROH'",
         "fields_modified": [
           "PRODUCT"
         ],
@@ -36,22 +36,33 @@
         }
       },
       {
-        "description": "Get Material Type from MARA_500 if ROH Material exists. Else, Get Material Type from MARA_700 if ROH Material exists. Else, Get Material Type from MARA table.",
+        "description": "Check Materials which you have got from Transaofmration rule In MARA_500 table and IF matching Entries found, then bring Unit of Measure field from MARA_500 table to the Target Table ELSE, If no entries found in MARA_500, then check ROH Material ( found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure ELSE, If no entries found in MARA_700, then bring the Unit of measure from MARA table",
+        "fields_modified": [
+          "MEINS"
+        ],
+        "filter_conditions": {
+          "MATNR": "MARA_500 or MARA_700"
+        }
+      },
+      {
+        "description": "Check ROH Material In MARA_500 table and IF matching Entries found, then bring Material Type field from MARA_500 table to the Target Table ELSE, If no entries found in MARA_500, then check ROH Material ( found in Transformation 2 ) in MARA_700 Table and bring the Material Type ELSE, bring the Material Type from MARA table",
         "fields_modified": [
           "MTART"
         ],
-        "filter_conditions": {}
+        "filter_conditions": {
+          "MATNR": "MARA_500 or MARA_700 or MARA"
+        }
       }
     ],
     "target_table_state": {
       "populated_fields": [
         "PRODUCT",
+        "MEINS",
         "MTART"
       ],
       "remaining_mandatory_fields": [
         "MAKTX",
-        "SPRAS",
-        "MEINS"
+        "SPRAS"
       ]
     }
   }

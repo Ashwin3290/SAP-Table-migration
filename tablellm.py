@@ -99,6 +99,10 @@ Current Target Table State:
         else:
             insertion_fields_str = "None"
             target_field_str = "None"
+
+        print(insertion_fields_str)
+        print("###################################")
+        print(target_field_str)
             
         # Combine with the regular prompt
         prompt = f"""
