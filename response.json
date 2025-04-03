@@ -1,31 +1,23 @@
 {
   "query_terms_matched": [
-    "Product Number",
-    "Product Type"
+    "Product Group"
   ],
   "target_sap_fields": [
-    "PRODUCT",
-    "MTART"
+    "MATKL"
   ],
   "target_table_name": "t_24_Product_Basic_Data_mandatory",
   "source_table_name": "MARA",
   "sap_structure": "S_MARA",
   "source_field_names": [
-    "MATNR",
-    "MTART"
+    "MATKL"
   ],
   "target_sap_table": "S_MARA",
   "segment_name": "Basic Data (mandatory)",
   "filtering_fields": [
-    "MTART"
+    "MATKL"
   ],
-  "insertion_fields": [
-    {
-      "source_field": "MATNR",
-      "target_field": "PRODUCT"
-    }
-  ],
-  "restructured_question": "Bring MATNR with MTART = ROH from MARA Table",
+  "insertion_fields": [],
+  "restructured_question": "If MATKL in ( L002, ZMGRP1,202R ) then \"GENAI01' ELSE IF MATKL in ( '01','L001','ZSUK1RM1') then \"GENAI02' ELSE IF MATKL in ( 'CH001','02') then \"GenAI03' Else 'GenAINo'(MARA Table)",
   "context": {
     "transformation_history": [
       {
@@ -36,17 +28,60 @@
         "filter_conditions": {
           "MTART": "ROH"
         }
+      },
+      {
+        "description": "Extracted Material Number with Material Type = ROH from MARA Table",
+        "fields_modified": [
+          "PRODUCT",
+          "MTART"
+        ],
+        "filter_conditions": {
+          "MTART": "ROH"
+        }
+      },
+      {
+        "description": "Check Materials from MARA_500 table and IF matching Entries found, then bring MEINS field from MARA_500 table to the Target Table ELSE, If no entries found in MARA_500, then check ROH Material ( found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure ELSE, If no entries found in MARA_700, then bring the Unit of measure from MARA table",
+        "fields_modified": [
+          "MEINS"
+        ],
+        "filter_conditions": {}
+      },
+      {
+        "description": "Check Materials which you have got from Transaofmration rule In MARA_500 table and IF matching Entries found, then bring Unit of Measure   field from MARA_500 table to the Target Table ELSE, If no entries found in MARA_500, then check ROH  Material  ( found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure ELSE, If no entries found in MARA_700, then bring the Unit of measure from MARA table",
+        "fields_modified": [
+          "MEINS"
+        ],
+        "filter_conditions": {}
+      },
+      {
+        "description": "Mapping MATKL based on given conditions",
+        "fields_modified": [
+          "MATKL"
+        ],
+        "filter_conditions": {
+          "MATKL": [
+            "L002",
+            "ZMGRP1",
+            "202R",
+            "01",
+            "L001",
+            "ZSUK1RM1",
+            "CH001",
+            "02"
+          ]
+        }
       }
     ],
     "target_table_state": {
       "populated_fields": [
-        "PRODUCT"
+        "PRODUCT",
+        "MEINS",
+        "MATKL"
       ],
       "remaining_mandatory_fields": [
         "MTART",
         "MAKTX",
-        "SPRAS",
-        "MEINS"
+        "SPRAS"
       ]
     }
   }
