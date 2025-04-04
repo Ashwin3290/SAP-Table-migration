@@ -130,9 +130,9 @@ with col1:
     st.markdown('<p class="sub-header">Configuration</p>', unsafe_allow_html=True)
     
     # Object and segment selection widgets
-    object_id = st.number_input("Object ID", min_value=1, value=1, step=1, key="object_id")
-    segment_id = st.number_input("Segment ID", min_value=1, value=1, step=1, key="segment_id")
-    project_id = st.number_input("Project ID", min_value=1, value=1, step=1, key="project_id")
+    object_id = st.number_input("Object ID", min_value=1, value=29, step=1, key="object_id")
+    segment_id = st.number_input("Segment ID", min_value=1, value=336, step=1, key="segment_id")
+    project_id = st.number_input("Project ID", min_value=1, value=24, step=1, key="project_id")
     
     # Session management
     st.markdown("### Session Management")
@@ -243,12 +243,13 @@ with col2:
             
             # Display code
             if st.session_state['show_code']:
-                with st.expander("Generated Python Code", expanded=True):
+                with st.expander("Generated Python Code", expanded=False):
                     st.code(code, language="python")
             
             # Display different result types appropriately
             if isinstance(result, pd.DataFrame):
-                st.dataframe(result, use_container_width=True)
+                filtered_result = result.dropna(axis=1, how='all') 
+                st.dataframe(filtered_result, use_container_width=True)
                 st.write("Number of rows:", len(result))
             elif str(type(result)).find('matplotlib') != -1:
                 st.pyplot(result)

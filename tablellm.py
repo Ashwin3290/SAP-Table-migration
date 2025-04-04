@@ -470,7 +470,6 @@ else:
         # 2. Extract and organize all relevant information from the planner
         resolved_data['original_query'] = query  # Add original query for context
         planner_info = self._extract_planner_info(resolved_data)
-        
         # Get session ID from the results
         session_id = planner_info["session_id"]
         
