@@ -133,11 +133,11 @@ def missing_values_handling(df):
     # Convert empty strings and whitespace-only to NaN first
         df['source_table'] = df['source_table'].replace(r'^\s*$', pd.NA, regex=True)
     
-    # Now handle both original NaNs and newly converted ones
-    if not df['source_table'].dropna().empty:
-        fill_value = df['source_table'].dropna().iloc[0]
-        df['source_table'] = df['source_table'].fillna(fill_value)
-        print(f"\nFilled {df['source_table'].isna().sum()} nulls in source_table with '{fill_value}'")
+    # # Now handle both original NaNs and newly converted ones
+    # if not df['source_table'].dropna().empty:
+    #     fill_value = df['source_table'].dropna().iloc[0]
+    #     df['source_table'] = df['source_table'].fillna(fill_value)
+    #     print(f"\nFilled {df['source_table'].isna().sum()} nulls in source_table with '{fill_value}'")
 
     # Handle source_field_name
     if 'source_field_name' in df.columns and 'target_sap_field' in df.columns:
@@ -213,7 +213,12 @@ def parse_data_with_context(joined_df, query, previous_context=None):
     * Incase you encounter any other tables used as source tables then in that case add the following fields:
     * `source_table_name`: The name of the base source table identified from the table description
     * `Additional_source_table`: List of the names of the additional source table identified from the table description
-
+    * This also is true if the source table is not the one being used in the query, then add the identified table name in the additional_source_table field with the identified target field and mark source table field as empty
+    * Do not assume that only single table is used in the source table and do not mix source tables for different target fields 
+    * If you dont find any table name for the related to the qery of the user in tbale description , in that case do the following:
+       * Identify the table name and the apparent source field from the query and add it to the source table name and source field instead of putting it in the additional source table
+       * Assume that the user is directly mentioning the table name and the source field in the query.
+       
     Output Format:
     * Present all extracted information in a single, consolidated JSON object
     * If no match is found for any term in the query, explicitly state that
@@ -222,33 +227,36 @@ def parse_data_with_context(joined_df, query, previous_context=None):
 
     Example JSON Output Structure:
     ```json
-    {{
-      "query_terms_matched": ["Material Number", "Material Type"],
-      "target_sap_fields": ["PRODUCT", "MTART"],
-      "target_table_name": "t_24_Product_Basic_Data_mandatory",
-      "source_table_name": "MARA",
-      "sap_structure": "S_MARA",
-      "source_field_names": ["MATNR", "MTART"],
-      "target_sap_table": "S_MARA",
-      "segment_name": "Basic Data (mandatory)",
-      "filtering_fields": ["MTART"],
-      "insertion_fields": [{{"source_field": "MATNR", "target_field": "PRODUCT"}}],
-      "additional_source_table": ["None"],
-      "restructured_question": "Select MATNR from source table where MTART = 'ROH' and insert into PRODUCT field of target table",
-      "context": {{
-        "transformation_history": [
-          {{
-            "description": "Populated PRODUCT with MATNR values where MTART = 'ROH'",
-            "fields_modified": ["PRODUCT"],
-            "filter_conditions": {{"MTART": "ROH"}}
-          }}
-        ],
-        "target_table_state": {{
-          "populated_fields": ["PRODUCT"],
-          "remaining_mandatory_fields": ["MTART", "WERKS"],
-        }}
+{{
+  "query_terms_matched": ["<source_field_1>", "<source_field_2>"],
+  "target_sap_fields": ["<target_field_1>", "<target_field_2>"],
+  "target_table_name": "<target_table>",
+  "source_table_name": "<source_table>",
+  "sap_structure": "<sap_structure>",
+  "source_field_names": ["<source_field_1>", "<source_field_2>"],
+  "target_sap_table": "<target_sap_table>",
+  "segment_name": "<segment_name>",
+  "filtering_fields": ["<filtering_field>"],
+  "insertion_fields": [{{
+    "source_field": "<source_field_1>", 
+    "target_field": "<target_field_1>"
+  }}],
+  "additional_source_table": ["<additional_source_table>"],
+  "restructured_question": "Select <source_field_1> from <source_table> where <filtering_field> = '<filter_value>' and insert into <target_field_1> field of <target_table>",
+  "context": {{
+    "transformation_history": [
+      {{
+        "description": "Populated <target_field_1> with <source_field_1> values where <filtering_field> = '<filter_value>'",
+        "fields_modified": ["<target_field_1>"],
+        "filter_conditions": {{"<filtering_field>": "<filter_value>"}}
       }}
+    ],
+    "target_table_state": {{
+      "populated_fields": ["<target_field_1>"],
+      "remaining_mandatory_fields": ["<target_field_2>", "<target_field_3>"]
     }}
+  }}
+}}
     ```
     """
     
@@ -304,59 +312,63 @@ def parse_data_with_context(joined_df, query, previous_context=None):
 def process_info(resolved_data, conn):
     """Process the resolved data to extract table information"""
     # Extract source and target dataframes based on the resolved data
-    source_df = pd.read_sql_query(
-        f"SELECT * FROM {resolved_data['source_table_name']} LIMIT 5", 
-        conn
-    )[resolved_data['source_field_names']]
-    
-    target_df = pd.read_sql_query(
-        f"SELECT * FROM {resolved_data['target_table_name']} LIMIT 5", 
-        conn
-    )[resolved_data['target_sap_fields']]
+    try:
 
-    if "Additional_source_table" in resolved_data:
-        additional_source_table = resolved_data["Additional_source_table"]
-        if additional_source_table != "None":
-            additional_source_tables = {}
-            for table in additional_source_table:
-                additional_source_tables[table] = pd.read_sql_query(
-                    f"SELECT * FROM {table} LIMIT 5", 
-                    conn
-                )
-                additional_source_tables[table] = additional_source_tables[table][resolved_data['source_field_names']]
-                additional_source_info_buffer = StringIO()
-                additional_source_tables[table].info(buf=additional_source_info_buffer)
-                additional_source_info = additional_source_info_buffer.getvalue()
-                additional_source_tables[table] = {
-                    "info": additional_source_info,
-                    "describe": additional_source_tables[table].describe()
-                }    
-    if isinstance(resolved_data['insertion_fields'] , list):
-        if resolved_data["insertion_fields"]:
-            insertion_fields = resolved_data['insertion_fields'][0]["target_field"]
-        else:
+        source_df = pd.read_sql_query(
+            f"SELECT * FROM {resolved_data['source_table_name']} LIMIT 5", 
+            conn
+        )[resolved_data['source_field_names']]
+        
+        target_df = pd.read_sql_query(
+            f"SELECT * FROM {resolved_data['target_table_name']} LIMIT 5", 
+            conn
+        )[resolved_data['target_sap_fields']]
+
+        if "Additional_source_table" in resolved_data:
+            additional_source_table = resolved_data["Additional_source_table"]
+            if additional_source_table != "None":
+                additional_source_tables = {}
+                for table in additional_source_table:
+                    additional_source_tables[table] = pd.read_sql_query(
+                        f"SELECT * FROM {table} LIMIT 5", 
+                        conn
+                    )
+                    additional_source_tables[table] = additional_source_tables[table][resolved_data['source_field_names']]
+                    additional_source_info_buffer = StringIO()
+                    additional_source_tables[table].info(buf=additional_source_info_buffer)
+                    additional_source_info = additional_source_info_buffer.getvalue()
+                    additional_source_tables[table] = {
+                        "info": additional_source_info,
+                        "describe": additional_source_tables[table].describe()
+                    }    
+        if isinstance(resolved_data['insertion_fields'] , list):
+            if resolved_data["insertion_fields"]:
+                insertion_fields = resolved_data['insertion_fields'][0]["target_field"]
+            else:
+                insertion_fields = "None identified yet try to identify the insertion fields"
+        
+        elif isinstance(resolved_data['insertion_fields'] , None):
             insertion_fields = "None identified yet try to identify the insertion fields"
-    
-    elif isinstance(resolved_data['insertion_fields'] , None):
-        insertion_fields = "None identified yet try to identify the insertion fields"
-    return {
-        "source_info": source_df,
-        "target_info": target_df,
-        "source_describe": source_df.describe(),
-        "target_describe": target_df.describe(),
-        "restructured_question": resolved_data['restructured_question'],
-        "filtering_fields": resolved_data['filtering_fields'],
-        "insertion_fields": insertion_fields,
-        "target_table_name": resolved_data['target_table_name'],
-        "source_table_name": resolved_data['source_table_name'],
-        "target_sap_fields": resolved_data['target_sap_fields'],
-        "source_field_names": resolved_data['source_field_names'],
-        "context": resolved_data.get('context', {}),
-        "additional_source_table": resolved_data.get('Additional_source_table', []),
-        "additional_source_tables": additional_source_tables if "Additional_source_table" in resolved_data else None,
+        return {
+            "source_info": source_df,
+            "target_info": target_df,
+            "source_describe": source_df.describe(),
+            "target_describe": target_df.describe(),
+            "restructured_question": resolved_data['restructured_question'],
+            "filtering_fields": resolved_data['filtering_fields'],
+            "insertion_fields": insertion_fields,
+            "target_table_name": resolved_data['target_table_name'],
+            "source_table_name": resolved_data['source_table_name'],
+            "target_sap_fields": resolved_data['target_sap_fields'],
+            "source_field_names": resolved_data['source_field_names'],
+            "context": resolved_data.get('context', {}),
+            "additional_source_table": resolved_data.get('Additional_source_table', []),
+            "additional_source_tables": additional_source_tables if "Additional_source_table" in resolved_data else None,
 
-    }
-
+        }
+    except Exception as e:
+        print(f"Error processing info: {e}")
+        return None
 
 def process_query(object_id, segment_id, project_id, query, session_id=None):
     """
@@ -405,6 +417,9 @@ def process_query(object_id, segment_id, project_id, query, session_id=None):
     # Process the resolved data to get table information
     json.dump(resolved_data,open('resolved_data.json',"w"), indent=2)
     results = process_info(resolved_data, conn)
+    if not results:
+        conn.close()
+        return None
     # Update the context in our session manager
     context_manager.update_context(session_id, resolved_data)
     

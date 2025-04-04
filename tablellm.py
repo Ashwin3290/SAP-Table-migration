@@ -192,10 +192,6 @@ Filtering field(s): {planner_info['filtering_fields']}
 Filtering conditions: {conditions_str}
 Insertion field(s): {planner_info['insertion_fields']}
 
-TRANSFORMATION CONTEXT:
-{history_context}
-
-
 Current state of target table:
 - Populated fields: {planner_info['target_table_state'].get('populated_fields', [])}
 - Remaining fields: {planner_info['target_table_state'].get('remaining_mandatory_fields', [])}
@@ -241,7 +237,7 @@ Your steps (numbered, 5-10 steps maximum):
 """
         
         response = self.client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.0-flash-thinking-exp-01-21",
             contents=base_prompt
         )
         
@@ -314,6 +310,7 @@ REQUIREMENTS:
 3. Handle additional tables correctly if they're provided
 4. Return the modified target dataframe (df2)
 5. Use numpy for conditional logic if needed (already imported as np)
+6. If you dont find target_field in target_table but it is present in the sample data then add the column to the target table
 
 Complete this function:
 ```python

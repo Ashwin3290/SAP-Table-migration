@@ -137,17 +137,9 @@ with col1:
     # Session management
     st.markdown("### Session Management")
     col_session1, col_session2 = st.columns(2)
+
     
     with col_session1:
-        if st.button("Create New Session", key="new_session"):
-            # Create a new transformation session
-            with st.spinner("Creating new session..."):
-                st.session_state['transformation_session_id'] = None
-                st.session_state['transformation_history'] = []
-                st.success("New session created!")
-                st.rerun()
-    
-    with col_session2:
         if st.button("Clear Current Session", key="clear_session") and st.session_state['transformation_session_id']:
             st.session_state['transformation_session_id'] = None
             st.session_state['transformation_history'] = []
@@ -180,23 +172,23 @@ with col1:
                     """, unsafe_allow_html=True)
     
     # Display sample tables from database if connected
-    if sqlite_conn:
-        with st.expander("Available Database Tables", expanded=False):
-            try:
-                cursor = sqlite_conn.cursor()
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-                tables = cursor.fetchall()
+    # if sqlite_conn:
+    #     with st.expander("Available Database Tables", expanded=False):
+    #         try:
+    #             cursor = sqlite_conn.cursor()
+    #             cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    #             tables = cursor.fetchall()
                 
-                for table in tables:
-                    if st.button(table[0], key=f"table_{table[0]}"):
-                        # Show sample data for this table
-                        sample_df = pd.read_sql_query(f"SELECT * FROM '{table[0]}' LIMIT 5", sqlite_conn)
-                        st.dataframe(sample_df)
-            except Exception as e:
-                # st.error(f"Error fetching tables: {e}")
-                pass
-    else:
-        st.warning("SQLite database connection is required for data transformations")
+    #             for table in tables:
+    #                 if st.button(table[0], key=f"table_{table[0]}"):
+    #                     # Show sample data for this table
+    #                     sample_df = pd.read_sql_query(f"SELECT * FROM '{table[0]}' LIMIT 5", sqlite_conn)
+    #                     st.dataframe(sample_df)
+    #         except Exception as e:
+    #             # st.error(f"Error fetching tables: {e}")
+    #             pass
+    # else:
+    #     st.warning("SQLite database connection is required for data transformations")
 
 with col2:
     st.markdown('<p class="sub-header">Data Transformation Query</p>', unsafe_allow_html=True)
@@ -257,6 +249,7 @@ with col2:
             # Display different result types appropriately
             if isinstance(result, pd.DataFrame):
                 st.dataframe(result, use_container_width=True)
+                st.write("Number of rows:", len(result))
             elif str(type(result)).find('matplotlib') != -1:
                 st.pyplot(result)
             elif isinstance(result, (list, dict)):
@@ -287,20 +280,7 @@ with col2:
                 st.write(f"Query: {tx['query']}")
                 st.code(tx['code'], language="python")
     
-    # Example transformation queries
-    with st.expander("Example Transformation Queries"):
-        example_queries = [
-            "Bring Material Number with Material Type = ROH from MARA Table",
-            "Insert Material Description where Material Number already exists",
-            "Fill Material Group where Material Type = FERT",
-            "Add Plant = 1000 to materials with group CHEM",
-            "Set Status = Active for all plants with Region = EU"
-        ]
-        
-        for i, query in enumerate(example_queries):
-            if st.button(query, key=f"example_tx_{i}"):
-                st.session_state["transformation_query"] = query
-                st.rerun()
+
 
 # Sidebar for settings
 # with st.sidebar:
