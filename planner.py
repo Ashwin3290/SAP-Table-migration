@@ -150,7 +150,6 @@ def missing_values_handling(df):
             valid_targets = df['target_sap_field'].replace(r'^\s*$', pd.NA, regex=True).notna()
             df.loc[df['source_field_name'].isna() & valid_targets, 'source_field_name'] = \
                 df.loc[df['source_field_name'].isna() & valid_targets, 'target_sap_field']
-            print(f"Filled {null_count} nulls in source_field_name from target_sap_field")
     
     return df
 
@@ -302,7 +301,6 @@ def parse_data_with_context(joined_df, query, previous_context=None):
         except json.JSONDecodeError as e:
             print(f"Error parsing JSON response: {e}")
             print("Raw response:")
-            print(response.text)
             return None
     except Exception as e:
         print(f"Error: {e}")

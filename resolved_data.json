@@ -1,60 +1,54 @@
 {
   "query_terms_matched": [
-    "Product Type",
-    "Product Group"
+    "unit of measure"
   ],
   "target_sap_fields": [
-    "MTART",
-    "MATKL"
+    "MEINS"
   ],
   "target_table_name": "t_24_Product_Basic_Data_mandatory",
   "source_table_name": "MARA",
   "sap_structure": "S_MARA",
   "source_field_names": [
-    "MTART",
-    "MATKL"
+    "MEINS"
   ],
   "target_sap_table": "S_MARA",
   "segment_name": "Basic Data (mandatory)",
-  "filtering_fields": [
-    "MTART",
-    "MATKL"
+  "filtering_fields": [],
+  "insertion_fields": [
+    {
+      "source_field": "MEINS",
+      "target_field": "MEINS"
+    }
   ],
-  "insertion_fields": [],
-  "additional_source_table": [
-    "MARA_700"
-  ],
-  "restructured_question": "If MTART IN ('ROH', 'FERT', 'HALB'), then check MATKL. If MATKL in MARA is in ('1000','2000','YBMM01') then hard code as 'mat0123' else check MATKL in MARA_700 and if found in ('L001','YBMM01') then hardcode as 'MAT1923'. ELSE DEFAULT TO 'NONE0912'",
+  "restructured_question": "bring MEINS from MARA",
   "context": {
     "transformation_history": [
       {
-        "description": "If MTART IN ('ROH', 'FERT', 'HALB'), then check MATKL. If MATKL in MARA is in ('1000','2000','YBMM01') then hard code as 'mat0123' else check MATKL in MARA_700 and if found in ('L001','YBMM01') then hardcode as 'MAT1923'. ELSE DEFAULT TO 'NONE0912'",
+        "description": "Populated PRODUCT with MATNR values where MTART = 'ROH'",
         "fields_modified": [
-          "MATKL"
+          "PRODUCT"
         ],
         "filter_conditions": {
-          "MTART": [
-            "ROH",
-            "FERT",
-            "HALB"
-          ],
-          "MATKL": [
-            "1000",
-            "2000",
-            "YBMM01",
-            "L001",
-            "YBMM01"
-          ]
+          "MTART": "ROH"
         }
+      },
+      {
+        "description": "bring MEINS from MARA",
+        "fields_modified": [
+          "MEINS"
+        ],
+        "filter_conditions": {}
       }
     ],
     "target_table_state": {
-      "populated_fields": [],
-      "remaining_mandatory_fields": [
+      "populated_fields": [
         "PRODUCT",
-        "MAKTX",
-        "SPRAS",
         "MEINS"
+      ],
+      "remaining_mandatory_fields": [
+        "MTART",
+        "MAKTX",
+        "SPRAS"
       ]
     }
   }

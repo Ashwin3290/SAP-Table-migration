@@ -3,7 +3,6 @@ import os
 import re
 import json
 import pandas as pd
-import pandas as pd    
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types

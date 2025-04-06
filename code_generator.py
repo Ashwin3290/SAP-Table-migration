@@ -132,8 +132,7 @@ def generate_double_table_code(file_name, numeric_cols, categorical_cols, date_c
 
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+
 
 def analyze_data(df1, df2):
     \"\"\"
