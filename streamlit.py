@@ -18,6 +18,10 @@ st.set_page_config(
 
 # Initialize SQLite connection for data access
 sqlite_conn = None
+<<<<<<< HEAD
+=======
+# try:
+>>>>>>> b5442569864bda0f354f062481b4932ece40bed5
 sqlite_conn = sqlite3.connect('db.sqlite3')
 #     st.sidebar.success("Connected to SQLite database")
 # except Exception as e:
@@ -120,8 +124,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Main app header
-st.markdown('<p class="main-header">TableLLM: Context-Aware Data Transformations</p>', unsafe_allow_html=True)
-st.markdown("Process sequential data transformations with context awareness, preserving state between queries.")
+st.markdown('<p class="main-header">Gen-AI Data Migration Tool</p>', unsafe_allow_html=True)
+# st.markdown("Process sequential data transformations with context awareness, preserving state between queries.")
 
 col1, col2 = st.columns([1, 1.5])
 
@@ -129,24 +133,16 @@ with col1:
     st.markdown('<p class="sub-header">Configuration</p>', unsafe_allow_html=True)
     
     # Object and segment selection widgets
-    object_id = st.number_input("Object ID", min_value=1, value=1, step=1, key="object_id")
-    segment_id = st.number_input("Segment ID", min_value=1, value=1, step=1, key="segment_id")
-    project_id = st.number_input("Project ID", min_value=1, value=1, step=1, key="project_id")
+    object_id = st.number_input("Object ID", min_value=1, value=29, step=1, key="object_id")
+    segment_id = st.number_input("Segment ID", min_value=1, value=336, step=1, key="segment_id")
+    project_id = st.number_input("Project ID", min_value=1, value=24, step=1, key="project_id")
     
     # Session management
     st.markdown("### Session Management")
     col_session1, col_session2 = st.columns(2)
+
     
     with col_session1:
-        if st.button("Create New Session", key="new_session"):
-            # Create a new transformation session
-            with st.spinner("Creating new session..."):
-                st.session_state['transformation_session_id'] = None
-                st.session_state['transformation_history'] = []
-                st.success("New session created!")
-                st.rerun()
-    
-    with col_session2:
         if st.button("Clear Current Session", key="clear_session") and st.session_state['transformation_session_id']:
             st.session_state['transformation_session_id'] = None
             st.session_state['transformation_history'] = []
@@ -179,22 +175,23 @@ with col1:
                     """, unsafe_allow_html=True)
     
     # Display sample tables from database if connected
-    if sqlite_conn:
-        with st.expander("Available Database Tables", expanded=False):
-            try:
-                cursor = sqlite_conn.cursor()
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-                tables = cursor.fetchall()
+    # if sqlite_conn:
+    #     with st.expander("Available Database Tables", expanded=False):
+    #         try:
+    #             cursor = sqlite_conn.cursor()
+    #             cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    #             tables = cursor.fetchall()
                 
-                for table in tables:
-                    if st.button(table[0], key=f"table_{table[0]}"):
-                        # Show sample data for this table
-                        sample_df = pd.read_sql_query(f"SELECT * FROM '{table[0]}' LIMIT 5", sqlite_conn)
-                        st.dataframe(sample_df)
-            except Exception as e:
-                st.error(f"Error fetching tables: {e}")
-    else:
-        st.warning("SQLite database connection is required for data transformations")
+    #             for table in tables:
+    #                 if st.button(table[0], key=f"table_{table[0]}"):
+    #                     # Show sample data for this table
+    #                     sample_df = pd.read_sql_query(f"SELECT * FROM '{table[0]}' LIMIT 5", sqlite_conn)
+    #                     st.dataframe(sample_df)
+    #         except Exception as e:
+    #             # st.error(f"Error fetching tables: {e}")
+    #             pass
+    # else:
+    #     st.warning("SQLite database connection is required for data transformations")
 
 with col2:
     st.markdown('<p class="sub-header">Data Transformation Query</p>', unsafe_allow_html=True)
@@ -215,16 +212,67 @@ with col2:
     # Process the query for data transformation
     if submit and query and sqlite_conn:
         with st.spinner("Processing transformation..."):
-            try:
-                # Process query with context awareness
-                code, result, session_id = tablellm.process_sequential_query(
-                    query, 
-                    object_id, 
-                    segment_id, 
-                    project_id,
-                    st.session_state['transformation_session_id']
-                )
+            # try:
+            # Process query with context awareness
+            code, result, session_id = tablellm.process_sequential_query(
+                query, 
+                object_id, 
+                segment_id, 
+                project_id,
+                st.session_state['transformation_session_id']
+            )
+            
+            # Update session ID if this is a new session
+            if not st.session_state['transformation_session_id']:
+                st.session_state['transformation_session_id'] = session_id
+            
+            # Get updated session info
+            session_info = tablellm.get_session_info(session_id)
+            
+            # Add to history
+            st.session_state['transformation_history'].append({
+                'query': query,
+                'code': code,
+                'timestamp': datetime.now().isoformat(),
+                'description': session_info['transformation_history'][-1]['description'] 
+                    if session_info['transformation_history'] else "Unknown transformation"
+            })
+            
+            # Display results
+            st.success("Transformation complete!")
+            
+            # Display the transformation results
+            st.markdown("### Result")
+            
+            # Display code
+            if st.session_state['show_code']:
+                with st.expander("Generated Python Code", expanded=False):
+                    st.code(code, language="python")
+            
+            # Display different result types appropriately
+            if isinstance(result, pd.DataFrame):
+                filtered_result = result.dropna(axis=1, how='all') 
+                st.dataframe(filtered_result, use_container_width=True)
+                st.write("Number of rows:", len(result))
+            elif str(type(result)).find('matplotlib') != -1:
+                st.pyplot(result)
+            elif isinstance(result, (list, dict)):
+                st.json(result)
+            else:
+                st.write(result)
+            
+            # Display summary of what happened
+            latest_tx = session_info['transformation_history'][-1] if session_info['transformation_history'] else {}
+            st.markdown(f"""
+            <div class="context-info">
+                <strong>Transformation Summary:</strong><br>
+                {latest_tx.get('description', 'Transformation completed')}<br>
+                <strong>Fields Modified:</strong> {', '.join(latest_tx.get('fields_modified', []))}<br>
+                <strong>Filter Conditions:</strong> {json.dumps(latest_tx.get('filter_conditions', {}))}
+            </div>
+            """, unsafe_allow_html=True)
                 
+<<<<<<< HEAD
                 # Update session ID if this is a new session
                 if not st.session_state['transformation_session_id']:
                     st.session_state['transformation_session_id'] = session_id
@@ -277,6 +325,11 @@ with col2:
                 
             except Exception as e:
                 st.error(f"Error processing transformation: {e}")
+=======
+            # except Exception as e:
+                # st.error(f"Error processing transformation: {e}")
+
+>>>>>>> b5442569864bda0f354f062481b4932ece40bed5
     
     # Display previous transformations in this session
     if st.session_state['transformation_history']:
@@ -286,20 +339,7 @@ with col2:
                 st.write(f"Query: {tx['query']}")
                 st.code(tx['code'], language="python")
     
-    # Example transformation queries
-    with st.expander("Example Transformation Queries"):
-        example_queries = [
-            "Bring Material Number with Material Type = ROH from MARA Table",
-            "Insert Material Description where Material Number already exists",
-            "Fill Material Group where Material Type = FERT",
-            "Add Plant = 1000 to materials with group CHEM",
-            "Set Status = Active for all plants with Region = EU"
-        ]
-        
-        for i, query in enumerate(example_queries):
-            if st.button(query, key=f"example_tx_{i}"):
-                st.session_state["transformation_query"] = query
-                st.rerun()
+
 
 # Sidebar for settings
 # with st.sidebar:

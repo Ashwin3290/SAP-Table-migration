@@ -1,20 +1,34 @@
 {
   "query_terms_matched": [
     "Product Type",
+<<<<<<< HEAD
     "ROH Material"
   ],
   "target_sap_fields": [
     "MTART"
+=======
+    "Product Group"
+  ],
+  "target_sap_fields": [
+    "MTART",
+    "MATKL"
+>>>>>>> b5442569864bda0f354f062481b4932ece40bed5
   ],
   "target_table_name": "t_24_Product_Basic_Data_mandatory",
   "source_table_name": "MARA",
   "sap_structure": "S_MARA",
   "source_field_names": [
+<<<<<<< HEAD
     "MTART"
+=======
+    "MTART",
+    "MATKL"
+>>>>>>> b5442569864bda0f354f062481b4932ece40bed5
   ],
   "target_sap_table": "S_MARA",
   "segment_name": "Basic Data (mandatory)",
   "filtering_fields": [
+<<<<<<< HEAD
     "MATNR"
   ],
   "insertion_fields": [
@@ -28,12 +42,38 @@
     "transformation_history": [
       {
         "description": "Populated PRODUCT with MATNR values where MTART = 'ROH'",
+=======
+    "MTART",
+    "MATKL"
+  ],
+  "insertion_fields": [],
+  "additional_source_table": [
+    "MARA_700"
+  ],
+  "restructured_question": "If MTART IN ('ROH', 'FERT', 'HALB'), then check MATKL. If MATKL in MARA is in ('1000','2000','YBMM01') then hard code as 'mat0123' else check MATKL in MARA_700 and if found in ('L001','YBMM01') then hardcode as 'MAT1923'. ELSE DEFAULT TO 'NONE0912'",
+  "context": {
+    "transformation_history": [
+      {
+        "description": "If MTART IN ('ROH', 'FERT', 'HALB'), then check MATKL. If MATKL in MARA is in ('1000','2000','YBMM01') then hard code as 'mat0123' else check MATKL in MARA_700 and if found in ('L001','YBMM01') then hardcode as 'MAT1923'. ELSE DEFAULT TO 'NONE0912'",
+>>>>>>> b5442569864bda0f354f062481b4932ece40bed5
         "fields_modified": [
-          "PRODUCT"
+          "MATKL"
         ],
         "filter_conditions": {
-          "MTART": "ROH"
+          "MTART": [
+            "ROH",
+            "FERT",
+            "HALB"
+          ],
+          "MATKL": [
+            "1000",
+            "2000",
+            "YBMM01",
+            "L001",
+            "YBMM01"
+          ]
         }
+<<<<<<< HEAD
       },
       {
         "description": "Check Materials which you have got from Transaofmration rule In MARA_500 table and IF matching Entries found, then bring Unit of Measure field from MARA_500 table to the Target Table ELSE, If no entries found in MARA_500, then check ROH Material ( found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure ELSE, If no entries found in MARA_700, then bring the Unit of measure from MARA table",
@@ -60,7 +100,14 @@
         "MEINS",
         "MTART"
       ],
+=======
+      }
+    ],
+    "target_table_state": {
+      "populated_fields": [],
+>>>>>>> b5442569864bda0f354f062481b4932ece40bed5
       "remaining_mandatory_fields": [
+        "PRODUCT",
         "MAKTX",
         "SPRAS"
       ]
