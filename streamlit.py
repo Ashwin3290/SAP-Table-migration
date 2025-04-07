@@ -18,10 +18,7 @@ st.set_page_config(
 
 # Initialize SQLite connection for data access
 sqlite_conn = None
-<<<<<<< HEAD
-=======
 # try:
->>>>>>> b5442569864bda0f354f062481b4932ece40bed5
 sqlite_conn = sqlite3.connect('db.sqlite3')
 #     st.sidebar.success("Connected to SQLite database")
 # except Exception as e:
@@ -272,64 +269,9 @@ with col2:
             </div>
             """, unsafe_allow_html=True)
                 
-<<<<<<< HEAD
-                # Update session ID if this is a new session
-                if not st.session_state['transformation_session_id']:
-                    st.session_state['transformation_session_id'] = session_id
-                
-                # Get updated session info
-                session_info = tablellm.get_session_info(session_id)
-                
-                # Add to history
-                st.session_state['transformation_history'].append({
-                    'query': query,
-                    'code': code,
-                    'timestamp': datetime.now().isoformat(),
-                    'description': session_info['transformation_history'][-1]['description'] 
-                        if session_info['transformation_history'] else "Unknown transformation"
-                })
-                
-                # Display results
-                st.success("Transformation complete!")
-                
-                # Display the transformation results
-                st.markdown("### Result")
-                
-                # Display code
-                if st.session_state['show_code']:
-                    with st.expander("Generated Python Code", expanded=True):
-                        st.code(code, language="python")
-                
-                # Display different result types appropriately
-                if isinstance(result, pd.DataFrame):
-                    length = len(result)
-                    st.dataframe(result, use_container_width=True)
-                    st.text("Number of rows: " + str(length))
-                elif str(type(result)).find('matplotlib') != -1:
-                    st.pyplot(result)
-                elif isinstance(result, (list, dict)):
-                    st.json(result)
-                else:
-                    st.write(result)
-                
-                # Display summary of what happened
-                latest_tx = session_info['transformation_history'][-1] if session_info['transformation_history'] else {}
-                st.markdown(f"""
-                <div class="context-info">
-                    <strong>Transformation Summary:</strong><br>
-                    {latest_tx.get('description', 'Transformation completed')}<br>
-                    <strong>Fields Modified:</strong> {', '.join(latest_tx.get('fields_modified', []))}<br>
-                    <strong>Filter Conditions:</strong> {json.dumps(latest_tx.get('filter_conditions', {}))}
-                </div>
-                """, unsafe_allow_html=True)
-                
-            except Exception as e:
-                st.error(f"Error processing transformation: {e}")
-=======
             # except Exception as e:
                 # st.error(f"Error processing transformation: {e}")
 
->>>>>>> b5442569864bda0f354f062481b4932ece40bed5
     
     # Display previous transformations in this session
     if st.session_state['transformation_history']:

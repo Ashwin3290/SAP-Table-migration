@@ -33,45 +33,6 @@ class TableLLM:
         # Load code templates
         self.code_templates = self._initialize_templates()
         
-<<<<<<< HEAD
-        # Build context section for the prompt
-        context_section = """
-Previous Transformations:
-"""
-        if not history:
-            context_section += "None (this is the first transformation)"
-        else:
-            for i, tx in enumerate(history):
-                context_section += f"""
-{i+1}. {tx.get('description', 'Unknown transformation')}
-   - Fields modified: {', '.join(tx.get('fields_modified', []))}
-   - Filter conditions: {json.dumps(tx.get('filter_conditions', {}))}
-"""
-        
-        context_section += f"""
-Current Target Table State:
-- Populated fields: {', '.join(table_state.get('populated_fields', []))}
-- Remaining mandatory fields: {', '.join(table_state.get('remaining_mandatory_fields', []))}
-"""
-        
-        # Handle insertion fields - ensure it's properly formatted
-        insertion_fields_str = ""
-        if "insertion_fields" in resolved_data and resolved_data["insertion_fields"]:
-            if isinstance(resolved_data["insertion_fields"], list) and len(resolved_data["insertion_fields"]) > 0:
-                insertion_fields_str = resolved_data["insertion_fields"][0]["source_field"]
-                target_field_str = resolved_data["insertion_fields"][0]["target_field"]
-            else:
-                logger.warning(f"Unexpected insertion_fields format: {resolved_data['insertion_fields']}")
-                insertion_fields_str = str(resolved_data["insertion_fields"])
-                target_field_str = "Unknown"
-        else:
-            insertion_fields_str = "None"
-            target_field_str = "None"
-
-        print(insertion_fields_str)
-        print("###################################")
-        print(target_field_str)
-=======
         # Current session context
         self.current_context = None
 
@@ -86,7 +47,6 @@ Current Target Table State:
             "source_table": resolved_data.get('source_table_name'),
             "target_table": resolved_data.get('target_table_name'),
             "additional_sources": resolved_data.get('additional_source_table', []),
->>>>>>> b5442569864bda0f354f062481b4932ece40bed5
             
             # Field information
             "source_fields": resolved_data.get('source_field_names', []),

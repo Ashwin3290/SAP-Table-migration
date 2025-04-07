@@ -1,115 +1,49 @@
 {
   "query_terms_matched": [
-    "Product Type",
-<<<<<<< HEAD
-    "ROH Material"
+    "Material Number",
+    "Material Type"
   ],
   "target_sap_fields": [
+    "MATNR",
     "MTART"
-=======
-    "Product Group"
   ],
-  "target_sap_fields": [
-    "MTART",
-    "MATKL"
->>>>>>> b5442569864bda0f354f062481b4932ece40bed5
-  ],
-  "target_table_name": "t_24_Product_Basic_Data_mandatory",
+  "target_table_name": "MARA",
   "source_table_name": "MARA",
-  "sap_structure": "S_MARA",
+  "sap_structure": "MARA",
   "source_field_names": [
-<<<<<<< HEAD
+    "MATNR",
     "MTART"
-=======
-    "MTART",
-    "MATKL"
->>>>>>> b5442569864bda0f354f062481b4932ece40bed5
   ],
-  "target_sap_table": "S_MARA",
-  "segment_name": "Basic Data (mandatory)",
+  "target_sap_table": "MARA",
+  "segment_name": "E1MARAM",
   "filtering_fields": [
-<<<<<<< HEAD
-    "MATNR"
+    "MTART"
   ],
   "insertion_fields": [
     {
-      "source_field": "MTART",
-      "target_field": "MTART"
+      "source_field": "MATNR",
+      "target_field": "MATNR"
     }
   ],
-  "restructured_question": "Check MARA.MATNR In MARA_500 table and IF matching Entries found, then bring MARA.MTART field from MARA_500 table to the Target Table ELSE, If no entries found in MARA_500, then check ROH Material ( found in Transformation 2 ) in MARA_700 Table and bring the MARA.MTART ELSE, bring the MARA.MTART from MARA table",
+  "restructured_question": "Bring MATNR from MARA Table where MTART = ROH",
   "context": {
     "transformation_history": [
       {
-        "description": "Populated PRODUCT with MATNR values where MTART = 'ROH'",
-=======
-    "MTART",
-    "MATKL"
-  ],
-  "insertion_fields": [],
-  "additional_source_table": [
-    "MARA_700"
-  ],
-  "restructured_question": "If MTART IN ('ROH', 'FERT', 'HALB'), then check MATKL. If MATKL in MARA is in ('1000','2000','YBMM01') then hard code as 'mat0123' else check MATKL in MARA_700 and if found in ('L001','YBMM01') then hardcode as 'MAT1923'. ELSE DEFAULT TO 'NONE0912'",
-  "context": {
-    "transformation_history": [
-      {
-        "description": "If MTART IN ('ROH', 'FERT', 'HALB'), then check MATKL. If MATKL in MARA is in ('1000','2000','YBMM01') then hard code as 'mat0123' else check MATKL in MARA_700 and if found in ('L001','YBMM01') then hardcode as 'MAT1923'. ELSE DEFAULT TO 'NONE0912'",
->>>>>>> b5442569864bda0f354f062481b4932ece40bed5
+        "description": "Extracted Material Number where Material Type is ROH from MARA Table",
         "fields_modified": [
-          "MATKL"
+          "MATNR"
         ],
         "filter_conditions": {
-          "MTART": [
-            "ROH",
-            "FERT",
-            "HALB"
-          ],
-          "MATKL": [
-            "1000",
-            "2000",
-            "YBMM01",
-            "L001",
-            "YBMM01"
-          ]
-        }
-<<<<<<< HEAD
-      },
-      {
-        "description": "Check Materials which you have got from Transaofmration rule In MARA_500 table and IF matching Entries found, then bring Unit of Measure field from MARA_500 table to the Target Table ELSE, If no entries found in MARA_500, then check ROH Material ( found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure ELSE, If no entries found in MARA_700, then bring the Unit of measure from MARA table",
-        "fields_modified": [
-          "MEINS"
-        ],
-        "filter_conditions": {
-          "MATNR": "MARA_500 or MARA_700"
-        }
-      },
-      {
-        "description": "Check ROH Material In MARA_500 table and IF matching Entries found, then bring Material Type field from MARA_500 table to the Target Table ELSE, If no entries found in MARA_500, then check ROH Material ( found in Transformation 2 ) in MARA_700 Table and bring the Material Type ELSE, bring the Material Type from MARA table",
-        "fields_modified": [
-          "MTART"
-        ],
-        "filter_conditions": {
-          "MATNR": "MARA_500 or MARA_700 or MARA"
+          "MTART": "ROH"
         }
       }
     ],
     "target_table_state": {
       "populated_fields": [
-        "PRODUCT",
-        "MEINS",
-        "MTART"
+        "MATNR"
       ],
-=======
-      }
-    ],
-    "target_table_state": {
-      "populated_fields": [],
->>>>>>> b5442569864bda0f354f062481b4932ece40bed5
       "remaining_mandatory_fields": [
-        "PRODUCT",
-        "MAKTX",
-        "SPRAS"
+        "..."
       ]
     }
   }

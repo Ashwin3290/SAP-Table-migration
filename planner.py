@@ -399,6 +399,7 @@ def process_query(object_id, segment_id, project_id, query, session_id=None):
     
     # Fetch mapping data
     joined_df = fetch_data_by_ids(object_id, segment_id, project_id, conn)
+    print(joined_df.head())
     # Handle missing values in the dataframe
     joined_df = missing_values_handling(joined_df)
     # Check if joined_df is emptys
