@@ -155,7 +155,7 @@ def missing_values_handling(df):
     return df
 
 @track_token_usage(log_to_file=True, log_path='gemini_planner_usage.log')
-def parse_data_with_context(joined_df, query, previous_context=None):
+def parse_data_with_context(joined_df, query, previous_context=None, target_table_desc=None):
     """
     Parse data using Gemini API with token usage tracking and context awareness
     
@@ -168,96 +168,49 @@ def parse_data_with_context(joined_df, query, previous_context=None):
     dict: The parsed data with mapping information and updated context
     """
     prompt = """
-    Role: You are an expert data mapping assistant with context awareness.
+    You are a data transformation assistant specializing in SAP data mappings. 
+Your task is to analyze a natural language query about data transformations and match it to the appropriate source and target tables and fields.
+ 
+CONTEXT DATA SCHEMA: {table_desc}
+ 
+USER QUERY: {question}
 
-    Goal: Extract specific technical data mapping details based on a user's query, while maintaining awareness of previous transformations.
+Target Table: {target_table_desc}
+(Take into consideration the target table and its fields, to give transformation logic)
 
-    Inputs:
-    1. User Query (`question`): {question}
-       This query will contain descriptive terms referring to data fields, some used for filtering and others for selection/insertion.
-    2. Table Description (`table_desc`): {table_desc}
-       This contains the mapping rules and metadata in a structured format with columns: `fields`, `description`, `isMandatory`, `isKey`, `source_field_name`, `target_sap_table`, `target_sap_field`, `segment_name`, `table_name`, `source_table`.
-    3. Previous Context (`previous_context`): {previous_context}
-       This contains information about previous transformations if any have been performed.
-
-    Task:
-
-    1. Identify Relevant Row(s):
-       - Analyze the `User Query` to identify all descriptive terms the user is asking about.
-       - Match these terms against values in the `description` column of the `Table Description`.
-       - Determine which fields are being used for filtering conditions versus which fields are being selected/inserted.
-       - The match should be robust enough to handle partial descriptions.
-
-    2. Consider Previous Context:
-       - Review the previous transformations to understand what data has already been populated.
-       - Consider how the current query relates to previous transformations (e.g., is it adding to previously populated data, or working with different fields).
-       - Ensure consistency with previous transformations.
-
-    3. Extract Information: Extract the following details precisely from the corresponding columns in the `Table Description` and consolidate them into a single JSON object:
-       * `query_terms_matched`: List of all descriptive terms from the query that were matched
-       * `target_sap_fields`: List of values from the `target_sap_field` column for all matched terms
-       * `target_table_name`: The value from the `table_name` column
-       * `source_table_name`: The value from the `source_table` column
-       * `sap_structure`: The value from the `sap_structure` column
-       * `source_field_names`: List of values from the `source_field_name` column for all matched terms
-       * `target_sap_table`: The value from the `target_sap_table` column
-       * `segment_name`: The value from the `segment_name` column
-       * `filtering_fields`: List of field names (from `source_field_name`) that are used for filtering conditions
-       * `insertion_fields`: List of field pairs as {{source_field: "X", target_field: "Y"}} that represent data to be inserted
-       * `restructured_question`: The original question with descriptive terms replaced by their technical field names
-       * `context`: Updated context information including:
-       * - transformation_history: List of previous transformations plus this one
-       * - target_table_state: Updated state information about populated fields
-
-    Note:
-    * Incase you encounter any other tables used as source tables then in that case add the following fields:
-    * `source_table_name`: The name of the base source table identified from the table description
-    * `Additional_source_table`: List of the names of the additional source table identified from the table description
-    * This also is true if the source table is not the one being used in the query, then add the identified table name in the additional_source_table field with the identified target field and mark source table field as empty
-    * Do not assume that only single table is used in the source table and do not mix source tables for different target fields 
-    * If you dont find any table name for the related to the qery of the user in tbale description , in that case do the following:
-       * Identify the table name and the apparent source field from the query and add it to the source table name and source field instead of putting it in the additional source table
-       * Assume that the user is directly mentioning the table name and the source field in the query.
-       
-    Output Format:
-    * Present all extracted information in a single, consolidated JSON object
-    * If no match is found for any term in the query, explicitly state that
-    * Group common values that should be the same across all matches (like table_name, sap_structure, etc.)
-    * Include the updated context that builds upon the previous context
-
-    Example JSON Output Structure:
-    ```json
+INSTRUCTIONS:
+1. Identify key entities in the query:
+   - Source table(s)
+   - Source field(s)
+   - Target table(s)
+   - Target field(s)
+   - Filtering or transformation conditions
+   - Logical flow (IF/THEN/ELSE statements)
+ 
+2. Match these entities to the corresponding entries in the joined_data.csv schema
+   - For each entity, find the closest match in the schema
+   - Resolve ambiguities using the description field
+   - Validate that the identified fields exist in the mentioned tables
+ 
+3. Generate a structured representation of the transformation logic:
+   - JSON format showing the transformation flow
+   - Include all source tables, fields, conditions, and targets
+   - Map conditional logic to proper syntax
+   - Handle fallback scenarios (ELSE conditions)
+ 
+4. Provide a summary of the identified transformation in both natural language and structured format.
+ 
+Respond with:
+```json
 {{
-  "query_terms_matched": ["<source_field_1>", "<source_field_2>"],
-  "target_sap_fields": ["<target_field_1>", "<target_field_2>"],
-  "target_table_name": "<target_table>",
-  "source_table_name": "<source_table>",
-  "sap_structure": "<sap_structure>",
-  "source_field_names": ["<source_field_1>", "<source_field_2>"],
-  "target_sap_table": "<target_sap_table>",
-  "segment_name": "<segment_name>",
-  "filtering_fields": ["<filtering_field>"],
-  "insertion_fields": [{{
-    "source_field": "<source_field_1>", 
-    "target_field": "<target_field_1>"
-  }}],
-  "additional_source_table": ["<additional_source_table>"],
-  "restructured_question": "Select <source_field_1> from <source_table> where <filtering_field> = '<filter_value>' and insert into <target_field_1> field of <target_table>",
-  "context": {{
-    "transformation_history": [
-      {{
-        "description": "Populated <target_field_1> with <source_field_1> values where <filtering_field> = '<filter_value>'",
-        "fields_modified": ["<target_field_1>"],
-        "filter_conditions": {{"<filtering_field>": "<filter_value>"}}
-      }}
-    ],
-    "target_table_state": {{
-      "populated_fields": ["<target_field_1>"],
-      "remaining_mandatory_fields": ["<target_field_2>", "<target_field_3>"]
-    }}
-  }}
+source_table_name: [List of all source_tables],
+source_field_names: [List of all source_fields],
+target_table_name: [Target table name],
+target_sap_fields: [List of target fields],
+filtering_fields: [List of filtering fields],
+transformation_logic: [Detailed transformation logic],
 }}
-    ```
+```
     """
     
     # Format the previous context for the prompt
@@ -266,10 +219,12 @@ def parse_data_with_context(joined_df, query, previous_context=None):
     # Format the prompt with all inputs
     # joined_df.to_csv("joined_data.csv", index=False) 
     table_desc = joined_df
+    target_table_desc = pd.read_csv("2025-04-07T06-57_export.csv")
     formatted_prompt = prompt.format(
         question=query,
         table_desc=table_desc.to_csv(index=False),
-        previous_context=context_str
+        previous_context=context_str,
+        target_table_desc = target_table_desc.to_csv(index=False)
     )
     
     # Call Gemini API with token tracking
@@ -310,62 +265,37 @@ def parse_data_with_context(joined_df, query, previous_context=None):
 
 
 def process_info(resolved_data, conn):
-    """Process the resolved data to extract table information"""
-    # Extract source and target dataframes based on the resolved data
+    """Process the resolved data to extract table information based on the specified JSON structure"""
     try:
-
-        source_df = pd.read_sql_query(
-            f"SELECT * FROM {resolved_data['source_table_name']} LIMIT 5", 
-            conn
-        )[resolved_data['source_field_names']]
-        
-        target_df = pd.read_sql_query(
-            f"SELECT * FROM {resolved_data['target_table_name']} LIMIT 5", 
-            conn
-        )[resolved_data['target_sap_fields']]
-
-        if "Additional_source_table" in resolved_data:
-            additional_source_table = resolved_data["Additional_source_table"]
-            if additional_source_table != "None":
-                additional_source_tables = {}
-                for table in additional_source_table:
-                    additional_source_tables[table] = pd.read_sql_query(
-                        f"SELECT * FROM {table} LIMIT 5", 
-                        conn
-                    )
-                    additional_source_tables[table] = additional_source_tables[table][resolved_data['source_field_names']]
-                    additional_source_info_buffer = StringIO()
-                    additional_source_tables[table].info(buf=additional_source_info_buffer)
-                    additional_source_info = additional_source_info_buffer.getvalue()
-                    additional_source_tables[table] = {
-                        "info": additional_source_info,
-                        "describe": additional_source_tables[table].describe()
-                    }    
-        if isinstance(resolved_data['insertion_fields'] , list):
-            if resolved_data["insertion_fields"]:
-                insertion_fields = resolved_data['insertion_fields'][0]["target_field"]
-            else:
-                insertion_fields = "None identified yet try to identify the insertion fields"
-        
-        elif isinstance(resolved_data['insertion_fields'] , None):
-            insertion_fields = "None identified yet try to identify the insertion fields"
-        return {
-            "source_info": source_df,
-            "target_info": target_df,
-            "source_describe": source_df.describe(),
-            "target_describe": target_df.describe(),
-            "restructured_question": resolved_data['restructured_question'],
-            "filtering_fields": resolved_data['filtering_fields'],
-            "insertion_fields": insertion_fields,
-            "target_table_name": resolved_data['target_table_name'],
+        # Initialize result dictionary with only the requested fields
+        result = {
             "source_table_name": resolved_data['source_table_name'],
-            "target_sap_fields": resolved_data['target_sap_fields'],
             "source_field_names": resolved_data['source_field_names'],
-            "context": resolved_data.get('context', {}),
-            "additional_source_table": resolved_data.get('Additional_source_table', []),
-            "additional_source_tables": additional_source_tables if "Additional_source_table" in resolved_data else None,
-
+            "target_table_name": resolved_data['target_table_name'],
+            "target_sap_fields": resolved_data['target_sap_fields'],
+            "filtering_fields": resolved_data['filtering_fields'],
+            "transformation_logic": resolved_data['transformation_logic']
         }
+        
+        # Add data samples from each source table (first 5 rows)
+        source_data = {}
+        for table in resolved_data['source_table_name']:
+            source_df = pd.read_sql_query(
+                f"SELECT {','.join(resolved_data['source_field_names'])} FROM {table} LIMIT 5", 
+                conn
+            )
+            source_data[table] = source_df.to_dict('records')
+        result['source_data_samples'] = source_data
+        
+        # Add target table data sample (first 5 rows)
+        target_df = pd.read_sql_query(
+            f"SELECT {','.join(resolved_data['target_sap_fields'])} FROM {resolved_data['target_table_name']} LIMIT 5", 
+            conn
+        )
+        result['target_data_sample'] = target_df.to_dict('records')
+        
+        return result
+        
     except Exception as e:
         print(f"Error processing info: {e}")
         return None
@@ -405,6 +335,7 @@ def process_query(object_id, segment_id, project_id, query, session_id=None):
     # Check if joined_df is emptys
 
     joined_df.to_csv("joined_data.csv", index=False)
+
     # Process query with context awareness
     resolved_data = parse_data_with_context(
         joined_df, 
@@ -489,22 +420,22 @@ def save_session_target_df(session_id, target_df:pd.DataFrame):
     
     return True
 
-# if __name__ == "__main__":
-#     # Example usage
-#     conn = sqlite3.connect('db.sqlite3')
-#     object_id = 29
-#     segment_id = 336
-#     project_id = 24
-#     query = """Check Materials which you have got from Transaofmration rule In MARA_500 table and
-# IF
-# matching Entries found, then bring Unit of Measure   field from MARA_500 table to the Target Table
-# ELSE,
-# If no entries found in MARA_500, then check ROH  Material  ( found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure
-# ELSE,
-# If no entries found in MARA_700, then bring the Unit of measure from MARA table
+if __name__ == "__main__":
+    # Example usage
+    conn = sqlite3.connect('db.sqlite3')
+    object_id = 41
+    segment_id = 577
+    project_id = 24
+    query = """Check Materials which you have got from Transaofmration rule In MARA_500 table and
+IF
+matching Entries found, then bring Unit of Measure   field from MARA_500 table to the Target Table
+ELSE,
+If no entries found in MARA_500, then check ROH  Material  ( found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure
+ELSE,
+If no entries found in MARA_700, then bring the Unit of measure from MARA table
 
-# """
+"""
     
-#     # Process the query and get results
-#     results = process_query(object_id, segment_id, project_id, query)
-#     print(results)
+    # Process the query and get results
+    results = process_query(object_id, segment_id, project_id, query)
+    print(results)
