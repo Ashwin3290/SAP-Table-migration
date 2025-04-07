@@ -1,54 +1,49 @@
 {
   "query_terms_matched": [
-    "unit of measure"
+    "Material Number",
+    "Material Type"
   ],
   "target_sap_fields": [
-    "MEINS"
+    "MATNR",
+    "MTART"
   ],
-  "target_table_name": "t_24_Product_Basic_Data_mandatory",
+  "target_table_name": "MARA",
   "source_table_name": "MARA",
-  "sap_structure": "S_MARA",
+  "sap_structure": "MARA",
   "source_field_names": [
-    "MEINS"
+    "MATNR",
+    "MTART"
   ],
-  "target_sap_table": "S_MARA",
-  "segment_name": "Basic Data (mandatory)",
-  "filtering_fields": [],
+  "target_sap_table": "MARA",
+  "segment_name": "E1MARAM",
+  "filtering_fields": [
+    "MTART"
+  ],
   "insertion_fields": [
     {
-      "source_field": "MEINS",
-      "target_field": "MEINS"
+      "source_field": "MATNR",
+      "target_field": "MATNR"
     }
   ],
-  "restructured_question": "bring MEINS from MARA",
+  "restructured_question": "Bring MATNR from MARA Table where MTART = 'ROH'",
   "context": {
     "transformation_history": [
       {
-        "description": "Populated PRODUCT with MATNR values where MTART = 'ROH'",
+        "description": "Extracted Material Number where Material Type is ROH",
         "fields_modified": [
-          "PRODUCT"
+          "MATNR"
         ],
         "filter_conditions": {
           "MTART": "ROH"
         }
-      },
-      {
-        "description": "bring MEINS from MARA",
-        "fields_modified": [
-          "MEINS"
-        ],
-        "filter_conditions": {}
       }
     ],
     "target_table_state": {
       "populated_fields": [
-        "PRODUCT",
-        "MEINS"
+        "MATNR"
       ],
       "remaining_mandatory_fields": [
-        "MTART",
-        "MAKTX",
-        "SPRAS"
+        "..."
       ]
     }
   }
