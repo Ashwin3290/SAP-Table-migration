@@ -202,8 +202,6 @@ Respond with:
 {{
 source_table_name: [List of all source_tables],
 source_field_names: [List of all source_fields],
-target_table_name: [Target table name],
-target_sap_fields: [List of target fields],
 filtering_fields: [List of filtering fields],
 transformation_logic: [Detailed transformation logic],
 }}
@@ -296,7 +294,7 @@ def process_info(resolved_data, conn):
         print(f"Error processing info: {e}")
         return None
 
-def process_query(object_id, segment_id, project_id, query, session_id=None):
+def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
     """
     Process a query with context awareness
     

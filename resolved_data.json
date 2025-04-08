@@ -4,9 +4,9 @@
   ],
   "source_field_names": [
     "MATNR",
-    "MTART"
+    "MEINS"
   ],
-  "target_table_name": "Unnamed: 0,PRODUCT,MEINS",
+  "target_table_name": "Unnamed: 0",
   "target_sap_fields": [
     "PRODUCT",
     "MEINS"
@@ -14,5 +14,5 @@
   "filtering_fields": [
     "MTART"
   ],
-  "transformation_logic": "The transformation logic involves extracting the 'PRODUCT' (Material Number) and 'MEINS' (Base Unit of Measure) fields from the target table where the 'MTART' (Material Type) in the MARA table equals 'ROH' (Raw Material)."
+  "transformation_logic": "The transformation logic involves retrieving the Unit of Measure (MEINS) for materials based on a hierarchical lookup in different MARA tables. The logic is as follows:\n\n1.  **First Lookup**: Check for the material number (MATNR) in the MARA_500 table. If a matching entry is found, retrieve the corresponding Unit of Measure (MEINS) from MARA_500 and populate the target table's MEINS field.\n\n2.  **Second Lookup (Fallback)**: If no matching entry is found in MARA_500, check for the material number in the MARA_700 table. If a match is found, retrieve the Unit of Measure (MEINS) from MARA_700 and populate the target table's MEINS field.\n\n3.  **Third Lookup (Final Fallback)**: If no matching entry is found in either MARA_500 or MARA_700, retrieve the Unit of Measure (MEINS) from the standard MARA table and populate the target table's MEINS field.\n\nIn summary, the transformation prioritizes MARA_500, then MARA_700, and finally MARA for retrieving the unit of measure for a given material."
 }
