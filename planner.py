@@ -175,9 +175,6 @@ CONTEXT DATA SCHEMA: {table_desc}
  
 USER QUERY: {question}
 
-Target Table: {target_table_desc}
-(Take into consideration the target table and its fields, to give transformation logic)
-
 INSTRUCTIONS:
 1. Identify key entities in the query:
    - Source table(s)
@@ -217,14 +214,13 @@ transformation_logic: [Detailed transformation logic],
     context_str = "None" if previous_context is None else json.dumps(previous_context, indent=2)
     
     # Format the prompt with all inputs
-    # joined_df.to_csv("joined_data.csv", index=False) 
+    joined_df.to_csv("joined_data.csv", index=False) 
     table_desc = joined_df
-    target_table_desc = pd.read_csv("2025-04-07T06-57_export.csv")
     formatted_prompt = prompt.format(
         question=query,
         table_desc=table_desc.to_csv(index=False),
         previous_context=context_str,
-        target_table_desc = target_table_desc.to_csv(index=False)
+        table_desc = joined_df
     )
     
     # Call Gemini API with token tracking
