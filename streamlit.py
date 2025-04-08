@@ -172,23 +172,55 @@ with col1:
                     """, unsafe_allow_html=True)
     
     # Display sample tables from database if connected
-    # if sqlite_conn:
-    #     with st.expander("Available Database Tables", expanded=False):
-    #         try:
-    #             cursor = sqlite_conn.cursor()
-    #             cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-    #             tables = cursor.fetchall()
+    if sqlite_conn:
+        try:
+            cursor = sqlite_conn.cursor()
+            
+            # First get the target SAP table name from connection_segments
+            cursor.execute("""
+                SELECT table_name 
+                FROM connection_segments 
+                WHERE obj_id_id = ? 
+                AND project_id_id = ? 
+                AND segment_id = ?
+            """, (object_id, project_id, segment_id))
+            
+            target_table_result = cursor.fetchone()
+            
+            if target_table_result:
+                target_table = target_table_result[0]
                 
-    #             for table in tables:
-    #                 if st.button(table[0], key=f"table_{table[0]}"):
-    #                     # Show sample data for this table
-    #                     sample_df = pd.read_sql_query(f"SELECT * FROM '{table[0]}' LIMIT 5", sqlite_conn)
-    #                     st.dataframe(sample_df)
-    #         except Exception as e:
-    #             # st.error(f"Error fetching tables: {e}")
-    #             pass
-    # else:
-    #     st.warning("SQLite database connection is required for data transformations")
+                # Get columns from the target table
+                cursor.execute(f"PRAGMA table_info('{target_table}')")
+                columns = cursor.fetchall()
+                
+                if columns:
+                    # Create a searchable select box for columns
+                    column_options = [col[1] for col in columns]  # col[1] is the column name
+                    selected_columns = st.multiselect(
+                        f"Select columns from {target_table}",
+                        options=column_options, # Show all columns selected by default
+                        key=f"columns_{target_table}"
+                    )
+                    
+                    # Show sample data button
+                    if st.button(f"Preview data from {target_table}"):
+                        if selected_columns:
+                            columns_str = ", ".join([f'"{col}"' for col in selected_columns])
+                            sample_df = pd.read_sql_query(
+                                f"SELECT {columns_str} FROM '{target_table}' LIMIT 10", 
+                                sqlite_conn
+                            )
+                            st.dataframe(sample_df)
+                        else:
+                            st.warning("Please select at least one column to preview")
+                else:
+                    st.warning(f"No columns found in table {target_table}")
+            else:
+                st.warning("No target SAP table found for the given parameters")
+                
+        except Exception as e:
+            st.error(f"Error fetching table information: {e}")
 
 with col2:
     st.markdown('<p class="sub-header">Data Transformation Query</p>', unsafe_allow_html=True)
