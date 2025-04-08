@@ -197,12 +197,13 @@ with col1:
                 if columns:
                     # Create a searchable select box for columns
                     column_options = [col[1] for col in columns]  # col[1] is the column name
-                    selected_columns = st.multiselect(
+                    selected_columns = st.selectbox(
                         f"Select columns from {target_table}",
                         options=column_options, # Show all columns selected by default
                         key=f"columns_{target_table}"
                     )
                     
+
                     # Show sample data button
                     if st.button(f"Preview data from {target_table}"):
                         if selected_columns:
@@ -248,7 +249,8 @@ with col2:
                 object_id, 
                 segment_id, 
                 project_id,
-                st.session_state['transformation_session_id']
+                st.session_state['transformation_session_id'],
+                selected_columns
             )
             
             # Update session ID if this is a new session

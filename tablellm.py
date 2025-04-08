@@ -447,7 +447,7 @@ else:
         
         return cleaned_df
 
-    def process_sequential_query(self, query, object_id=29, segment_id=336, project_id=24, session_id=None):
+    def process_sequential_query(self, query, object_id=29, segment_id=336, project_id=24, session_id=None, target_sap_field=None):
         """
         Process a query as part of a sequential transformation
         With improved information flow from planner
@@ -462,8 +462,9 @@ else:
         Returns:
         tuple: (code, result, session_id)
         """
+        print(target_sap_field)
         # 1. Process query with the planner
-        resolved_data = planner_process_query(object_id, segment_id, project_id, query, session_id)
+        resolved_data = planner_process_query(object_id, segment_id, project_id, query, session_id,target_sap_field)
         if not resolved_data:
             return None, "Failed to resolve query", session_id
         
