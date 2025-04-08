@@ -4,7 +4,12 @@
   ],
   "source_field_names": [
     "MATNR",
-    "MTART"
+    "MEINS"
+  ],
+  "target_table_name": "Unnamed: 0",
+  "target_sap_fields": [
+    "PRODUCT",
+    "MEINS"
   ],
   "filtering_fields": [
     "MTART"

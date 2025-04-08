@@ -214,7 +214,7 @@ transformation_logic: [Detailed transformation logic],
     context_str = "None" if previous_context is None else json.dumps(previous_context, indent=2)
     
     # Format the prompt with all inputs
-    # joined_df.to_csv("joined_data.csv", index=False) 
+    joined_df.to_csv("joined_data.csv", index=False) 
     table_desc = joined_df
     formatted_prompt = prompt.format(
         question=query,
