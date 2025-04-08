@@ -130,8 +130,8 @@ with col1:
     st.markdown('<p class="sub-header">Configuration</p>', unsafe_allow_html=True)
     
     # Object and segment selection widgets
-    object_id = st.number_input("Object ID", min_value=1, value=29, step=1, key="object_id")
-    segment_id = st.number_input("Segment ID", min_value=1, value=336, step=1, key="segment_id")
+    object_id = st.number_input("Object ID", min_value=1, value=41, step=1, key="object_id")
+    segment_id = st.number_input("Segment ID", min_value=1, value=577, step=1, key="segment_id")
     project_id = st.number_input("Project ID", min_value=1, value=24, step=1, key="project_id")
     
     # Session management

@@ -140,17 +140,17 @@ def missing_values_handling(df):
     #     print(f"\nFilled {df['source_table'].isna().sum()} nulls in source_table with '{fill_value}'")
 
     # Handle source_field_name
-    if 'source_field_name' in df.columns and 'target_sap_field' in df.columns:
-        # Convert empty strings to NaN first
-        df['source_field_name'] = df['source_field_name'].replace(r'^\s*$', pd.NA, regex=True)
+    # if 'source_field_name' in df.columns and 'target_sap_field' in df.columns:
+    #     # Convert empty strings to NaN first
+    #     df['source_field_name'] = df['source_field_name'].replace(r'^\s*$', pd.NA, regex=True)
         
-        null_count = df['source_field_name'].isna().sum()
-        if null_count > 0:
-            # Ensure we don't propagate empty strings from target_sap_field
-            valid_targets = df['target_sap_field'].replace(r'^\s*$', pd.NA, regex=True).notna()
-            df.loc[df['source_field_name'].isna() & valid_targets, 'source_field_name'] = \
-                df.loc[df['source_field_name'].isna() & valid_targets, 'target_sap_field']
-            print(f"Filled {null_count} nulls in source_field_name from target_sap_field")
+    #     null_count = df['source_field_name'].isna().sum()
+    #     if null_count > 0:
+    #         # Ensure we don't propagate empty strings from target_sap_field
+    #         valid_targets = df['target_sap_field'].replace(r'^\s*$', pd.NA, regex=True).notna()
+    #         df.loc[df['source_field_name'].isna() & valid_targets, 'source_field_name'] = \
+    #             df.loc[df['source_field_name'].isna() & valid_targets, 'target_sap_field']
+    #         print(f"Filled {null_count} nulls in source_field_name from target_sap_field")
     
     return df
 
@@ -197,25 +197,27 @@ INSTRUCTIONS:
 4. Provide a summary of the identified transformation in both natural language and structured format.
 
 5. For the insertion fields, identify the fields that need to be inserted into the target table based on the transformation logic.Take note to not add the filetring fields to the insertion fields if not specifically requested.
+
+6. Restructure the user query with resolved data and transformation logic.
  
 Respond with:
 ```json
 {{
-source_table_name: [List of all source_tables],
-source_field_names: [List of all source_fields],
-filtering_fields: [List of filtering fields],
-insertion_fields: [List of fields to be inserted],
-transformation_logic: [Detailed transformation logic],
+"source_table_name": [List of all source_tables],
+"source_field_names": [List of all source_fields],
+"filtering_fields": [List of filtering fields],
+"insertion_fields": [List of fields to be inserted],
+"transformation_logic": [Detailed transformation logic],
+"Resolved_query": [Rephrased query with resolved data]
 }}
 ```
     """
     
     # Format the previous context for the prompt
     context_str = "None" if previous_context is None else json.dumps(previous_context, indent=2)
-    
     # Format the prompt with all inputs
     joined_df.to_csv("joined_data.csv", index=False) 
-    table_desc = joined_df
+    table_desc = joined_df[joined_df.columns.tolist()[0:7]]
     formatted_prompt = prompt.format(
         question=query,
         table_desc=table_desc.to_csv(index=False),
@@ -246,8 +248,9 @@ transformation_logic: [Detailed transformation logic],
                 parsed_data = json.loads(json_str.group(1).strip())
             else:
                 parsed_data = json.loads(response.text.strip())
+            parsed_data["target_table"] = joined_df["table_name"].unique().tolist()
             json.dump(parsed_data,open('response.json',"w"), indent=2)
-
+            
             return parsed_data
         except json.JSONDecodeError as e:
             print(f"Error parsing JSON response: {e}")
@@ -259,17 +262,18 @@ transformation_logic: [Detailed transformation logic],
         return None
 
 
-def process_info(resolved_data, conn):
+def process_info(resolved_data, conn,target_sap_fields):
     """Process the resolved data to extract table information based on the specified JSON structure"""
     try:
         # Initialize result dictionary with only the requested fields
         result = {
             "source_table_name": resolved_data['source_table_name'],
             "source_field_names": resolved_data['source_field_names'],
-            "target_table_name": resolved_data['target_table_name'],
-            "target_sap_fields": resolved_data['target_sap_fields'],
+            "target_table_name": resolved_data['target_table'],
+            "target_sap_fields": target_sap_fields,
             "filtering_fields": resolved_data['filtering_fields'],
-            "transformation_logic": resolved_data['transformation_logic']
+            "transformation_logic": resolved_data['transformation_logic'],
+            "restructured_query": resolved_data['Resolved_query'],
         }
         
         # Add data samples from each source table (first 5 rows)
@@ -279,16 +283,8 @@ def process_info(resolved_data, conn):
                 f"SELECT {','.join(resolved_data['source_field_names'])} FROM {table} LIMIT 5", 
                 conn
             )
-            source_data[table] = source_df.to_dict('records')
+            source_data[table] = source_df
         result['source_data_samples'] = source_data
-        
-        # Add target table data sample (first 5 rows)
-        target_df = pd.read_sql_query(
-            f"SELECT {','.join(resolved_data['target_sap_fields'])} FROM {resolved_data['target_table_name']} LIMIT 5", 
-            conn
-        )
-        result['target_data_sample'] = target_df.to_dict('records')
-        
         return result
         
     except Exception as e:
@@ -342,7 +338,7 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
         conn.close()
         return None
     # Process the resolved data to get table information
-    results = process_info(resolved_data, conn)
+    results = process_info(resolved_data, conn, target_sap_fields)
     if not results:
         conn.close()
         return None

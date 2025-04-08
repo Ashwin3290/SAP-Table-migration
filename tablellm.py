@@ -46,7 +46,6 @@ class TableLLM:
             # Table information
             "source_table": resolved_data.get('source_table_name'),
             "target_table": resolved_data.get('target_table_name'),
-            "additional_sources": resolved_data.get('additional_source_table', []),
             
             # Field information
             "source_fields": resolved_data.get('source_field_names', []),
@@ -56,21 +55,23 @@ class TableLLM:
             
             # Data samples
             "source_data": {
-                "sample": resolved_data.get('source_info', pd.DataFrame()).head(3).to_dict('records'),
-                "describe": resolved_data.get('source_describe', {})
+                "sample": {k:v.head(3).to_dict('records') for k,v in resolved_data.get('source_data_samples', pd.DataFrame()).items()},
+                "describe": {k:v.describe().to_dict('records') for k,v in resolved_data.get('source_data_samples', pd.DataFrame()).items()}
             },
             "target_data": {
-                "sample": resolved_data.get('target_info', pd.DataFrame()).head(3).to_dict('records'),
-                "describe": resolved_data.get('target_describe', {})
+                "sample": resolved_data.get('target_data_samples', pd.DataFrame()).head(3).to_dict('records'),
+                "describe": resolved_data.get('target_data_samples', pd.DataFrame()).describe().to_dict()
             },
             
             # Query understanding
             "original_query": resolved_data.get('original_query', ''),
-            "restructured_query": resolved_data.get('restructured_question', ''),
+            "restructured_query": resolved_data.get('restructured_query', ''),
+
+            "transformation_logic" : resolved_data.get('transformation_logic', ''),
             
-            # Transformation history and context
-            "transformation_history": resolved_data.get('context', {}).get('transformation_history', []),
-            "target_table_state": resolved_data.get('context', {}).get('target_table_state', {}),
+            # # Transformation history and context
+            # "transformation_history": resolved_data.get('context', {}).get('transformation_history', []),
+            # "target_table_state": resolved_data.get('context', {}).get('target_table_state', {}),
             
             # Session information
             "session_id": resolved_data.get('session_id')
@@ -447,7 +448,7 @@ else:
         
         return cleaned_df
 
-    def process_sequential_query(self, query, object_id=29, segment_id=336, project_id=24, session_id=None, target_sap_field=None):
+    def process_sequential_query(self, query, object_id=29, segment_id=336, project_id=24, session_id=None, target_sap_fields=None):
         """
         Process a query as part of a sequential transformation
         With improved information flow from planner
@@ -462,20 +463,20 @@ else:
         Returns:
         tuple: (code, result, session_id)
         """
-        print(target_sap_field)
+        print(target_sap_fields)
         # 1. Process query with the planner
-        resolved_data = planner_process_query(object_id, segment_id, project_id, query, session_id,target_sap_field)
+        resolved_data = planner_process_query(object_id, segment_id, project_id, query, session_id,target_sap_fields)
         if not resolved_data:
             return None, "Failed to resolve query", session_id
-        
+        conn = sqlite3.connect('db.sqlite3')
+
         # 2. Extract and organize all relevant information from the planner
         resolved_data['original_query'] = query  # Add original query for context
+        resolved_data['target_data_samples'] = get_or_create_session_target_df(session_id, resolved_data['target_table_name'][0], conn).head()
         planner_info = self._extract_planner_info(resolved_data)
         # Get session ID from the results
         session_id = planner_info["session_id"]
         
-        # 3. Connect to database
-        conn = sqlite3.connect('db.sqlite3')
         
         # 4. Extract table names
         source_table = planner_info['source_table']
@@ -483,7 +484,9 @@ else:
         additional_tables = planner_info.get('additional_sources', [])
         
         # 5. Get source and target dataframes
-        source_df = pd.read_sql_query(f"SELECT * FROM {source_table}", conn)
+        source_df = {
+            table: pd.read_sql_query(f"SELECT * FROM {table}", conn) for table in planner_info["source_table"]
+        }
         target_df = get_or_create_session_target_df(session_id, target_table, conn)
         
         # 6. Prepare additional tables if present

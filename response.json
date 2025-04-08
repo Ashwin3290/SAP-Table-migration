@@ -4,15 +4,17 @@
   ],
   "source_field_names": [
     "MATNR",
-    "MEINS"
-  ],
-  "target_table_name": "Unnamed: 0",
-  "target_sap_fields": [
-    "PRODUCT",
-    "MEINS"
+    "MTART"
   ],
   "filtering_fields": [
     "MTART"
   ],
-  "transformation_logic": "Extract Material Number (MATNR) from the MARA table where the Material Type (MTART) is equal to 'ROH'. Load the extracted Material Number into the PRODUCT field of the target table."
+  "insertion_fields": [
+    "MATNR"
+  ],
+  "transformation_logic": "Extract the 'Product Number' (MATNR) from the 'MARA' table where the 'Product Type' (MTART) is equal to 'ROH'.",
+  "Resolved_query": "Extract Product Number from MARA table where Product Type is ROH.",
+  "target_table": [
+    "t_24_Product_Basic_Data_mandatory_Ext"
+  ]
 }
