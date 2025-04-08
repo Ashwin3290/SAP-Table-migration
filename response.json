@@ -9,5 +9,8 @@
   "filtering_fields": [
     "MTART"
   ],
-  "transformation_logic": "Extract Material Number (MATNR) from the MARA table where the Material Type (MTART) is equal to 'ROH'. Load the extracted Material Number into the PRODUCT field of the target table."
+  "insertion_fields": [
+    "PRODUCT"
+  ],
+  "transformation_logic": "Extract the Product Number (MATNR) from the MARA table where the Product Type (MTART) is equal to 'ROH'.\n\nIF MARA.MTART = 'ROH'\nTHEN insert MARA.MATNR into TargetTable.PRODUCT"
 }

@@ -175,17 +175,13 @@ CONTEXT DATA SCHEMA: {table_desc}
  
 USER QUERY: {question}
 
-Target Table: {target_table_desc}
-(Take into consideration the target table and its fields, to give transformation logic)
-
 INSTRUCTIONS:
 1. Identify key entities in the query:
    - Source table(s)
    - Source field(s)
-   - Target table(s)
-   - Target field(s)
    - Filtering or transformation conditions
    - Logical flow (IF/THEN/ELSE statements)
+   - insertion fields
  
 2. Match these entities to the corresponding entries in the joined_data.csv schema
    - For each entity, find the closest match in the schema
@@ -199,6 +195,8 @@ INSTRUCTIONS:
    - Handle fallback scenarios (ELSE conditions)
  
 4. Provide a summary of the identified transformation in both natural language and structured format.
+
+5. For the insertion fields, identify the fields that need to be inserted into the target table based on the transformation logic.Take note to not add the filetring fields to the insertion fields if not specifically requested.
  
 Respond with:
 ```json
@@ -206,6 +204,7 @@ Respond with:
 source_table_name: [List of all source_tables],
 source_field_names: [List of all source_fields],
 filtering_fields: [List of filtering fields],
+insertion_fields: [List of fields to be inserted],
 transformation_logic: [Detailed transformation logic],
 }}
 ```
@@ -217,12 +216,9 @@ transformation_logic: [Detailed transformation logic],
     # Format the prompt with all inputs
     # joined_df.to_csv("joined_data.csv", index=False) 
     table_desc = joined_df
-    target_table_desc = pd.read_csv("2025-04-07T06-57_export.csv")
     formatted_prompt = prompt.format(
         question=query,
         table_desc=table_desc.to_csv(index=False),
-        previous_context=context_str,
-        target_table_desc = target_table_desc.to_csv(index=False)
     )
     
     # Call Gemini API with token tracking
@@ -251,6 +247,7 @@ transformation_logic: [Detailed transformation logic],
             else:
                 parsed_data = json.loads(response.text.strip())
             json.dump(parsed_data,open('response.json',"w"), indent=2)
+
             return parsed_data
         except json.JSONDecodeError as e:
             print(f"Error parsing JSON response: {e}")
@@ -345,7 +342,6 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
         conn.close()
         return None
     # Process the resolved data to get table information
-    json.dump(resolved_data,open('resolved_data.json',"w"), indent=2)
     results = process_info(resolved_data, conn)
     if not results:
         conn.close()
