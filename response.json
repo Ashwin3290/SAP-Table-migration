@@ -2,18 +2,13 @@
   "source_table_name": [
     "MARA"
   ],
-  "source_field_names": [
-    "MATNR",
-    "MTART"
-  ],
+  "source_field_names": [],
   "filtering_fields": [
-    "MTART"
+    "Product Group"
   ],
-  "insertion_fields": [
-    "MATNR"
-  ],
-  "transformation_logic": "Extract the 'Product Number' (MATNR) from the 'MARA' table where the 'Product Type' (MTART) is equal to 'ROH'.",
-  "Resolved_query": "Extract Product Number from MARA table where Product Type is ROH.",
+  "insertion_fields": [],
+  "transformation_logic": "IF Product Group in ( L002, ZMGRP1,202R ) THEN 'GENAI01' ELSE IF Product Group in ( '01','L001','ZSUK1RM1') THEN 'GENAI02' ELSE IF Product Group in ( 'CH001','02') THEN 'GenAI03' ELSE 'GenAINo'",
+  "Resolved_query": "IF Product Group in MARA table is one of ( L002, ZMGRP1,202R ) THEN assign value 'GENAI01'. ELSE, IF Product Group is one of ( '01','L001','ZSUK1RM1') THEN assign value 'GENAI02'. ELSE, IF Product Group is one of ( 'CH001','02') THEN assign value 'GenAI03'. ELSE assign 'GenAINo'.",
   "target_table": [
     "t_24_Product_Basic_Data_mandatory_Ext"
   ]

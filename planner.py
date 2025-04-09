@@ -79,6 +79,24 @@ class ContextualSessionManager:
         
         return context["context"]["transformation_history"]
 
+    def add_key_mapping(self, session_id, target_col,source_col):
+        file_path = f"{self.storage_path}/{session_id}/key_mapping.json"
+        if not os.path.exists(file_path):
+            key_mappings = []
+        else:
+            with open(file_path, "r") as f:
+                key_mappings = json.load(f)
+        key_mappings.append({"target_col": target_col, "source_col": source_col})
+        with open(file_path, "w") as f:
+            json.dump(key_mappings, f, indent=2)
+        return key_mappings
+        
+    def get_key_mapping(self, session_id):
+        file_path = f"{self.storage_path}/{session_id}/key_mapping.json"
+        if not os.path.exists(file_path):
+            return []
+        with open(file_path, "r") as f:
+            return json.load(f)
 
 def fetch_data_by_ids(object_id, segment_id, project_id, conn):  
     """Fetch data mappings from the database"""
@@ -199,6 +217,9 @@ INSTRUCTIONS:
 5. For the insertion fields, identify the fields that need to be inserted into the target table based on the transformation logic.Take note to not add the filetring fields to the insertion fields if not specifically requested.
 
 6. Restructure the user query with resolved data and transformation logic.
+
+Note:
+- if the user says about something that previous transformations, use target table as a way to know what is already done.
  
 Respond with:
 ```json
@@ -217,7 +238,7 @@ Respond with:
     context_str = "None" if previous_context is None else json.dumps(previous_context, indent=2)
     # Format the prompt with all inputs
     joined_df.to_csv("joined_data.csv", index=False) 
-    table_desc = joined_df[joined_df.columns.tolist()[0:7]]
+    table_desc = joined_df[joined_df.columns.tolist()[1:7]]
     formatted_prompt = prompt.format(
         question=query,
         table_desc=table_desc.to_csv(index=False),
@@ -274,6 +295,7 @@ def process_info(resolved_data, conn,target_sap_fields):
             "filtering_fields": resolved_data['filtering_fields'],
             "transformation_logic": resolved_data['transformation_logic'],
             "restructured_query": resolved_data['Resolved_query'],
+            "insertion_fields": resolved_data['insertion_fields']
         }
         
         # Add data samples from each source table (first 5 rows)
@@ -320,7 +342,6 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
     
     # Fetch mapping data
     joined_df = fetch_data_by_ids(object_id, segment_id, project_id, conn)
-    print(joined_df.head())
     # Handle missing values in the dataframe
     joined_df = missing_values_handling(joined_df)
     # Check if joined_df is emptys
@@ -339,11 +360,19 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
         return None
     # Process the resolved data to get table information
     results = process_info(resolved_data, conn, target_sap_fields)
+
+    if joined_df[joined_df["target_sap_field"] == target_sap_fields]["isKey"].values[0] == "True":
+        key_mapping = context_manager.add_key_mapping(session_id, target_sap_fields,results["insertion_fields"][0])
+    else:
+        key_mapping = context_manager.get_key_mapping(session_id)
+
+    results["key_mapping"] = key_mapping
+    
     if not results:
         conn.close()
         return None
     # Update the context in our session manager
-    context_manager.update_context(session_id, resolved_data)
+    # context_manager.update_context(session_id, resolved_data)
     
     # Add session_id to the results
     results["session_id"] = session_id
@@ -410,22 +439,22 @@ def save_session_target_df(session_id, target_df:pd.DataFrame):
     
     return True
 
-if __name__ == "__main__":
-    # Example usage
-    conn = sqlite3.connect('db.sqlite3')
-    object_id = 41
-    segment_id = 577
-    project_id = 24
-    query = """Check Materials which you have got from Transaofmration rule In MARA_500 table and
-IF
-matching Entries found, then bring Unit of Measure   field from MARA_500 table to the Target Table
-ELSE,
-If no entries found in MARA_500, then check ROH  Material  ( found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure
-ELSE,
-If no entries found in MARA_700, then bring the Unit of measure from MARA table
+# if __name__ == "__main__":
+#     # Example usage
+#     conn = sqlite3.connect('db.sqlite3')
+#     object_id = 41
+#     segment_id = 577
+#     project_id = 24
+#     query = """Check Materials which you have got from Transaofmration rule In MARA_500 table and
+# IF
+# matching Entries found, then bring Unit of Measure   field from MARA_500 table to the Target Table
+# ELSE,
+# If no entries found in MARA_500, then check ROH  Material  ( found in Transformation 2 ) in MARA_700 Table and bring the Unit of Measure
+# ELSE,
+# If no entries found in MARA_700, then bring the Unit of measure from MARA table
 
-"""
+# """
     
-    # Process the query and get results
-    results = process_query(object_id, segment_id, project_id, query)
-    print(results)
+#     # Process the query and get results
+#     results = process_query(object_id, segment_id, project_id, query)
+#     print(results)

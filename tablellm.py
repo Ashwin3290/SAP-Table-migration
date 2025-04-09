@@ -66,7 +66,7 @@ class TableLLM:
             # Query understanding
             "original_query": resolved_data.get('original_query', ''),
             "restructured_query": resolved_data.get('restructured_query', ''),
-
+            "key_columns": resolved_data.get('key_mapping', []),
             "transformation_logic" : resolved_data.get('transformation_logic', ''),
             
             # # Transformation history and context
@@ -134,9 +134,9 @@ Filter fields: {planner_info['filtering_fields']}
 Insertion fields: {planner_info['insertion_fields']}
 
 
-TRANSFORMATION CONTEXT:
-Previously populated fields: {planner_info['target_table_state'].get('populated_fields', [])}
-Previously completed transformations: {len(planner_info['transformation_history'])}
+# TRANSFORMATION CONTEXT:
+# Previously populated fields: {planner_info['target_table_state'].get('populated_fields', [])}
+# Previously completed transformations: {len(planner_info['transformation_history'])}
 
 EXTRACTED CONDITIONS:
 {json.dumps(planner_info['extracted_conditions'], indent=2)}
@@ -152,7 +152,7 @@ Return ONLY the classification name with no explanation.
         return response.text.strip()
     
     @track_token_usage()
-    def _generate_simple_plan(self, query_type, planner_info):
+    def _generate_simple_plan(self, planner_info):
         """
         Generate a simple, step-by-step plan in natural language
         Uses comprehensive planner information
@@ -169,22 +169,30 @@ Return ONLY the classification name with no explanation.
         if planner_info["extracted_conditions"]:
             conditions_str = json.dumps(planner_info["extracted_conditions"], indent=2)
         
+        if planner_info["key_columns"]:
+            keys_in_use = {}
+            for target,source in planner_info["key_columns"]:
+                if source in planner_info["source_fields"] and target in planner_info["target_fields"]:
+                    keys_in_use[target] = source
+        else:
+            keys_in_use = {}
+        
         # Add context from transformation history
-        history_context = ""
-        if planner_info["transformation_history"]:
-            last_transform = planner_info["transformation_history"][-1]
-            history_context = f"""
-Last transformation: {last_transform.get('description', 'Unknown')}
-Fields modified: {last_transform.get('fields_modified', [])}
-Filter conditions used: {json.dumps(last_transform.get('filter_conditions', {}))}
-"""
-        print(planner_info)
+#         history_context = ""
+#         if planner_info["transformation_history"]:
+#             last_transform = planner_info["transformation_history"][-1]
+#             history_context = f"""
+# Last transformation: {last_transform.get('description', 'Unknown')}
+# Fields modified: {last_transform.get('fields_modified', [])}
+# Filter conditions used: {json.dumps(last_transform.get('filter_conditions', {}))}
+# """
         # Generate prompt with different templates based on query type
         base_prompt = f"""
-Create a simplified step-by-step plan for code that will perform a {query_type} operation.
+Create a simplified step-by-step plan for code that will perform a  operation.
 
 QUERY DETAILS:
 User's intent: {planner_info['restructured_query']}
+Transformation logic: {planner_info['transformation_logic']}
 Source table: {planner_info['source_table']}
 Target table: {planner_info['target_table']}
 Source field(s): {source_fields}
@@ -194,37 +202,21 @@ Filtering conditions: {conditions_str}
 Insertion field(s): {planner_info['insertion_fields']}
 
 Current state of target table:
-- Populated fields: {planner_info['target_table_state'].get('populated_fields', [])}
-- Remaining fields: {planner_info['target_table_state'].get('remaining_mandatory_fields', [])}
+Target data sample: {json.dumps(planner_info['target_data'], indent=2)}
 
+Primary key mapping: {json.dumps(keys_in_use, indent=2)}
+Primary key Mapping is given in target_field:source_field format
 Note:
-1. Only update a the Insertion field in the target table do not add anything else
-2. Use the source table for the initial data 
-3. Do not add any additional fields to the target table
+1. Only update the Insertion field in the target table do not add anything else
+2. Use the Provided key mapping so to map the filtered values to the actual primary key of the target table
+3. Add the condition where the source key matches to target key
+3. Use the source table for the initial data 
+4. Do not add any additional fields to the target table
 
-SAMPLE DATA:
-Source data sample: {json.dumps(planner_info['source_data']['sample'][:2], indent=2)}
-Target data sample: {json.dumps(planner_info['target_data']['sample'][:2], indent=2)}
-"""
+Source Data:
+Source data sample: {json.dumps(planner_info['source_data'], indent=2)}
 
-        # Add query-type specific prompting
-        if query_type == "CONDITIONAL_MAPPING":
-            base_prompt += """
-For CONDITIONAL_MAPPING, include steps that:
-1. Identify all the conditions mentioned in the query
-2. Define a clear mapping from conditions to output values
-3. Explain how to apply the conditions in the right order
-4. Handle the default case
-"""
-        elif query_type == "TIERED_LOOKUP":
-            base_prompt += """
-For TIERED_LOOKUP, include steps that:
-1. Define the lookup order across multiple tables
-2. Specify what to do when a match is found in each table
-3. Handle the case when no matches are found in any table
-"""
-        
-        base_prompt += """
+
 Write ONLY simple, clear steps that a code generator must follow exactly, like this example:
 1. Make copy of the source dataframe 
 2. Filter rows where MTART value is ROH
@@ -241,14 +233,14 @@ Your steps (numbered, 5-10 steps maximum):
             model="gemini-2.0-flash-thinking-exp-01-21",
             contents=base_prompt
         )
-        
+        print(response.text)
         return response.text.strip()
 
     @track_token_usage()
     def _generate_code_from_simple_plan(self, simple_plan, planner_info):
         """
         Generate code based on a simple, step-by-step plan
-        With improved context from planner
+        With improved context from planner and support for multiple source tables
         """
         # Extract key information
         source_fields = planner_info["source_fields"]
@@ -263,108 +255,108 @@ Your steps (numbered, 5-10 steps maximum):
             # Convert the extracted conditions to pandas filter syntax
             for field, value in planner_info["extracted_conditions"].items():
                 if isinstance(value, list):
-                    conditions = [f"df1['{field}'] == '{v}'" for v in value]
+                    conditions = [f"source_dfs['{planner_info['source_table'][0]}']['{field}'] == '{v}'" for v in value]
                     filter_conditions.append(f"({' | '.join(conditions)})")
                 else:
-                    filter_conditions.append(f"df1['{field}'] == '{value}'")
+                    filter_conditions.append(f"source_dfs['{planner_info['source_table'][0]}']['{field}'] == '{value}'")
         
         # Use a default condition if none found
         if not filter_conditions:
-            filter_conditions = ["df1[df1.columns[0]] != ''"]  # Default condition that selects all rows
+            filter_conditions = ["source_dfs[source_tables[0]][source_dfs[source_tables[0]].columns[0]] != ''"]  # Default condition that selects all rows
         
         filter_condition_str = " & ".join(filter_conditions)
         
-        # Determine if there are multiple source tables to handle
-        additional_tables = planner_info.get("additional_sources", [])
-        additional_tables_handling = ""
-        if additional_tables and isinstance(additional_tables, list) and len(additional_tables) > 0:
-            additional_tables_handling = f"""
-# The additional_tables parameter contains these tables: {additional_tables}
-# Access them like this: additional_tables['{additional_tables[0]}']
-# Make sure to check if they exist before using them:
-if additional_tables and '{additional_tables[0]}' in additional_tables:
-    secondary_table = additional_tables['{additional_tables[0]}']
-    # Use the secondary table for lookups
-"""
-
+        # Handle multiple source tables
+        source_tables_str = json.dumps(planner_info['source_table'])
+        
         # Create template with the simple plan as a guide and extensive context
         prompt = f"""
-Write Python code that follows these EXACT steps:
+    Write Python code that follows these EXACT steps:
 
-{simple_plan}
+    {simple_plan}
 
-DETAILED INFORMATION:
-- Source table: {planner_info['source_table']}
-- Target table: {planner_info['target_table']}
-- Source field(s): {source_fields}
-- Target field(s): {target_fields}
-- Filter condition to use: {filter_condition_str}
-{additional_tables_handling}
+    DETAILED INFORMATION:
+    - Source tables: {source_tables_str}
+    - Target table: {planner_info['target_table']}
+    - Source field(s): {source_fields}
+    - Target field(s): {target_fields}
+    - Filter condition example: {filter_condition_str}
+    - Key mapping: {planner_info.get('key_columns', [])}
 
-SAMPLE DATA:
-Source data sample: {json.dumps(planner_info['source_data']['sample'][:2], indent=2)}
-Target data sample: {json.dumps(planner_info['target_data']['sample'][:2], indent=2)}
+    SAMPLE DATA:
+    Source data samples:
+    {json.dumps(planner_info['source_data']['sample'], indent=2)}
 
-REQUIREMENTS:
-1. Follow the steps PRECISELY in order
-2. Handle both empty and non-empty target dataframes
-3. Handle additional tables correctly if they're provided
-4. Return the modified target dataframe (df2)
-5. Use numpy for conditional logic if needed (already imported as np)
-6. If you dont find target_field in target_table but it is present in the sample data then add the column to the target table
+    Target data sample:
+    {json.dumps(planner_info['target_data']['sample'], indent=2)}
 
-Complete this function:
-```python
-def analyze_data(df1, df2, additional_tables=None):
-    # Your implementation of the steps above
+    REQUIREMENTS:
+    1. Follow the steps PRECISELY in order
+    2. Handle both empty and non-empty target dataframes
+    3. Handle multiple source tables correctly - they are provided as a dictionary where keys are table names
+    4. Return the modified target dataframe (df2)
+    5. Use numpy for conditional logic if needed (already imported as np)
+    6. If you don't find target_field in target_table but it is present in the sample data then add the column to the target table
+    7. Use the key mapping to match records between source and target tables
+
+    Complete this function:
     
-    # Make sure to return the modified df2
-    return df2
-```
-
-Return ONLY the complete Python function:
-"""
+    def analyze_data(source_dfs, target_df):
+        # source_dfs is a dictionary where keys are table names and values are dataframes
+        # Example: source_dfs = {{'table1': df1, 'table2': df2}}
+        # target_df is the target dataframe to update
         
+        # Get list of source tables for easier reference
+        source_tables = list(source_dfs.keys())
+        
+        # Your implementation of the steps above
+        
+        # Make sure to return the modified target_df
+        return target_df
+    Return ONLY the complete Python function: """
+            
         response = self.client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.0-flash-thinking-exp-01-21",
             contents=prompt
         )
-        
+
         # Extract the code
         import re
-        code_match = re.search(r'```python\s*(.*?)\s*```', response.text, re.DOTALL)
+        code_match = re.search(r'python\s*(.*?)\s*```', response.text, re.DOTALL)
         if code_match:
             return code_match.group(1)
         else:
             # If no code block, try to extract the function
             function_match = re.search(r'def analyze_data.*?return', response.text, re.DOTALL)
             if function_match:
-                return function_match.group(0) + " df2"  # Add return value if missing
+                return function_match.group(0) + " target_df"  # Add return value if missing
             return response.text
 
     def _initialize_templates(self):
-        """Initialize code templates for common operations"""
+        """Initialize code templates for common operations with support for multiple source tables"""
         return {
             "filter": """
 # Filter source data based on condition
+source_table = '{source_table}'
 mask = {filter_condition}
-filtered_df = df1[mask].copy()
+filtered_df = source_dfs[source_table][mask].copy()
 """,
             "update": """
-# Create a copy of df2 to avoid modifying the original
-result = df2.copy()
+# Create a copy of target_df to avoid modifying the original
+result = target_df.copy()
+source_table = '{source_table}'
 
 # Check if target table is empty
 if len(result) == 0:
     # For empty target, create a new dataframe with necessary columns
     # and only the data we need from source
-    key_data = df1[['{key_field}']].copy()
-    key_data['{target_field}'] = df1['{source_field}']
+    key_data = source_dfs[source_table][['{key_field}']].copy()
+    key_data['{target_field}'] = source_dfs[source_table]['{source_field}']
     return key_data
 else:
     # For non-empty target, update only the target field
     # Find matching rows using the key field
-    for idx, row in df1.iterrows():
+    for idx, row in source_dfs[source_table].iterrows():
         # Get the key value
         key_value = row['{key_field}']
         
@@ -378,14 +370,15 @@ else:
     return result
 """,
             "conditional_mapping": """
-# Create a copy of df2 to avoid modifying the original
-result = df2.copy()
+# Create a copy of target_df to avoid modifying the original
+result = target_df.copy()
+source_table = '{source_table}'
 
 # Check if target table is empty
 if len(result) == 0:
     # For empty target, we need to create initial structure with key fields
     # and apply our conditional logic directly to the source data
-    key_data = df1[['{key_field}']].copy()
+    key_data = source_dfs[source_table][['{key_field}']].copy()
     
     # Define conditions and choices
     conditions = [
@@ -410,7 +403,10 @@ else:
     default = '{default_value}'
     
     # Create temporary mapping from source data
-    source_mapping = pd.Series(index=df1['{key_field}'], data=np.select(conditions, choices, default=default))
+    source_mapping = pd.Series(
+        index=source_dfs[source_table]['{key_field}'], 
+        data=np.select(conditions, choices, default=default)
+    )
     
     # Apply mapping to target based on key field
     for idx, row in result.iterrows():
@@ -451,7 +447,7 @@ else:
     def process_sequential_query(self, query, object_id=29, segment_id=336, project_id=24, session_id=None, target_sap_fields=None):
         """
         Process a query as part of a sequential transformation
-        With improved information flow from planner
+        With improved information flow from planner and support for multiple source tables
         
         Parameters:
         query (str): The user's query
@@ -459,61 +455,54 @@ else:
         segment_id (int): Segment ID for mapping
         project_id (int): Project ID for mapping
         session_id (str): Optional session ID, creates new session if None
+        target_sap_fields (list): Optional list of target SAP fields
         
         Returns:
         tuple: (code, result, session_id)
         """
-        print(target_sap_fields)
+
         # 1. Process query with the planner
-        resolved_data = planner_process_query(object_id, segment_id, project_id, query, session_id,target_sap_fields)
+        resolved_data = planner_process_query(object_id, segment_id, project_id, query, session_id, target_sap_fields)
         if not resolved_data:
             return None, "Failed to resolve query", session_id
         conn = sqlite3.connect('db.sqlite3')
 
         # 2. Extract and organize all relevant information from the planner
         resolved_data['original_query'] = query  # Add original query for context
-        resolved_data['target_data_samples'] = get_or_create_session_target_df(session_id, resolved_data['target_table_name'][0], conn).head()
+        resolved_data['target_data_samples'] = get_or_create_session_target_df(
+            session_id, 
+            resolved_data['target_table_name'][0] if isinstance(resolved_data['target_table_name'], list) else resolved_data['target_table_name'], 
+            conn
+        ).head()
         planner_info = self._extract_planner_info(resolved_data)
+        
         # Get session ID from the results
         session_id = planner_info["session_id"]
         
+        # 3. Extract table names
+        source_tables = planner_info['source_table']
+        target_table = planner_info['target_table'][0] if isinstance(planner_info['target_table'], list) else planner_info['target_table']
         
-        # 4. Extract table names
-        source_table = planner_info['source_table']
-        target_table = planner_info['target_table']
-        additional_tables = planner_info.get('additional_sources', [])
+        # 4. Get source and target dataframes
+        source_dfs = {}
+        for table in source_tables:
+            source_dfs[table] = pd.read_sql_query(f"SELECT * FROM {table}", conn)
         
-        # 5. Get source and target dataframes
-        source_df = {
-            table: pd.read_sql_query(f"SELECT * FROM {table}", conn) for table in planner_info["source_table"]
-        }
         target_df = get_or_create_session_target_df(session_id, target_table, conn)
         
-        # 6. Prepare additional tables if present
-        additional_source_tables = None
-        if additional_tables:
-            additional_source_tables = {}
-            for table in additional_tables:
-                if table and table.lower() != "none":
-                    additional_source_tables[table] = pd.read_sql_query(f"SELECT * FROM {table}", conn)
-        
-        # 7. Generate query classification with context
-        query_type = self._classify_query(query, planner_info)
-        logger.info(f"Query classified as: {query_type}")
-        
-        # 8. Generate a simple, step-by-step plan in natural language
-        simple_plan = self._generate_simple_plan(query_type, planner_info)
+        # 5. Generate a simple, step-by-step plan in natural language
+        simple_plan = self._generate_simple_plan(planner_info)
         logger.info(f"Simple plan generated: {simple_plan}")
         
-        # 9. Generate code from the simple plan with full context
+        # 6. Generate code from the simple plan with full context
         code_content = self._generate_code_from_simple_plan(simple_plan, planner_info)
         logger.info(f"Code generated with context: {len(code_content)} chars")
         
-        # 10. Execute the generated code
+        # 7. Execute the generated code
         code_file = create_code_file(code_content, query, is_double=True)
-        result = execute_code(code_file, (source_df, target_df), additional_tables=additional_source_tables, is_double=True)
+        result = execute_code(code_file, source_dfs, target_df)
         
-        # 11. Save the updated target dataframe if it's a DataFrame
+        # 8. Save the updated target dataframe if it's a DataFrame
         if isinstance(result, pd.DataFrame):
             result = self.post_proccess_result(result)
             save_session_target_df(session_id, result)

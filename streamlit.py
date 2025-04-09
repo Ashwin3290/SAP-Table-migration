@@ -196,7 +196,8 @@ with col1:
                 
                 if columns:
                     # Create a searchable select box for columns
-                    column_options = [col[1] for col in columns]  # col[1] is the column name
+                    column_options = [col[1] for col in columns]
+                    print(column_options)  # col[1] is the column name
                     selected_columns = st.selectbox(
                         f"Select columns from {target_table}",
                         options=column_options, # Show all columns selected by default
