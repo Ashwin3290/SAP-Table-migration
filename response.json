@@ -1,15 +1,65 @@
 {
   "source_table_name": [
-    "MARA"
+    "MARA",
+    "MARA_500",
+    "MARA_700"
   ],
-  "source_field_names": [],
+  "source_field_names": [
+    "MATNR",
+    "MTART"
+  ],
   "filtering_fields": [
-    "Product Group"
+    "MTART"
   ],
-  "insertion_fields": [],
-  "transformation_logic": "IF Product Group in ( L002, ZMGRP1,202R ) THEN 'GENAI01' ELSE IF Product Group in ( '01','L001','ZSUK1RM1') THEN 'GENAI02' ELSE IF Product Group in ( 'CH001','02') THEN 'GenAI03' ELSE 'GenAINo'",
-  "Resolved_query": "IF Product Group in MARA table is one of ( L002, ZMGRP1,202R ) THEN assign value 'GENAI01'. ELSE, IF Product Group is one of ( '01','L001','ZSUK1RM1') THEN assign value 'GENAI02'. ELSE, IF Product Group is one of ( 'CH001','02') THEN assign value 'GenAI03'. ELSE assign 'GenAINo'.",
+  "insertion_fields": [
+    "MTART"
+  ],
+  "transformation_logic": {
+    "steps": [
+      {
+        "step": 1,
+        "description": "Check if material type is 'ROH' in MARA_500 table for the given product number.",
+        "source_table": "MARA_500",
+        "condition": "MARA_500.MTART = 'ROH' AND MARA_500.MATNR = target.PRODUCT",
+        "action": "If a matching entry is found, retrieve the material type (MTART) from MARA_500 and update the target table.",
+        "target_field": "MEINS",
+        "source_field": "MTART",
+        "mapping": "MEINS:MTART"
+      },
+      {
+        "step": 2,
+        "description": "If no matching entry is found in MARA_500, check if material type is 'ROH' in MARA_700 table for the given product number.",
+        "source_table": "MARA_700",
+        "condition": "MARA_500 is empty AND MARA_700.MTART = 'ROH' AND MARA_700.MATNR = target.PRODUCT",
+        "action": "If a matching entry is found, retrieve the material type (MTART) from MARA_700 and update the target table.",
+        "target_field": "MEINS",
+        "source_field": "MTART",
+        "mapping": "MEINS:MTART"
+      },
+      {
+        "step": 3,
+        "description": "If no matching entry is found in MARA_500 or MARA_700, retrieve the material type (MTART) from MARA table for the given product number.",
+        "source_table": "MARA",
+        "condition": "MARA_500 is empty AND MARA_700 is empty AND MARA.MATNR = target.PRODUCT",
+        "action": "Retrieve the material type (MTART) from MARA and update the target table.",
+        "target_field": "MEINS",
+        "source_field": "MTART",
+        "mapping": "MEINS:MTART"
+      }
+    ]
+  },
+  "Resolved_query": "For each product in the target table, check the MARA_500 table for entries where the material type (MTART) is 'ROH' and the material number (MATNR) matches the product number. If a match is found, update the target table with the material type from MARA_500. If no match is found in MARA_500, repeat the process with the MARA_700 table. If no match is found in either MARA_500 or MARA_700, retrieve the material type from the MARA table and update the target table.",
   "target_table": [
     "t_24_Product_Basic_Data_mandatory_Ext"
+  ],
+  "key_mapping": [
+    {
+      "target_col": "PRODUCT",
+      "source_col": "MATNR"
+    },
+    {
+      "target_col": "PRODUCT",
+      "source_col": "PRODUCT"
+    }
   ]
 }

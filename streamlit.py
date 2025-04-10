@@ -8,6 +8,7 @@ from datetime import datetime
 
 from code_exec import save_file
 from tablellm import TableLLM
+from tablellm import get_session_context
 
 # Page configuration
 st.set_page_config(
@@ -148,7 +149,7 @@ with col1:
     
     # Display current session info
     if st.session_state['transformation_session_id']:
-        session_info = tablellm.get_session_info(st.session_state['transformation_session_id'])
+        session_info = get_session_context(st.session_state['transformation_session_id'])
         
         st.markdown("### Current Session")
         st.markdown(f"""
@@ -259,7 +260,7 @@ with col2:
                 st.session_state['transformation_session_id'] = session_id
             
             # Get updated session info
-            session_info = tablellm.get_session_info(session_id)
+            session_info = get_session_context(session_id)
             
             # Add to history
             st.session_state['transformation_history'].append({
@@ -328,7 +329,7 @@ with col2:
 #     if st.session_state['transformation_session_id']:
 #         st.markdown("---")
 #         st.markdown("### Context Information")
-#         session_info = tablellm.get_session_info(st.session_state['transformation_session_id'])
+#         session_info = get_session_context(st.session_state['transformation_session_id'])
         
 #         # Display target table state
 #         st.markdown("#### Target Table State")
