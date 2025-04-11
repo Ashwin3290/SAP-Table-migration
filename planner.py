@@ -327,7 +327,7 @@ def missing_values_handling(df):
                 if fill_indices.any():
                     df_processed.loc[fill_indices, 'source_field_name'] = df_processed.loc[fill_indices, 'target_sap_field']
                     logger.info(f"Filled {fill_indices.sum()} nulls in source_field_name from target_sap_field")
-        
+    
         return df_processed
     except Exception as e:
         logger.error(f"Error in missing_values_handling: {e}")
@@ -479,7 +479,7 @@ def parse_data_with_context(joined_df, query, session_id=None, previous_context=
         table_desc = joined_df[joined_df.columns.tolist()[1:7]]
         formatted_prompt = prompt.format(
             question=query,
-            table_desc=table_desc.to_csv(index=False),
+            table_desc=list(table_desc.itertuples(index=False)),
             key_mapping=key_mapping_str,
             target_df_sample=target_df_sample_str
         )
