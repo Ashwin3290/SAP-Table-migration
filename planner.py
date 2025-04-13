@@ -12,6 +12,8 @@ from google import genai
 from google.genai import types
 from token_tracker import track_token_usage, get_token_usage_stats
 from pathlib import Path
+import spacy
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -55,6 +57,47 @@ def validate_sql_identifier(identifier):
         raise SQLInjectionError("SQL identifier contains invalid characters")
     
     return identifier
+
+def check_distinct_requirement(sentence):
+    """
+    Analyzes a sentence to determine if it contains words semantically similar to 'distinct' or 'unique',
+    which would indicate a need for DISTINCT in SQL queries.
+    
+    Args:
+        sentence (str): The input sentence/query to analyze
+        
+    Returns:
+        bool: True if the sentence likely requires distinct values, False otherwise
+    """
+    # Load the spaCy model - using the medium English model for better word vectors
+    nlp = spacy.load("en_core_web_md")
+    
+    # Process the input sentence
+    doc = nlp(sentence.lower())
+    
+    # Target words we're looking for similarity to
+    target_words = ["distinct", "unique", "different", "individual", "separate"]
+    target_docs = [nlp(word) for word in target_words]
+    
+    similarity_threshold = 0.9
+    
+    direct_keywords = ["distinct", "unique", "duplicates", "duplicate", "duplicated", "deduplicate", "deduplication"]
+    for token in doc:
+        if token.text in direct_keywords:
+            return True
+    
+    for token in doc:
+        if token.is_stop or token.is_punct:
+            continue
+        
+        # Check similarity with each target word
+        for target_doc in target_docs:
+            similarity = token.similarity(target_doc[0])
+            if similarity > similarity_threshold:
+                return True
+    
+    return False
+
 
 class ContextualSessionManager:
     """
@@ -193,7 +236,8 @@ class ContextualSessionManager:
                     key_mappings = []
             
             # Add the new mapping
-            key_mappings.append({"target_col": target_col, "source_col": source_col})
+            if not any(mapping for mapping in key_mappings if mapping["target_col"] == target_col and mapping["source_col"] == source_col):
+                key_mappings.append({"target_col": target_col, "source_col": source_col})
             
             # Save the updated mappings
             with open(file_path, "w") as f:
@@ -430,7 +474,6 @@ def parse_data_with_context(joined_df, query, session_id=None, previous_context=
     - Use the key mappings to determine the relationship between source and target fields (format is target_field:source_field).
     - Consider the current state of the target table when determining what needs to be inserted or updated.
     - if the user says about something that previous transformations, use target table as a way to know what is already done.
-     
     Respond with:
     ```json
     {{
@@ -556,6 +599,188 @@ def parse_data_with_context(joined_df, query, session_id=None, previous_context=
         logger.error(f"Error in parse_data_with_context: {e}")
         return None
 
+def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
+    """
+    Process a query with context awareness
+    
+    Parameters:
+    object_id (int): Object ID
+    segment_id (int): Segment ID
+    project_id (int): Project ID
+    query (str): The natural language query
+    session_id (str): Optional session ID for context tracking
+    target_sap_fields (str/list): Optional target SAP fields
+    
+    Returns:
+    dict: Processed information including context or None if key validation fails
+    """
+    conn = None
+    try:
+        # Validate inputs
+        if not query or not isinstance(query, str):
+            logger.error(f"Invalid query: {query}")
+            return None
+            
+        # Validate IDs
+        if not all(isinstance(x, int) for x in [object_id, segment_id, project_id]):
+            logger.error(f"Invalid ID types: object_id={type(object_id)}, segment_id={type(segment_id)}, project_id={type(project_id)}")
+            return None
+        
+        # Initialize context manager
+        context_manager = ContextualSessionManager()
+        
+        # Create a session if none provided
+        if not session_id:
+            session_id = context_manager.create_session()
+            logger.info(f"Created new session: {session_id}")
+        
+        # Get existing context
+        previous_context = context_manager.get_context(session_id)
+        
+        # Connect to database
+        conn = sqlite3.connect('db.sqlite3')
+        
+        # Fetch mapping data
+        joined_df = fetch_data_by_ids(object_id, segment_id, project_id, conn)
+        
+        # Check if joined_df is empty
+        if joined_df.empty:
+            logger.error(f"No data found for object_id={object_id}, segment_id={segment_id}, project_id={project_id}")
+            if conn:
+                conn.close()
+            return None
+        
+        # Handle missing values in the dataframe
+        joined_df = missing_values_handling(joined_df)
+        
+        # Save joined data for debugging
+        try:
+            joined_df.to_csv("joined_data.csv", index=False)
+        except Exception as e:
+            logger.warning(f"Failed to save joined_data.csv: {e}")
+        
+        # Process query with context awareness
+        resolved_data = parse_data_with_context(
+            joined_df, 
+            query,
+            session_id,  # Pass session_id to access key mappings and target data
+            previous_context.get("context") if previous_context else None
+        )
+        
+        if not resolved_data:
+            logger.error("Failed to resolve query")
+            if conn:
+                conn.close()
+            return None
+            
+        # Process the resolved data to get table information
+        results = process_info(resolved_data, conn, target_sap_fields)
+        
+        if not results:
+            logger.error("Failed to process resolved data")
+            if conn:
+                conn.close()
+            return None
+        
+        # Process key mapping with error handling and primary key validation
+        key_mapping = []
+        try:
+            # Check if we have a target field and it's a key
+            target_field_filter = joined_df["target_sap_field"] == target_sap_fields
+            if target_field_filter.any() and joined_df[target_field_filter]["isKey"].values[0] == "True":
+                # We're working with a primary key field
+                logger.info(f"Target field '{target_sap_fields}' is identified as a primary key")
+                
+                # Check if we have insertion fields to map
+                if results["insertion_fields"] and len(results["insertion_fields"]) > 0:
+                    source_field = results["insertion_fields"][0]
+                    source_table = results["source_table_name"][0] if results["source_table_name"] else None
+                    
+                    # Verify the source data meets primary key requirements
+                    if source_table and source_field:
+                        error = None
+                        try:
+                            # Get the source data
+                            source_df = None
+                            try:
+                                # Validate table and field names to prevent SQL injection
+                                safe_table = validate_sql_identifier(source_table)
+                                safe_field = validate_sql_identifier(source_field)
+                                query = f"SELECT {safe_field} FROM {safe_table}"
+                                source_df = pd.read_sql_query(query, conn)
+                            except Exception as e:
+                                logger.error(f"Failed to query source data: {e}")
+                                source_df = None
+                            
+                            if source_df is not None:
+                                # Check for uniqueness and non-null values
+                                has_nulls = source_df[source_field].isna().any()
+                                has_duplicates = source_df[source_field].duplicated().any()
+                                
+                                # Only proceed if the data satisfies primary key requirements
+                                # or if the query explicitly indicates working with distinct values
+                                if has_nulls or has_duplicates:
+                                    # Check if the query is requesting distinct values
+                                    is_distinct_query = check_distinct_requirement(query) or \
+                                                        check_distinct_requirement(results.get("restructured_query", ""))
+                                    
+                                    if not is_distinct_query:
+                                        # The data doesn't meet primary key requirements and query doesn't indicate distinct values
+                                        error_msg = f"Cannot use '{source_field}' as a primary key: "
+                                        if has_nulls and has_duplicates:
+                                            error_msg += "contains null values and duplicate entries"
+                                        elif has_nulls:
+                                            error_msg += "contains null values"
+                                        else:
+                                            error_msg += "contains duplicate entries"
+                                        
+                                        logger.error(error_msg)
+                                        error=error_msg
+                                        
+                                        # Return None to signal that execution should stop
+                                        if conn:
+                                            conn.close()
+                                    else:
+                                        logger.info(f"Source data has integrity issues but query suggests distinct values will be used")
+                        except Exception as e:
+                            logger.error(f"Error during primary key validation: {e}")
+                            # If we can't validate, we err on the side of caution and don't proceed
+                            if conn:
+                                conn.close()
+                            return None
+                    if not error:
+                    # If we've reached here, it's safe to add the key mapping
+                        key_mapping = context_manager.add_key_mapping(session_id, target_sap_fields, source_field)
+                    else:
+                        key_mapping = [error]
+                else:
+                    logger.warning("No insertion fields found for key mapping")
+                    key_mapping = context_manager.get_key_mapping(session_id)
+            else:
+                # Not a key field, just get existing mappings
+                key_mapping = context_manager.get_key_mapping(session_id)
+        except Exception as e:
+            logger.error(f"Error processing key mapping: {e}")
+            # Continue with empty key mapping
+            key_mapping = []
+        
+        # Safely add key mapping to results
+        results["key_mapping"] = key_mapping
+        
+        # Add session_id to the results
+        results["session_id"] = session_id
+        
+        return results
+    except Exception as e:
+        logger.error(f"Error in process_query: {e}")
+        return None
+    finally:
+        # Ensure database connection is closed
+        if conn:
+            try:
+                conn.close()
+            except Exception as e:
+                logger.error(f"Error closing database connection: {e}")
 
 def process_info(resolved_data, conn, target_sap_fields):
     """Process the resolved data to extract table information based on the specified JSON structure"""
@@ -627,126 +852,127 @@ def process_info(resolved_data, conn, target_sap_fields):
         logger.error(f"Error in process_info: {e}")
         return None
 
-def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
-    """
-    Process a query with context awareness
+# def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
+#     """
+#     Process a query with context awareness
     
-    Parameters:
-    object_id (int): Object ID
-    segment_id (int): Segment ID
-    project_id (int): Project ID
-    query (str): The natural language query
-    session_id (str): Optional session ID for context tracking
-    target_sap_fields (str/list): Optional target SAP fields
+#     Parameters:
+#     object_id (int): Object ID
+#     segment_id (int): Segment ID
+#     project_id (int): Project ID
+#     query (str): The natural language query
+#     session_id (str): Optional session ID for context tracking
+#     target_sap_fields (str/list): Optional target SAP fields
     
-    Returns:
-    dict: Processed information including context
-    """
-    conn = None
-    try:
-        # Validate inputs
-        if not query or not isinstance(query, str):
-            logger.error(f"Invalid query: {query}")
-            return None
+#     Returns:
+#     dict: Processed information including context
+#     """
+#     conn = None
+#     try:
+#         # Validate inputs
+#         if not query or not isinstance(query, str):
+#             logger.error(f"Invalid query: {query}")
+#             return None
             
-        # Validate IDs
-        if not all(isinstance(x, int) for x in [object_id, segment_id, project_id]):
-            logger.error(f"Invalid ID types: object_id={type(object_id)}, segment_id={type(segment_id)}, project_id={type(project_id)}")
-            return None
+#         # Validate IDs
+#         if not all(isinstance(x, int) for x in [object_id, segment_id, project_id]):
+#             logger.error(f"Invalid ID types: object_id={type(object_id)}, segment_id={type(segment_id)}, project_id={type(project_id)}")
+#             return None
         
-        # Initialize context manager
-        context_manager = ContextualSessionManager()
+#         # Initialize context manager
+#         context_manager = ContextualSessionManager()
         
-        # Create a session if none provided
-        if not session_id:
-            session_id = context_manager.create_session()
-            logger.info(f"Created new session: {session_id}")
+#         # Create a session if none provided
+#         if not session_id:
+#             session_id = context_manager.create_session()
+#             logger.info(f"Created new session: {session_id}")
         
-        # Get existing context
-        previous_context = context_manager.get_context(session_id)
+#         # Get existing context
+#         previous_context = context_manager.get_context(session_id)
         
-        # Connect to database
-        conn = sqlite3.connect('db.sqlite3')
+#         # Connect to database
+#         conn = sqlite3.connect('db.sqlite3')
         
-        # Fetch mapping data
-        joined_df = fetch_data_by_ids(object_id, segment_id, project_id, conn)
+#         # Fetch mapping data
+#         joined_df = fetch_data_by_ids(object_id, segment_id, project_id, conn)
         
-        # Check if joined_df is empty
-        if joined_df.empty:
-            logger.error(f"No data found for object_id={object_id}, segment_id={segment_id}, project_id={project_id}")
-            if conn:
-                conn.close()
-            return None
+#         # Check if joined_df is empty
+#         if joined_df.empty:
+#             logger.error(f"No data found for object_id={object_id}, segment_id={segment_id}, project_id={project_id}")
+#             if conn:
+#                 conn.close()
+#             return None
         
-        # Handle missing values in the dataframe
-        joined_df = missing_values_handling(joined_df)
+#         # Handle missing values in the dataframe
+#         joined_df = missing_values_handling(joined_df)
         
-        # Save joined data for debugging
-        try:
-            joined_df.to_csv("joined_data.csv", index=False)
-        except Exception as e:
-            logger.warning(f"Failed to save joined_data.csv: {e}")
+#         # Save joined data for debugging
+#         try:
+#             joined_df.to_csv("joined_data.csv", index=False)
+#         except Exception as e:
+#             logger.warning(f"Failed to save joined_data.csv: {e}")
         
-        # Process query with context awareness
-        resolved_data = parse_data_with_context(
-            joined_df, 
-            query,
-            session_id,  # Pass session_id to access key mappings and target data
-            previous_context.get("context") if previous_context else None
-        )
+#         # Process query with context awareness
+#         resolved_data = parse_data_with_context(
+#             joined_df, 
+#             query,
+#             session_id,  # Pass session_id to access key mappings and target data
+#             previous_context.get("context") if previous_context else None
+#         )
         
-        if not resolved_data:
-            logger.error("Failed to resolve query")
-            if conn:
-                conn.close()
-            return None
+#         if not resolved_data:
+#             logger.error("Failed to resolve query")
+#             if conn:
+#                 conn.close()
+#             return None
             
-        # Process the resolved data to get table information
-        results = process_info(resolved_data, conn, target_sap_fields)
+#         # Process the resolved data to get table information
+#         results = process_info(resolved_data, conn, target_sap_fields)
         
-        if not results:
-            logger.error("Failed to process resolved data")
-            if conn:
-                conn.close()
-            return None
+#         if not results:
+#             logger.error("Failed to process resolved data")
+#             if conn:
+#                 conn.close()
+#             return None
         
-        # Process key mapping with error handling
-        key_mapping = []
-        try:
-            # Check if we have a target field and it's a key
-            target_field_filter = joined_df["target_sap_field"] == target_sap_fields
-            if target_field_filter.any() and joined_df[target_field_filter]["isKey"].values[0] == "True":
-                # Check if we have insertion fields to map
-                if results["insertion_fields"] and len(results["insertion_fields"]) > 0:
-                    key_mapping = context_manager.add_key_mapping(session_id, target_sap_fields, results["insertion_fields"][0])
-                else:
-                    logger.warning("No insertion fields found for key mapping")
-                    key_mapping = context_manager.get_key_mapping(session_id)
-            else:
-                # Not a key field, just get existing mappings
-                key_mapping = context_manager.get_key_mapping(session_id)
-        except Exception as e:
-            logger.error(f"Error processing key mapping: {e}")
-            # Continue with empty key mapping
-            key_mapping = []
+#         # Process key mapping with error handling
+#         key_mapping = []
+#         try:
+#             # Check if we have a target field and it's a key
+#             target_field_filter = joined_df["target_sap_field"] == target_sap_fields
+#             if target_field_filter.any() and joined_df[target_field_filter]["isKey"].values[0] == "True":
+#                 # Check if we have insertion fields to map
+#                 if results["insertion_fields"] and len(results["insertion_fields"]) > 0:
+
+#                     key_mapping = context_manager.add_key_mapping(session_id, target_sap_fields, results["insertion_fields"][0])
+#                 else:
+#                     logger.warning("No insertion fields found for key mapping")
+#                     key_mapping = context_manager.get_key_mapping(session_id)
+#             else:
+#                 # Not a key field, just get existing mappings
+#                 key_mapping = context_manager.get_key_mapping(session_id)
+#         except Exception as e:
+#             logger.error(f"Error processing key mapping: {e}")
+#             # Continue with empty key mapping
+#             key_mapping = []
         
-        # Safely add key mapping to results
-        results["key_mapping"] = key_mapping
+#         # Safely add key mapping to results
+#         results["key_mapping"] = key_mapping
         
-        # Add session_id to the results
-        results["session_id"] = session_id
+#         # Add session_id to the results
+#         results["session_id"] = session_id
         
-        return results
-    except Exception as e:
-        logger.error(f"Error in process_query: {e}")
-        return None
-    finally:
-        # Ensure database connection is closed
-        if conn:
-            try:
-                conn.close()
-            except Exception as e:
-                logger.error(f"Error closing database connection: {e}")
+#         return results
+#     except Exception as e:
+#         logger.error(f"Error in process_query: {e}")
+#         return None
+#     finally:
+#         # Ensure database connection is closed
+#         if conn:
+#             try:
+#                 conn.close()
+#             except Exception as e:
+#                 logger.error(f"Error closing database connection: {e}")
 
 
 def get_session_context(session_id):

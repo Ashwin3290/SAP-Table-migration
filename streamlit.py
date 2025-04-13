@@ -253,60 +253,62 @@ with col2:
                 st.session_state['transformation_session_id'],
                 selected_columns
             )
-            
-            # Update session ID if this is a new session
-            if not st.session_state['transformation_session_id']:
-                st.session_state['transformation_session_id'] = session_id
-            
-            # Get updated session info
-            session_info = get_session_context(session_id)
-            
-            # Add to history
-            st.session_state['transformation_history'].append({
-                'query': query,
-                'code': code,
-                'timestamp': datetime.now().isoformat(),
-                'description': session_info['transformation_history'][-1]['description'] 
-                    if session_info['transformation_history'] else "Unknown transformation"
-            })
-            
-            # Display results
-            st.success("Transformation complete!")
-            
-            # Display the transformation results
-            st.markdown("### Result")
-            
-            # Display code
-            if st.session_state['show_code']:
-                with st.expander("Generated Python Code", expanded=False):
-                    st.code(code, language="python")
-            
-            # Display different result types appropriately
-            if isinstance(result, pd.DataFrame):
-                filtered_result = result.dropna(axis=1, how='all') 
-                st.dataframe(filtered_result, use_container_width=True)
-                st.write("Number of rows:", len(result))
-            elif str(type(result)).find('matplotlib') != -1:
-                st.pyplot(result)
-            elif isinstance(result, (list, dict)):
-                st.json(result)
-            else:
-                st.write(result)
-            
-            # Display summary of what happened
-            latest_tx = session_info['transformation_history'][-1] if session_info['transformation_history'] else {}
-            st.markdown(f"""
-            <div class="context-info">
-                <strong>Transformation Summary:</strong><br>
-                {latest_tx.get('description', 'Transformation completed')}<br>
-                <strong>Fields Modified:</strong> {', '.join(latest_tx.get('fields_modified', []))}<br>
-                <strong>Filter Conditions:</strong> {json.dumps(latest_tx.get('filter_conditions', {}))}
-            </div>
-            """, unsafe_allow_html=True)
-                
-            # except Exception as e:
-                # st.error(f"Error processing transformation: {e}")
 
+            if code is None:
+                st.error(result)
+            else:
+                # Update session ID if this is a new session
+                if not st.session_state['transformation_session_id']:
+                    st.session_state['transformation_session_id'] = session_id
+                
+                # Get updated session info
+                session_info = get_session_context(session_id)
+                
+                # Add to history
+                st.session_state['transformation_history'].append({
+                    'query': query,
+                    'code': code,
+                    'timestamp': datetime.now().isoformat(),
+                    'description': session_info['transformation_history'][-1]['description'] 
+                        if session_info['transformation_history'] else "Unknown transformation"
+                })
+                
+                # Display results
+                st.success("Transformation complete!")
+                
+                # Display the transformation results
+                st.markdown("### Result")
+                
+                # Display code
+                if st.session_state['show_code']:
+                    with st.expander("Generated Python Code", expanded=False):
+                        st.code(code, language="python")
+                
+                # Display different result types appropriately
+                if isinstance(result, pd.DataFrame):
+                    filtered_result = result.dropna(axis=1, how='all') 
+                    st.dataframe(filtered_result, use_container_width=True)
+                    st.write("Number of rows:", len(result))
+                elif str(type(result)).find('matplotlib') != -1:
+                    st.pyplot(result)
+                elif isinstance(result, (list, dict)):
+                    st.json(result)
+                else:
+                    st.write(result)
+                
+                # Display summary of what happened
+                latest_tx = session_info['transformation_history'][-1] if session_info['transformation_history'] else {}
+                st.markdown(f"""
+                <div class="context-info">
+                    <strong>Transformation Summary:</strong><br>
+                    {latest_tx.get('description', 'Transformation completed')}<br>
+                    <strong>Fields Modified:</strong> {', '.join(latest_tx.get('fields_modified', []))}<br>
+                    <strong>Filter Conditions:</strong> {json.dumps(latest_tx.get('filter_conditions', {}))}
+                </div>
+                """, unsafe_allow_html=True)
+                    
+                # except Exception as e:
+                    # st.error(f"Error processing transformation: {e}")
     
     # Display previous transformations in this session
     if st.session_state['transformation_history']:

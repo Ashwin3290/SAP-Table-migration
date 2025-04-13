@@ -107,23 +107,37 @@ import seaborn as sns
     return filename
 
 
-def execute_code(file_path, source_dfs,target_df):
-    """Execute a Python file and return the result"""
+def execute_code(file_path, source_dfs, target_df):
+    """Execute a Python file and return the result or detailed error traceback"""
     try:
+        # Add the current directory to sys.path to ensure utilities can be imported
+        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+        
         # Import the module
         module_name = os.path.basename(file_path).replace('.py', '')
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
-        result = module.analyze_data(source_dfs,target_df)          
+        result = module.analyze_data(source_dfs, target_df)          
         return result
     except Exception as e:
-        # Capture the error and return it
-        error_msg = f"Error executing code: {str(e)}"
-        print(error_msg)
-        return error_msg
-
+        # Capture the full traceback with detailed information
+        import traceback
+        error_traceback = {
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "traceback": traceback.format_exc(),
+            "code_file": file_path
+        }
+        
+        # Return the detailed error information
+        return error_traceback
+    finally:
+        # Restore sys.path
+        if os.path.dirname(os.path.abspath(__file__)) in sys.path:
+            sys.path.remove(os.path.dirname(os.path.abspath(__file__)))
+            
 
 def execute_code_from_resolved_data(file_path, resolved_data):
     """

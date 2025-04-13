@@ -92,7 +92,6 @@ class TableLLM:
                 # Query understanding
                 "original_query": resolved_data.get('original_query', ''),
                 "restructured_query": resolved_data.get('restructured_query', ''),
-                "key_columns": resolved_data.get('key_mapping', []),
                 "transformation_logic": resolved_data.get('transformation_logic', ''),
                 
                 # Session information
@@ -313,6 +312,12 @@ Return ONLY the classification name with no explanation.
     Specify the EXACT parameter values for each function.
     Be specific about fields, values, and data types.
 
+    Note:
+    - Make sure to handle queries with if/else logics correctly.
+    - Revolve your plans around using keys in the source and target tables to correct add or update data.
+    - Use the utility functions as much as possible to avoid writing custom code.
+    - If a query talks about if data in source table then he is meaning to look for key values that are common in the target table and source table.
+
     Example:
     1. Import utility functions from transform_utils
     2. Get source dataframe from source_dfs dictionary using 'MARA' key
@@ -412,10 +417,10 @@ Return ONLY the classification name with no explanation.
     PARAMETERS:
     - source_df: Source pandas DataFrame
     - target_df: Target pandas DataFrame to update
-    - field_mapping: Dictionary with format {'TARGET_FIELD': 'SOURCE_FIELD'} 
+    - field_mapping: Dictionary with format {{'TARGET_FIELD': 'SOURCE_FIELD'}} 
     - key_field_pair: Optional tuple with format (target_key_field, source_key_field)
     
-    EXAMPLE: result_df = map_fields(source_df, target_df, {'PRODUCT': 'MATNR', 'MTART': 'MTART'}, ('PRODUCT', 'MATNR'))
+    EXAMPLE: result_df = map_fields(source_df, target_df, {{'PRODUCT': 'MATNR', 'MTART': 'MTART'}}, ('PRODUCT', 'MATNR'))
 
     ===================================================================================
 
@@ -424,9 +429,9 @@ Return ONLY the classification name with no explanation.
     PARAMETERS:
     - source_df: Source pandas DataFrame
     - target_df: Target pandas DataFrame
-    - key_mapping: Dictionary mapping target keys to source keys {'TARGET_KEY': 'SOURCE_KEY'}
+    - key_mapping: Dictionary mapping target keys to source keys {{'TARGET_KEY': 'SOURCE_KEY'}}
     
-    EXAMPLE: result_df = match_by_keys(source_df, target_df, {'PRODUCT': 'MATNR'})
+    EXAMPLE: result_df = match_by_keys(source_df, target_df, {{'PRODUCT': 'MATNR'}})
 
     ===================================================================================
 
@@ -480,7 +485,7 @@ Return ONLY the classification name with no explanation.
     - group_by: Column(s) to group by (string or list of strings)
     - agg_functions: Dictionary mapping columns to agg functions. Functions MUST be one of: 'sum', 'mean', 'min', 'max', 'count'
     
-    EXAMPLE: result_df = aggregate_data(source_df, 'WERKS', {'STOCK': 'sum', 'PRICE': 'mean'})
+    EXAMPLE: result_df = aggregate_data(source_df, 'WERKS', {{'STOCK': 'sum', 'PRICE': 'mean'}})
 
     ===================================================================================
 
@@ -508,27 +513,26 @@ Return ONLY the classification name with no explanation.
     3. ALWAYS match the exact parameter names and formats shown in the reference above
     4. For conditional operations like filter_dataframe, use ONLY the exact condition_type strings listed
     5. When constructing conditions for conditional_mapping, use the EXACT formats shown
-    6. Always import transform_utils at the beginning
+    6. Always import transform_utils at the beginning and do not try to implement it yourself
     7. Handle both empty and non-empty target dataframes
     8. Return the modified target dataframe (target_df)
     9. Use numpy for conditional logic if needed (already imported as np)
-    10. If you don't find target_field in target_table but it is present in the sample data, add the column
+    10. Make sure to handle multiple source tables correctly
+    11. Do not create sample dataframes and just use the data given in the prompt
+    12. Only give the analyze_data function and do not add any other functions or classes
 
-    Complete this function:
+    Make the function like this :
 
     def analyze_data(source_dfs, target_df):
         # source_dfs is a dictionary where keys are table names and values are dataframes
         # Example: source_dfs = {{'table1': df1, 'table2': df2}}
         # target_df is the target dataframe to update
         
-        # Import the utility functions
-        from transform_utils import *
-        
         # Get list of source tables for easier reference
         source_tables = list(source_dfs.keys())
         
         # Your implementation of the steps above
-        
+
         # Make sure to return the modified target_df
         return target_df
     """
@@ -582,6 +586,118 @@ Return ONLY the classification name with no explanation.
         
         # Return unmodified target dataframe
         return target_df"""
+
+    @track_token_usage()
+    def _fix_code(self, code_content, error_info, planner_info, attempt=1, max_attempts=3):
+        """
+        Attempt to fix code based on error traceback
+        
+        Parameters:
+        code_content (str): The original code that failed
+        error_info (dict): Error information with traceback
+        planner_info (dict): Context information from planner
+        attempt (int): Current attempt number
+        max_attempts (int): Maximum number of attempts to fix the code
+        
+        Returns:
+        str: Fixed code or None if max attempts reached
+        """
+        if attempt > max_attempts:
+            logger.error(f"Failed to fix code after {max_attempts} attempts")
+            return None
+        
+        try:
+            # Extract error information
+            error_type = error_info.get("error_type", "Unknown error") 
+            error_message = error_info.get("error_message", "No error message")
+            traceback_text = error_info.get("traceback", "No traceback available")
+            
+            # Create a prompt for the code fixer
+            prompt = f"""
+    You are an expert code debugging and fixing agent. Your task is to fix code that failed during execution.
+
+    THE CODE THAT FAILED:
+    ```python
+    {code_content}
+    ERROR INFORMATION:
+    Error Type: {error_type}
+    Error Message: {error_message}
+    FULL TRACEBACK:
+    {traceback_text}
+    CONTEXT INFORMATION:
+    Source tables: {planner_info.get('source_table', [])}
+    Target table: {planner_info.get('target_table', [])}
+    Source fields: {planner_info.get('source_fields', [])}
+    Target fields: {planner_info.get('target_fields', [])}
+    Filtering fields: {planner_info.get('filtering_fields', [])}
+    Insertion fields: {planner_info.get('insertion_fields', [])}
+    Extracted conditions: {json.dumps(planner_info.get('extracted_conditions', {}), indent=2)}
+    COMMON ERRORS TO CHECK FOR:
+
+    Field name typos or case sensitivity issues
+    Incorrect parameter names or order in utility function calls
+    Missing or incorrect imports
+    Incorrect handling of empty dataframes
+    Missing field in target dataframe
+    Incorrect data types in filter or map operations
+    Wrong condition_type parameter in filter_dataframe
+    Syntax errors in condition strings
+
+    TASK:
+
+    Analyze the error carefully
+    Identify the root cause of the issue
+    Fix the code to address the specific error
+    Make sure your solution maintains the original intent of the code
+    Return only the complete fixed code with no explanations
+
+    Remember to keep the overall structure and logic of the original code, fixing only what's necessary
+    to address the error.
+    This is attempt {attempt} of {max_attempts}.
+    ONLY PROVIDE THE COMPLETE FIXED CODE, WITH NO EXPLANATIONS:
+    """
+        
+            # Call the AI to fix the code
+            try:
+                response = self.client.models.generate_content(
+                    model="gemini-2.0-flash-thinking-exp-01-21",
+                    contents=prompt
+                )
+                
+                # Validate response
+                if not response or not hasattr(response, 'text') or not response.text:
+                    logger.error("Invalid response from Gemini API in _fix_code")
+                    return None
+                
+                logger.info(f"Generated fixed code on attempt {attempt}")
+                
+                # Extract the code
+                import re
+                
+                # First try to extract code between triple backticks
+                code_match = re.search(r'```python\s*(.*?)\s*```', response.text, re.DOTALL)
+                if code_match:
+                    return code_match.group(1)
+                
+                # Next try to extract code without backticks
+                code_match = re.search(r'```\s*(.*?)\s*```', response.text, re.DOTALL)
+                if code_match:
+                    return code_match.group(1)
+                
+                # Try to extract the function definition directly
+                function_match = re.search(r'def analyze_data\s*\(.*?\).*?return\s+target_df', response.text, re.DOTALL)
+                if function_match:
+                    return function_match.group(0)
+                
+                # Last resort, return the whole text
+                return response.text
+                
+            except Exception as e:
+                logger.error(f"Error calling Gemini API in _fix_code: {e}")
+                return None
+        except Exception as e:
+            logger.error(f"Error in _fix_code: {e}")
+            return None
         
     def _initialize_templates(self):
         """Initialize code templates for common operations with support for multiple source tables"""
@@ -746,6 +862,9 @@ else:
                 return None, "Failed to resolve query", session_id
                 
             # Connect to database
+            print(resolved_data['key_mapping'])
+            if isinstance(resolved_data['key_mapping'][0],str):
+                return None,resolved_data['key_mapping'][0],session_id
             try:
                 conn = sqlite3.connect('db.sqlite3')
             except sqlite3.Error as e:
@@ -848,8 +967,45 @@ else:
                     code_file = create_code_file(code_content, query, is_double=True)
                     result = execute_code(code_file, source_dfs, target_df)
                     
-                    # Check if result is an error message
-                    if isinstance(result, str) and "Error" in result:
+                    # Check if result is an error (now it's a dictionary with traceback information)
+                    if isinstance(result, dict) and 'error_type' in result:
+                        logger.error(f"Code execution error: {result['error_message']}")
+                        logger.error(f"Traceback: {result['traceback']}")
+                        
+                        # Try to fix the code up to 3 times
+                        fixed_code = code_content
+                        for attempt in range(1, 4):  # 3 attempts maximum
+                            logger.info(f"Attempting to fix code (attempt {attempt}/3)")
+                            
+                            fixed_code = self._fix_code(fixed_code, result, planner_info, attempt=attempt, max_attempts=3)
+                            if fixed_code is None:
+                                # Failed to fix the code after max attempts
+                                if conn:
+                                    conn.close()
+                                return code_content, f"Failed to generate working code after 3 attempts. Last error: {result['error_message']}", session_id
+                            
+                            # Try executing the fixed code
+                            fixed_code_file = create_code_file(fixed_code, f"{query} (fixed attempt {attempt})", is_double=True)
+                            fixed_result = execute_code(fixed_code_file, source_dfs, target_df)
+                            
+                            # If the fixed code worked (result is not an error dictionary), use it
+                            if not isinstance(fixed_result, dict) or 'error_type' not in fixed_result:
+                                logger.info(f"Successfully fixed code on attempt {attempt}")
+                                code_content = fixed_code  # Update the code content to the fixed version
+                                result = fixed_result  # Use the successful result
+                                break
+                            else:
+                                # The fix didn't work, update the error for the next attempt
+                                result = fixed_result
+                                logger.error(f"Fix attempt {attempt} failed with error: {result['error_message']}")
+                        
+                        # If we've gone through all attempts and still have an error
+                        if isinstance(result, dict) and 'error_type' in result:
+                            if conn:
+                                conn.close()
+                            return code_content, f"Failed to generate working code after 3 attempts. Last error: {result['error_message']}", session_id
+                    
+                    elif isinstance(result, str) and "Error" in result:
                         logger.error(f"Code execution error: {result}")
                         if conn:
                             conn.close()

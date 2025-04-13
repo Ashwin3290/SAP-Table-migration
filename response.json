@@ -6,16 +6,24 @@
   ],
   "source_field_names": [
     "MATNR",
-    "MEINS"
+    "MEINS",
+    "MTART"
   ],
   "filtering_fields": [
-    "MATNR"
+    "MATNR",
+    "MTART"
   ],
   "insertion_fields": [
     "MEINS"
   ],
-  "transformation_logic": "The transformation logic involves checking for materials in MARA_500, MARA_700, and MARA tables to retrieve the 'Base Unit of Measure (ISO Format)' (MEINS). The logic uses 'Product Number' (MATNR) as the key to match records. \n\n1. **Check MARA_500:**\n   - Use the existing 'PRODUCT' field in the target table, which maps to 'MATNR' in the source tables, to find matching entries in the MARA_500 table.\n   - IF a match is found, retrieve the 'MEINS' value from MARA_500 and insert/update it into the target table.\n\n2. **Check MARA_700 (if no match in MARA_500):**\n   - IF no matching entries are found in MARA_500 for a given 'PRODUCT' (MATNR), check for the same 'PRODUCT' (MATNR) in the MARA_700 table.\n   - IF a match is found in MARA_700, retrieve the 'MEINS' value from MARA_700 and insert/update it into the target table.\n\n3. **Check MARA (if no match in MARA_500 or MARA_700):**\n   - IF no matching entries are found in either MARA_500 or MARA_700 for a given 'PRODUCT' (MATNR), retrieve the 'MEINS' value from the MARA table and insert/update it into the target table.\n\nThe target table's 'PRODUCT' field is mapped to the 'MATNR' field in all three source tables. The 'MEINS' field from the first matching table (MARA_500, MARA_700, or MARA) is inserted into the target table.",
-  "Resolved_query": "For each product in the target table, check for matching entries in the MARA_500 table using the 'Product Number' (MATNR). If a match is found, retrieve the 'Base Unit of Measure (ISO Format)' (MEINS) from MARA_500 and update the target table. Otherwise, check MARA_700 for matching 'Product Number' (MATNR) and retrieve 'Base Unit of Measure (ISO Format)' (MEINS). If no match is found in MARA_700, retrieve the 'Base Unit of Measure (ISO Format)' (MEINS) from the MARA table and update the target table.",
+  "transformation_logic": {
+    "step_1": "Check for matching entries in MARA_500 where MARA_500.MATNR equals PRODUCT from the target table.",
+    "step_2": "IF a match is found in MARA_500, retrieve the value of MEINS from MARA_500 and insert it into the target table for the corresponding PRODUCT.",
+    "step_3": "ELSE, IF no match is found in MARA_500, check for matching entries in MARA_700 where MARA_700.MATNR equals PRODUCT from the target table AND MARA_700.MTART equals 'ROH' (from Transformation 2).",
+    "step_4": "IF a match is found in MARA_700, retrieve the value of MEINS from MARA_700 and insert it into the target table for the corresponding PRODUCT.",
+    "step_5": "ELSE, IF no match is found in MARA_700, retrieve the value of MEINS from MARA where MARA.MATNR equals PRODUCT from the target table and insert it into the target table for the corresponding PRODUCT."
+  },
+  "Resolved_query": "For each product in the target table, first check if a matching entry exists in the MARA_500 table based on the product number (MATNR). If a match is found, retrieve the Base Unit of Measure (MEINS) from MARA_500 and update the target table. Otherwise, check the MARA_700 table for entries where the product number (MATNR) matches and the product type (MTART) is 'ROH'. If a match is found, retrieve the Base Unit of Measure (MEINS) from MARA_700 and update the target table. If no match is found in either MARA_500 or MARA_700, retrieve the Base Unit of Measure (MEINS) from the MARA table based on the product number (MATNR) and update the target table.",
   "target_table": [
     "t_24_Product_Basic_Data_mandatory_Ext"
   ],
@@ -23,6 +31,10 @@
     {
       "target_col": "PRODUCT",
       "source_col": "MATNR"
+    },
+    {
+      "target_col": "PRODUCT",
+      "source_col": "MEINS"
     }
   ]
 }
