@@ -358,3 +358,4 @@ def cleanup():
 # Register the cleanup function
 import atexit
 atexit.register(cleanup)
+# Run the app
