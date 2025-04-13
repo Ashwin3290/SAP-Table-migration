@@ -238,25 +238,22 @@ Return ONLY the classification name with no explanation.
         except Exception as e:
             logger.error(f"Error in _classify_query: {e}")
             return "EXTRACTION"  # Default classification
-    
+        
     @track_token_usage()
     def _generate_simple_plan(self, planner_info):
         """
         Generate a simple, step-by-step plan in natural language
-        Uses comprehensive planner information
+        With focus on using utility functions with correct parameters
         """
         try:
             # Validate input
             if not planner_info:
                 logger.error("No planner info provided to _generate_simple_plan")
-                return "1. Make copy of the source dataframe\n2. Return the dataframe unchanged"
+                return "1. Import utility functions from transform_utils\n2. Get source dataframe\n3. Return the dataframe unchanged"
             
-            # Extract key fields safely
+            # Extract key information for the prompt
             source_fields = planner_info.get("source_fields", [])
-            source_field = source_fields[0] if isinstance(source_fields, list) and len(source_fields) > 0 else "SOURCE_FIELD"
-            
             target_fields = planner_info.get("target_fields", [])
-            target_field = target_fields[0] if isinstance(target_fields, list) and len(target_fields) > 0 else "TARGET_FIELD"
             
             # Extract filtering conditions safely
             conditions_str = "No specific conditions found"
@@ -267,61 +264,65 @@ Return ONLY the classification name with no explanation.
                     logger.warning(f"Error converting extracted conditions to JSON: {e}")
                     conditions_str = str(planner_info["extracted_conditions"])
             
-            keys_in_use = {}
-            if planner_info.get("key_columns"):
-                for mapping in planner_info["key_columns"]:
-                    if isinstance(mapping, dict) and "target_col" in mapping and "source_col" in mapping:
-                        target = mapping["target_col"]
-                        source = mapping["source_col"]
-                        if source in source_fields and target in target_fields:
-                            keys_in_use[target] = source
-                    elif isinstance(mapping, (list, tuple)) and len(mapping) == 2:
-                        target, source = mapping
-                        if source in source_fields and target in target_fields:
-                            keys_in_use[target] = source
-            
-            # Generate prompt with different templates based on query type
+            # Generate prompt with focus on utility functions
             base_prompt = f"""
-Create a simplified step-by-step plan for code that will perform a data transformation operation.
+    Create a step-by-step plan for code that will perform this data transformation operation.
+    Focus on using the available utility functions with their EXACT parameter formats.
 
-QUERY DETAILS:
-User's intent: {planner_info.get('restructured_query', 'Transform data')}
-Transformation logic: {planner_info.get('transformation_logic', 'Simple transformation')}
-Source table: {planner_info.get('source_table', ['source_table'])}
-Target table: {planner_info.get('target_table', ['target_table'])}
-Source field(s): {source_fields}
-Target field(s): {target_fields}
-Filtering field(s): {planner_info.get('filtering_fields', [])}
-Filtering conditions: {conditions_str}
-Insertion field(s): {planner_info.get('insertion_fields', [])}
+    QUERY DETAILS:
+    User's intent: {planner_info.get('restructured_query', 'Transform data')}
+    Transformation logic: {planner_info.get('transformation_logic', 'Simple transformation')}
+    Source table: {planner_info.get('source_table', ['source_table'])}
+    Target table: {planner_info.get('target_table', ['target_table'])}
+    Source field(s): {source_fields}
+    Target field(s): {target_fields}
+    Filtering field(s): {planner_info.get('filtering_fields', [])}
+    Filtering conditions: {conditions_str}
+    Insertion field(s): {planner_info.get('insertion_fields', [])}
 
-Current state of target table:
-Target data sample: {json.dumps(planner_info.get('target_data', {}).get('sample', []), indent=2)}
+    AVAILABLE UTILITY FUNCTIONS AND THEIR PARAMETER FORMATS:
+    1. filter_dataframe(df, field, condition_type, value)
+    - condition_type MUST be one of: 'equals', 'not_equals', 'contains', 'greater_than', 'less_than', 'in_list', 'not_in_list', 'is_null', 'is_not_null'
 
-Primary key mapping: {json.dumps(keys_in_use, indent=2)}
-Primary key Mapping is given in target_field:source_field format
-Note:
-1. Only update the Insertion field in the target table do not add anything else
-2. Use the Provided key mapping so to map the filtered values to the actual primary key of the target table
-3. Add the condition where the source key matches to target key
-3. Use the source table for the initial data 
-4. Do not add any additional fields to the target table
+    2. map_fields(source_df, target_df, field_mapping, key_field_pair=None)
+    - field_mapping format: {{'TARGET_FIELD1': 'SOURCE_FIELD1', 'TARGET_FIELD2': 'SOURCE_FIELD2'}}
+    - key_field_pair format: ('TARGET_KEY', 'SOURCE_KEY')
 
-Source Data:
-Source data sample: {json.dumps(planner_info.get('source_data', {}).get('sample', {}), indent=2)}
+    3. match_by_keys(source_df, target_df, key_mapping)
+    - key_mapping format: {{'TARGET_KEY': 'SOURCE_KEY'}}
 
+    4. conditional_mapping(source_df, condition_field, conditions, value_field=None, value_map=None, default=None)
+    - conditions format: ["== 'ROH'", "== 'HALB'", "> 100"]
+    - value_map format: ['Raw Material', 'Semi-Finished', 'High Value']
 
-Write ONLY simple, clear steps that a code generator must follow exactly, like this example:
-1. Make copy of the source dataframe 
-2. Filter rows where MTART value is ROH
-3. Take only MATNR column from filtered source data
-4. Check if target dataframe is empty
-5. If empty, create new dataframe with MATNR as target field
-6. If not empty, update the target field with source field values
-7. Return the updated target dataframe
+    5. initialize_target(target_df, required_columns)
+    - required_columns format: ['FIELD1', 'FIELD2', 'FIELD3']
 
-Your steps (numbered, 5-10 steps maximum):
-"""
+    6. join_tables(main_df, other_df, main_key, other_key, fields_to_add)
+    - fields_to_add format: ['FIELD1', 'FIELD2', 'FIELD3']
+
+    7. SAP-specific functions:
+    - map_material_type(source_df, source_field='MTART')
+    - convert_sap_date(source_df, date_field, output_format='YYYY-MM-DD')
+    - map_sap_language_code(source_df, lang_field='SPRAS')
+    - map_sap_unit_of_measure(source_df, uom_field='MEINS')
+    - handle_sap_leading_zeros(source_df, field, length=10)
+
+    Write a numbered, step-by-step plan that outlines EXACTLY how to perform the transformation.
+    Use utility functions whenever possible.
+    Specify the EXACT parameter values for each function.
+    Be specific about fields, values, and data types.
+
+    Example:
+    1. Import utility functions from transform_utils
+    2. Get source dataframe from source_dfs dictionary using 'MARA' key
+    3. Initialize target dataframe with required columns ['PRODUCT', 'MTART', 'MEINS']
+    4. Filter source dataframe using filter_dataframe(source_df, 'MTART', 'equals', 'ROH')
+    5. Map fields using map_fields(filtered_df, target_df, {{'PRODUCT': 'MATNR', 'MTART': 'MTART', 'MEINS': 'MEINS'}})
+    6. Return the updated target dataframe
+
+    Your step-by-step plan (5-10 steps):
+    """
             
             try:
                 response = self.client.models.generate_content(
@@ -332,22 +333,22 @@ Your steps (numbered, 5-10 steps maximum):
                 # Validate response
                 if not response or not hasattr(response, 'text') or not response.text:
                     logger.warning("Invalid response from Gemini API in _generate_simple_plan")
-                    return "1. Make copy of the source dataframe\n2. Return the dataframe unchanged"
+                    return "1. Import utility functions from transform_utils\n2. Get source dataframe\n3. Return the dataframe unchanged"
                 
                 logger.info(f"Generated plan: {response.text.strip()}")
                 return response.text.strip()
             except Exception as e:
                 logger.error(f"Error calling Gemini API in _generate_simple_plan: {e}")
-                return "1. Make copy of the source dataframe\n2. Return the dataframe unchanged"
+                return "1. Import utility functions from transform_utils\n2. Get source dataframe\n3. Return the dataframe unchanged"
         except Exception as e:
             logger.error(f"Error in _generate_simple_plan: {e}")
-            return "1. Make copy of the source dataframe\n2. Return the dataframe unchanged"
-
+            return "1. Import utility functions from transform_utils\n2. Get source dataframe\n3. Return the dataframe unchanged"
+        
     @track_token_usage()
     def _generate_code_from_simple_plan(self, simple_plan, planner_info):
         """
         Generate code based on a simple, step-by-step plan
-        With improved context from planner and support for multiple source tables
+        With improved context from planner and support for utility functions
         """
         try:
             # Validate inputs
@@ -361,43 +362,13 @@ Your steps (numbered, 5-10 steps maximum):
             
             # Extract key information safely
             source_fields = planner_info.get("source_fields", [])
-            source_field = source_fields[0] if isinstance(source_fields, list) and len(source_fields) > 0 else "SOURCE_FIELD"
-            
             target_fields = planner_info.get("target_fields", [])
-            target_field = target_fields[0] if isinstance(target_fields, list) and len(target_fields) > 0 else "TARGET_FIELD"
-            
-            # Extract filtering conditions safely
-            filter_conditions = []
-            source_tables = planner_info.get('source_table', [])
-            
-            if planner_info.get("extracted_conditions") and source_tables:
-                # Convert the extracted conditions to pandas filter syntax
-                for field, value in planner_info["extracted_conditions"].items():
-                    # Make sure we have at least one source table
-                    if not source_tables:
-                        continue
-                        
-                    source_table = source_tables[0]
-                    
-                    if isinstance(value, list):
-                        conditions = [f"source_dfs['{source_table}']['{field}'] == '{v}'" for v in value]
-                        filter_conditions.append(f"({' | '.join(conditions)})")
-                    else:
-                        filter_conditions.append(f"source_dfs['{source_table}']['{field}'] == '{value}'")
-            
-            # Use a default condition if none found
-            if not filter_conditions and source_tables:
-                source_table = source_tables[0]
-                filter_conditions = [f"source_dfs['{source_table}'][source_dfs['{source_table}'].columns[0]] != ''"]
-            elif not filter_conditions:
-                filter_conditions = ["source_dfs[source_tables[0]][source_dfs[source_tables[0]].columns[0]] != ''"]
-            
-            filter_condition_str = " & ".join(filter_conditions)
             
             # Handle multiple source tables safely
+            source_tables = planner_info.get('source_table', [])
             source_tables_str = json.dumps(source_tables) if source_tables else "[]"
             
-            # Create template with the simple plan as a guide and extensive context
+            # Create template with the simple plan as a guide and utility functions information
             prompt = f"""
     Write Python code that follows these EXACT steps:
 
@@ -408,8 +379,121 @@ Your steps (numbered, 5-10 steps maximum):
     - Target table: {planner_info.get('target_table', [])}
     - Source field(s): {source_fields}
     - Target field(s): {target_fields}
-    - Filter condition example: {filter_condition_str}
+    - Filtering field(s): {planner_info.get('filtering_fields', [])}
+    - Filtering conditions: {json.dumps(planner_info.get('extracted_conditions', {}), indent=2)}
     - Key mapping: {planner_info.get('key_columns', [])}
+
+    UTILITY FUNCTIONS REFERENCE:
+    ===================================================================================
+
+    1. filter_dataframe(df: pd.DataFrame, field: str, condition_type: str, value: Any) -> pd.DataFrame
+
+    PARAMETERS:
+    - df: Source pandas DataFrame
+    - field: Column name to filter on (must be exact string match)
+    - condition_type: MUST be one of these exact strings:
+        * 'equals' - Field equals value (==)
+        * 'not_equals' - Field not equal to value (!=)
+        * 'contains' - Field contains substring (str.contains)
+        * 'greater_than' - Field greater than value (>)
+        * 'less_than' - Field less than value (<)
+        * 'in_list' - Field value is in provided list (isin)
+        * 'not_in_list' - Field value is not in provided list (~isin)
+        * 'is_null' - Field is null (isna)
+        * 'is_not_null' - Field is not null (~isna)
+    - value: Value to compare against (not used for is_null/is_not_null)
+    
+    EXAMPLE: filtered_df = filter_dataframe(source_df, 'MTART', 'equals', 'ROH')
+
+    ===================================================================================
+
+    2. map_fields(source_df: pd.DataFrame, target_df: pd.DataFrame, field_mapping: Dict[str, str], key_field_pair: Optional[Tuple[str, str]] = None) -> pd.DataFrame
+
+    PARAMETERS:
+    - source_df: Source pandas DataFrame
+    - target_df: Target pandas DataFrame to update
+    - field_mapping: Dictionary with format {'TARGET_FIELD': 'SOURCE_FIELD'} 
+    - key_field_pair: Optional tuple with format (target_key_field, source_key_field)
+    
+    EXAMPLE: result_df = map_fields(source_df, target_df, {'PRODUCT': 'MATNR', 'MTART': 'MTART'}, ('PRODUCT', 'MATNR'))
+
+    ===================================================================================
+
+    3. match_by_keys(source_df: pd.DataFrame, target_df: pd.DataFrame, key_mapping: Dict[str, str]) -> pd.DataFrame
+
+    PARAMETERS:
+    - source_df: Source pandas DataFrame
+    - target_df: Target pandas DataFrame
+    - key_mapping: Dictionary mapping target keys to source keys {'TARGET_KEY': 'SOURCE_KEY'}
+    
+    EXAMPLE: result_df = match_by_keys(source_df, target_df, {'PRODUCT': 'MATNR'})
+
+    ===================================================================================
+
+    4. conditional_mapping(source_df: pd.DataFrame, condition_field: str, conditions: List[str], value_field: Optional[str] = None, value_map: Optional[List[Any]] = None, default: Optional[Any] = None) -> pd.Series
+
+    PARAMETERS:
+    - source_df: Source pandas DataFrame
+    - condition_field: Field to apply conditions to
+    - conditions: List of condition strings in these EXACT formats:
+        * "== 'ROH'"      (equals string value - note single quotes)
+        * "== 50"         (equals numeric value)
+        * "!= 'FERT'"     (not equals string value)
+        * "> 100"         (greater than numeric value)
+        * "< 200"         (less than numeric value)
+        * "in ['A', 'B']" (value in list)
+    - value_field: Field to get values from if value_map not provided
+    - value_map: List of values corresponding to conditions
+    - default: Value when no conditions match
+    
+    EXAMPLE: result_df['CATEGORY'] = conditional_mapping(source_df, 'MTART', ["== 'ROH'", "== 'HALB'"], value_map=['Raw', 'Semi'], default='Other')
+
+    ===================================================================================
+
+    5. initialize_target(target_df: Optional[pd.DataFrame], required_columns: List[str]) -> pd.DataFrame
+
+    PARAMETERS:
+    - target_df: Target pandas DataFrame, can be None
+    - required_columns: List of column names that must exist in result
+    
+    EXAMPLE: target_df = initialize_target(target_df, ['PRODUCT', 'MTART', 'MEINS'])
+
+    ===================================================================================
+
+    6. join_tables(main_df: pd.DataFrame, other_df: pd.DataFrame, main_key: str, other_key: str, fields_to_add: List[str]) -> pd.DataFrame
+
+    PARAMETERS:
+    - main_df: Main pandas DataFrame to update
+    - other_df: Other pandas DataFrame to get data from
+    - main_key: Key field in main_df
+    - other_key: Key field in other_df
+    - fields_to_add: List of field names from other_df to add to main_df
+    
+    EXAMPLE: result_df = join_tables(source_df, target_df, 'MATNR', 'PRODUCT', ['MAKTX', 'MEINS'])
+
+    ===================================================================================
+
+    7. aggregate_data(df: pd.DataFrame, group_by: Union[str, List[str]], agg_functions: Dict[str, Union[str, List[str]]]) -> pd.DataFrame
+
+    PARAMETERS:
+    - df: Pandas DataFrame to aggregate
+    - group_by: Column(s) to group by (string or list of strings)
+    - agg_functions: Dictionary mapping columns to agg functions. Functions MUST be one of: 'sum', 'mean', 'min', 'max', 'count'
+    
+    EXAMPLE: result_df = aggregate_data(source_df, 'WERKS', {'STOCK': 'sum', 'PRICE': 'mean'})
+
+    ===================================================================================
+
+    8. safe_combine_tables(df1: Optional[pd.DataFrame], df2: Optional[pd.DataFrame], key: Optional[str] = None) -> pd.DataFrame
+
+    PARAMETERS:
+    - df1: First pandas DataFrame, can be None
+    - df2: Second pandas DataFrame, can be None
+    - key: Optional key field for matching records
+    
+    EXAMPLE: result_df = safe_combine_tables(target_df, new_data, key='PRODUCT')
+
+    ===================================================================================
 
     SAMPLE DATA:
     Source data samples:
@@ -420,19 +504,25 @@ Your steps (numbered, 5-10 steps maximum):
 
     REQUIREMENTS:
     1. Follow the steps PRECISELY in order
-    2. Handle both empty and non-empty target dataframes
-    3. Handle multiple source tables correctly - they are provided as a dictionary where keys are table names
-    4. Return the modified target dataframe (df2)
-    5. Use numpy for conditional logic if needed (already imported as np)
-    6. If you don't find target_field in target_table but it is present in the sample data then add the column to the target table
-    7. Use the key mapping to match records between source and target tables
+    2. Use the utility functions whenever appropriate
+    3. ALWAYS match the exact parameter names and formats shown in the reference above
+    4. For conditional operations like filter_dataframe, use ONLY the exact condition_type strings listed
+    5. When constructing conditions for conditional_mapping, use the EXACT formats shown
+    6. Always import transform_utils at the beginning
+    7. Handle both empty and non-empty target dataframes
+    8. Return the modified target dataframe (target_df)
+    9. Use numpy for conditional logic if needed (already imported as np)
+    10. If you don't find target_field in target_table but it is present in the sample data, add the column
 
     Complete this function:
-    
+
     def analyze_data(source_dfs, target_df):
         # source_dfs is a dictionary where keys are table names and values are dataframes
         # Example: source_dfs = {{'table1': df1, 'table2': df2}}
         # target_df is the target dataframe to update
+        
+        # Import the utility functions
+        from transform_utils import *
         
         # Get list of source tables for easier reference
         source_tables = list(source_dfs.keys())
@@ -441,7 +531,7 @@ Your steps (numbered, 5-10 steps maximum):
         
         # Make sure to return the modified target_df
         return target_df
-    Return ONLY the complete Python function: """
+    """
             
             try:
                 response = self.client.models.generate_content(
@@ -484,13 +574,15 @@ Your steps (numbered, 5-10 steps maximum):
             logger.error(f"Error in _generate_code_from_simple_plan: {e}")
             # Generate a safe default function if all else fails
             return """def analyze_data(source_dfs, target_df):
-    # Safety function - error occurred during code generation
-    # Get list of source tables
-    source_tables = list(source_dfs.keys())
-    
-    # Return unmodified target dataframe
-    return target_df"""
-
+        # Import the utility functions
+        from transform_utils import *
+        
+        # Get list of source tables
+        source_tables = list(source_dfs.keys())
+        
+        # Return unmodified target dataframe
+        return target_df"""
+        
     def _initialize_templates(self):
         """Initialize code templates for common operations with support for multiple source tables"""
         try:
