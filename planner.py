@@ -474,6 +474,8 @@ def parse_data_with_context(joined_df, query, session_id=None, previous_context=
     - Use the key mappings to determine the relationship between source and target fields (format is target_field:source_field).
     - Consider the current state of the target table when determining what needs to be inserted or updated.
     - if the user says about something that previous transformations, use target table as a way to know what is already done.
+    - properly make logic about if else cases.
+    - if a user talks about matching entries then use the key mappings to determine the relationship between source and target fields and match entries from target table to source table.
     Respond with:
     ```json
     {{

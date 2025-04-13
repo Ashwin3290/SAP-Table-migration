@@ -313,7 +313,7 @@ Return ONLY the classification name with no explanation.
     Be specific about fields, values, and data types.
 
     Note:
-    - Make sure to handle queries with if/else logics correctly.
+    - Make sure to handle queries with if/else logics by properly adding if-elif-else blocks instead of just adding data directly.
     - Revolve your plans around using keys in the source and target tables to correct add or update data.
     - Use the utility functions as much as possible to avoid writing custom code.
     - If a query talks about if data in source table then he is meaning to look for key values that are common in the target table and source table.
@@ -520,6 +520,7 @@ Return ONLY the classification name with no explanation.
     10. Make sure to handle multiple source tables correctly
     11. Do not create sample dataframes and just use the data given in the prompt
     12. Only give the analyze_data function and do not add any other functions or classes
+    13. Do not make the transform_utils functions by youself based upon the prompt, just use them as they are already implemented and ready to be imported.
 
     Make the function like this :
 
@@ -863,6 +864,7 @@ else:
                 
             # Connect to database
             print(resolved_data['key_mapping'])
+
             if isinstance(resolved_data['key_mapping'][0],str):
                 return None,resolved_data['key_mapping'][0],session_id
             try:
