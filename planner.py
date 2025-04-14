@@ -558,6 +558,7 @@ def parse_data_with_context(
     - Consider the current state of the target table when determining what needs to be inserted or updated.
     - if the user says about something that previous transformations, use target table as a way to know what is already done.
     - properly make logic about if else cases.
+    - Do not use markdown format for the JSON response.
     - if a user talks about matching entries then use the key mappings to determine the relationship between source and target fields and match entries from target table to source table.
     Respond with:
     ```json

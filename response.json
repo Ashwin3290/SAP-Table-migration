@@ -1,65 +1,21 @@
 {
   "source_table_name": [
-    "MARA",
     "MARA_500",
-    "MARA_700"
+    "MARA_700",
+    "MARA"
   ],
   "source_field_names": [
-    "MATKL",
-    "MEINS"
+    "MTART",
+    "MATNR"
   ],
   "filtering_fields": [
-    "MATKL"
+    "MTART"
   ],
   "insertion_fields": [
-    "MEINS"
+    "MTART"
   ],
-  "transformation_logic": {
-    "steps": [
-      {
-        "step": 1,
-        "description": "Check Material Group (MATKL) in MARA table and assign a value based on its value.",
-        "source_table": "MARA",
-        "conditions": [
-          {
-            "condition": "MATKL in ('L002', 'ZMGRP1', '202R')",
-            "target_value": "GENAI01"
-          },
-          {
-            "condition": "MATKL in ('01', 'L001', 'ZSUK1RM1')",
-            "target_value": "GENAI02"
-          },
-          {
-            "condition": "MATKL in ('CH001', '02')",
-            "target_value": "GenAI03"
-          },
-          {
-            "condition": "ELSE",
-            "target_value": "GenAINo"
-          }
-        ]
-      },
-      {
-        "step": 2,
-        "description": "If no entries are found in MARA_500 for the given material number (MATNR), then check MARA_700 for the same material number (MATNR) and retrieve the Base Unit of Measure (MEINS).",
-        "source_table": "MARA_700",
-        "target_table": "MARA",
-        "condition": "No entries found in MARA_500 for MATNR",
-        "action": "Retrieve MEINS from MARA_700 where MATNR matches",
-        "key_mapping": "PRODUCT:MATNR"
-      },
-      {
-        "step": 3,
-        "description": "If no entries are found in MARA_700 for the given material number (MATNR), then retrieve the Base Unit of Measure (MEINS) from the MARA table.",
-        "source_table": "MARA",
-        "target_table": "MARA",
-        "condition": "No entries found in MARA_700 for MATNR",
-        "action": "Retrieve MEINS from MARA where MATNR matches",
-        "key_mapping": "PRODUCT:MATNR"
-      }
-    ]
-  },
-  "Resolved_query": "For each product, check the Material Group (MATKL) in the MARA table. If MATKL is in ('L002', 'ZMGRP1', '202R'), then assign 'GENAI01'. Else if MATKL is in ('01', 'L001', 'ZSUK1RM1'), then assign 'GENAI02'. Else if MATKL is in ('CH001', '02'), then assign 'GenAI03'. Otherwise, assign 'GenAINo'. If no entries are found in MARA_500 for a given product number (MATNR), check MARA_700 for the same product number and retrieve the Base Unit of Measure (MEINS). If no entries are found in MARA_700, then retrieve the Base Unit of Measure (MEINS) from the MARA table.",
+  "transformation_logic": "The transformation logic is as follows:\n\n1.  Check for the existence of a material in the MARA_500 table where the material number (MATNR) matches the PRODUCT field in the target table.\n2.  If a match is found in MARA_500, retrieve the corresponding material type (MTART) from MARA_500 and insert it into the target table.\n3.  If no match is found in MARA_500, check for the existence of the same material in the MARA_700 table.\n4.  If a match is found in MARA_700, retrieve the corresponding material type (MTART) from MARA_700 and insert it into the target table.\n5.  If no match is found in either MARA_500 or MARA_700, retrieve the corresponding material type (MTART) from the MARA table and insert it into the target table.\n\nIn essence, the transformation prioritizes MARA_500, then MARA_700, and finally MARA as the source for the material type (MTART) based on the existence of matching material numbers (MATNR) with the PRODUCT field in the target table.",
+  "Resolved_query": "For each product in the target table, check if a matching entry exists in the MARA_500 table based on the PRODUCT field (mapped to MATNR). If a match is found, retrieve the MTART field from MARA_500 and insert it into the target table. If no match is found in MARA_500, check MARA_700 using the same logic. If no match is found in MARA_700, retrieve the MTART field from the MARA table and insert it into the target table.",
   "target_table": [
     "t_24_Product_Basic_Data_mandatory_Ext"
   ],
@@ -67,10 +23,6 @@
     {
       "target_col": "PRODUCT",
       "source_col": "MATNR"
-    },
-    {
-      "target_col": "PRODUCT",
-      "source_col": "MEINS"
     }
   ]
 }

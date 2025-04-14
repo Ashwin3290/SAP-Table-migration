@@ -364,6 +364,7 @@ Return ONLY the classification name with no explanation.
     - Use the utility functions as much as possible to avoid writing custom code.
     - If a query talks about if data in source table then he is meaning to look for key values that are common in the target table and source table.
     - Do not give code or code snippets. Just write the plan.
+    - Do not use any other columns in the target table other than the ones mentioned in the prompt.
 
     Example:
     1. Import utility functions from transform_utils
