@@ -13,7 +13,6 @@ TableLLM is an intelligent data transformation system that uses natural language
 - [Database Analysis](#database-analysis)
 - [Session Management](#session-management)
 - [Error Handling](#error-handling)
-- [Contributing](#contributing)
 
 ## Overview
 

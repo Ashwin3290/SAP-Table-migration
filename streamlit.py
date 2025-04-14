@@ -16,14 +16,9 @@ st.set_page_config(
     page_icon="📊"
 )
 
-# Initialize SQLite connection for data access
 sqlite_conn = None
 # try:
 sqlite_conn = sqlite3.connect('db.sqlite3')
-#     st.sidebar.success("Connected to SQLite database")
-# except Exception as e:
-#     st.sidebar.warning(f"SQLite connection failed: {e}")
-
 # Initialize TableLLM
 tablellm = TableLLM()
 
@@ -318,40 +313,6 @@ with col2:
                 st.write(f"Query: {tx['query']}")
                 st.code(tx['code'], language="python")
     
-
-
-# Sidebar for settings
-# with st.sidebar:
-#     st.title("Settings")
-    
-#     st.session_state['show_code'] = st.checkbox("Show generated code by default", value=st.session_state['show_code'])
-    
-#     # Context information
-#     if st.session_state['transformation_session_id']:
-#         st.markdown("---")
-#         st.markdown("### Context Information")
-#         session_info = get_session_context(st.session_state['transformation_session_id'])
-        
-#         # Display target table state
-#         st.markdown("#### Target Table State")
-#         table_state = session_info['target_table_state']
-#         st.markdown(f"**Populated Fields:** {', '.join(table_state.get('populated_fields', ['None']))}")
-#         st.markdown(f"**Remaining Fields:** {', '.join(table_state.get('remaining_mandatory_fields', ['None']))}")
-        
-#         # Display token usage if available
-#         try:
-#             from token_tracker import get_token_usage_stats
-#             token_stats = get_token_usage_stats()
-            
-#             st.markdown("---")
-#             st.markdown("### Token Usage")
-#             st.markdown(f"**Total API Calls:** {token_stats['total_api_calls']}")
-#             st.markdown(f"**Input Tokens:** {token_stats['total_input_tokens']:,}")
-#             st.markdown(f"**Output Tokens:** {token_stats['total_output_tokens']:,}")
-#             st.markdown(f"**Total Tokens:** {token_stats['total_tokens']:,}")
-#         except:
-#             pass
-
 # Cleanup connections when app is closed
 def cleanup():
     if sqlite_conn:

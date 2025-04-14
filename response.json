@@ -1,57 +1,65 @@
 {
   "source_table_name": [
+    "MARA",
     "MARA_500",
-    "MARA_700",
-    "MARA"
+    "MARA_700"
   ],
   "source_field_names": [
-    "MATNR",
-    "MEINS",
-    "MTART"
+    "MATKL",
+    "MEINS"
   ],
   "filtering_fields": [
-    "MATNR",
-    "MTART"
+    "MATKL"
   ],
   "insertion_fields": [
     "MEINS"
   ],
   "transformation_logic": {
-    "step_1": {
-      "description": "Check for materials in MARA_500 that exist in the target table based on the PRODUCT:MATNR key mapping.",
-      "source_table": "MARA_500",
-      "join_condition": "MARA_500.MATNR = TargetTable.PRODUCT",
-      "condition": "Record exists in MARA_500",
-      "action": {
-        "type": "insert",
-        "target_field": "MEINS",
-        "source_field": "MARA_500.MEINS"
+    "steps": [
+      {
+        "step": 1,
+        "description": "Check Material Group (MATKL) in MARA table and assign a value based on its value.",
+        "source_table": "MARA",
+        "conditions": [
+          {
+            "condition": "MATKL in ('L002', 'ZMGRP1', '202R')",
+            "target_value": "GENAI01"
+          },
+          {
+            "condition": "MATKL in ('01', 'L001', 'ZSUK1RM1')",
+            "target_value": "GENAI02"
+          },
+          {
+            "condition": "MATKL in ('CH001', '02')",
+            "target_value": "GenAI03"
+          },
+          {
+            "condition": "ELSE",
+            "target_value": "GenAINo"
+          }
+        ]
+      },
+      {
+        "step": 2,
+        "description": "If no entries are found in MARA_500 for the given material number (MATNR), then check MARA_700 for the same material number (MATNR) and retrieve the Base Unit of Measure (MEINS).",
+        "source_table": "MARA_700",
+        "target_table": "MARA",
+        "condition": "No entries found in MARA_500 for MATNR",
+        "action": "Retrieve MEINS from MARA_700 where MATNR matches",
+        "key_mapping": "PRODUCT:MATNR"
+      },
+      {
+        "step": 3,
+        "description": "If no entries are found in MARA_700 for the given material number (MATNR), then retrieve the Base Unit of Measure (MEINS) from the MARA table.",
+        "source_table": "MARA",
+        "target_table": "MARA",
+        "condition": "No entries found in MARA_700 for MATNR",
+        "action": "Retrieve MEINS from MARA where MATNR matches",
+        "key_mapping": "PRODUCT:MATNR"
       }
-    },
-    "step_2": {
-      "description": "If no matching record is found in MARA_500, check MARA_700 for materials of type 'ROH' that exist in the target table based on the PRODUCT:MATNR key mapping.",
-      "source_table": "MARA_700",
-      "join_condition": "MARA_700.MATNR = TargetTable.PRODUCT",
-      "condition": "Record exists in MARA_700 AND MARA_700.MTART = 'ROH'",
-      "action": {
-        "type": "insert",
-        "target_field": "MEINS",
-        "source_field": "MARA_700.MEINS"
-      }
-    },
-    "step_3": {
-      "description": "If no matching record is found in MARA_500 or MARA_700, check MARA for materials that exist in the target table based on the PRODUCT:MATNR key mapping.",
-      "source_table": "MARA",
-      "join_condition": "MARA.MATNR = TargetTable.PRODUCT",
-      "condition": "Record exists in MARA",
-      "action": {
-        "type": "insert",
-        "target_field": "MEINS",
-        "source_field": "MARA.MEINS"
-      }
-    }
+    ]
   },
-  "Resolved_query": "For each material in the target table (PRODUCT), check if the material number (MATNR) exists in MARA_500. If it does, insert the corresponding Base Unit of Measure (MEINS) into the target table. If not, check if the material number (MATNR) exists in MARA_700 and the Product Type (MTART) is 'ROH'. If both conditions are met, insert the corresponding Base Unit of Measure (MEINS) into the target table. If the material is not found in either MARA_500 or MARA_700, check if the material number (MATNR) exists in MARA and insert the corresponding Base Unit of Measure (MEINS) into the target table.",
+  "Resolved_query": "For each product, check the Material Group (MATKL) in the MARA table. If MATKL is in ('L002', 'ZMGRP1', '202R'), then assign 'GENAI01'. Else if MATKL is in ('01', 'L001', 'ZSUK1RM1'), then assign 'GENAI02'. Else if MATKL is in ('CH001', '02'), then assign 'GenAI03'. Otherwise, assign 'GenAINo'. If no entries are found in MARA_500 for a given product number (MATNR), check MARA_700 for the same product number and retrieve the Base Unit of Measure (MEINS). If no entries are found in MARA_700, then retrieve the Base Unit of Measure (MEINS) from the MARA table.",
   "target_table": [
     "t_24_Product_Basic_Data_mandatory_Ext"
   ],
@@ -59,6 +67,10 @@
     {
       "target_col": "PRODUCT",
       "source_col": "MATNR"
+    },
+    {
+      "target_col": "PRODUCT",
+      "source_col": "MEINS"
     }
   ]
 }
