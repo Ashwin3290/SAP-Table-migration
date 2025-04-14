@@ -379,7 +379,7 @@ Return ONLY the classification name with no explanation.
 
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash-thinking-exp-01-21", contents=base_prompt
+                    model="gemini-2.0-flash", contents=base_prompt
                 )
 
                 # Validate response
@@ -595,7 +595,7 @@ Return ONLY the classification name with no explanation.
 
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt
+                    model="gemini-2.0-flash", contents=prompt
                 )
 
                 # Validate response
@@ -730,7 +730,7 @@ Return ONLY the classification name with no explanation.
             # Call the AI to fix the code
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt
+                    model="gemini-2.0-flash", contents=prompt
                 )
 
                 # Validate response
