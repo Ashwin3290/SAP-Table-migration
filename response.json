@@ -9,13 +9,13 @@
     "MATNR"
   ],
   "filtering_fields": [
-    "MTART"
+    "MATNR"
   ],
   "insertion_fields": [
     "MTART"
   ],
-  "transformation_logic": "The transformation logic is as follows:\n\n1.  Check for the existence of a material in the MARA_500 table where the material number (MATNR) matches the PRODUCT field in the target table.\n2.  If a match is found in MARA_500, retrieve the corresponding material type (MTART) from MARA_500 and insert it into the target table.\n3.  If no match is found in MARA_500, check for the existence of the same material in the MARA_700 table.\n4.  If a match is found in MARA_700, retrieve the corresponding material type (MTART) from MARA_700 and insert it into the target table.\n5.  If no match is found in either MARA_500 or MARA_700, retrieve the corresponding material type (MTART) from the MARA table and insert it into the target table.\n\nIn essence, the transformation prioritizes MARA_500, then MARA_700, and finally MARA as the source for the material type (MTART) based on the existence of matching material numbers (MATNR) with the PRODUCT field in the target table.",
-  "Resolved_query": "For each product in the target table, check if a matching entry exists in the MARA_500 table based on the PRODUCT field (mapped to MATNR). If a match is found, retrieve the MTART field from MARA_500 and insert it into the target table. If no match is found in MARA_500, check MARA_700 using the same logic. If no match is found in MARA_700, retrieve the MTART field from the MARA table and insert it into the target table.",
+  "transformation_logic": "The transformation logic is as follows:\n\n1.  Check for entries in the MARA_500 table where MARA_500.MATNR matches the existing target table's PRODUCT field (using the key mapping PRODUCT:MATNR) and the Product Type is ROH.\n2.  If a match is found, insert the corresponding MTART (Material Type) from MARA_500 into the target table.\n3.  If no match is found in MARA_500, check the MARA_700 table where MARA_700.MATNR matches the existing target table's PRODUCT field and the Product Type is ROH.\n4.  If a match is found in MARA_700, insert the corresponding MTART from MARA_700 into the target table.\n5.  If no match is found in either MARA_500 or MARA_700, check the MARA table where MARA.MATNR matches the existing target table's PRODUCT field.\n6.  If a match is found in MARA, insert the corresponding MTART from MARA into the target table.",
+  "Resolved_query": "Check for entries in the MARA_500 table where the Product Number (MATNR) matches existing PRODUCT values in the target table and the product type is ROH. If matching entries are found, then insert the Material Type (MTART) field from the MARA_500 table into the target table. Otherwise, check MARA_700 table for the same conditions and if matching entries are found, insert the Material Type (MTART) field from the MARA_700 table into the target table. If no entries are found in MARA_500 or MARA_700, retrieve the Material Type (MTART) from the MARA table based on matching Product Number (MATNR) with PRODUCT values in the target table and insert into the target table.",
   "target_table": [
     "t_24_Product_Basic_Data_mandatory_Ext"
   ],

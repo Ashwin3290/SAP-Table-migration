@@ -316,7 +316,8 @@ Return ONLY the classification name with no explanation.
 
     QUERY DETAILS:
     User's intent: {planner_info.get('restructured_query', 'Transform data')}
-    Transformation logic: {planner_info.get('transformation_logic', 'Simple transformation')}
+    # Transformation logic: {planner_info.get('transformation_logic', 'Simple transformation')}
+    Resolved Query: {planner_info.get('restructured_query', 'Transform data')}
     Source table: {planner_info.get('source_table', ['source_table'])}
     Target table: {planner_info.get('target_table', ['target_table'])}
     Source field(s): {source_fields}
@@ -575,6 +576,7 @@ Return ONLY the classification name with no explanation.
     12. Only give the analyze_data function and do not add any other functions or classes
     13. Do not make any mock transform_utils functions by youself based upon the prompt, just use them as they are already implemented and ready to be imported.
     14. Do not make any mock utils function, import them from the transform_utils module, Assume it already exists and is ready to be imported.
+    15. Add/Update the Transformed data to target_df and just return that only.
     Make the function like this :
 
     from transform_utils import *
