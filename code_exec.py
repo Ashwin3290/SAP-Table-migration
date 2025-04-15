@@ -10,6 +10,9 @@ from io import StringIO
 import sqlite3
 import json
 
+class ValidationError(Exception):
+    """Custom exception for validation errors."""
+    pass
 
 def docx2tabular(docx_path):
     """Convert a DOCX table to a list of rows"""
@@ -106,8 +109,61 @@ import seaborn as sns
     
     return filename
 
+def validation_handling(source_df,target_df, result, target_sap_fields):
+    error_msg = ""
+    
+    # Check 1: Length validation - target_df should never be smaller than result
+    if len(target_df) < len(result) or len(target_df) == 0:
+        error_msg += f"Error: Target dataframe has fewer rows than result. Target: {len(target_df)}, Result: {len(result)}\n"
+    
+    # Get non-null columns in both dataframes
+    target_not_null_columns = set(target_df.columns[target_df.notna().any()].tolist())
+    result_not_null_columns = set(result.columns[result.notna().any()].tolist())
+    
+    # For debugging purposes
+    print("Target non-null columns:", target_not_null_columns)
+    print("#########################################")
+    print("Result non-null columns:", result_not_null_columns)
+    print("#########################################")
+    
+    
+    # Check if the target_sap_field should be included
+    expected_not_null_columns = target_not_null_columns.copy()
+    if target_sap_fields in target_df.columns:
+        # If the target_sap_field has non-null values or isn't already in the not-null columns,
+        # we add it to our expected non-null columns
+        if target_sap_fields not in target_not_null_columns or target_df[target_sap_fields].notna().any():
+            expected_not_null_columns.add(target_sap_fields)
+    
+    # Now validate that result has exactly the expected non-null columns
+    if result_not_null_columns != expected_not_null_columns:
+        # Find specific differences
+        missing_in_result = expected_not_null_columns - result_not_null_columns
+        if missing_in_result:
+            error_msg += f"Error: Expected non-null columns missing in result: {missing_in_result}\n"
+        
+        unexpected_in_result = result_not_null_columns - expected_not_null_columns
+        if unexpected_in_result:
+            error_msg += f"Error: Unexpected non-null columns in result: {unexpected_in_result}\n"
+        
+        # Even if the counts match but the columns are different, it's still an error
+        if len(result_not_null_columns) == len(expected_not_null_columns):
+            error_msg += "Error: Result has the same number of non-null columns as expected, but they are different columns\n"
+    else:
+        print("Validation passed: Result contains the correct set of non-null columns")
+    
 
-def execute_code(file_path, source_dfs, target_df):
+    # Check for any unexpected non-null columns in result
+    # expected_not_null = set(target_not_null_columns).union(set(sap_fields_not_null))
+    # unexpected_not_null = set(result_not_null_columns) - expected_not_null
+    # if unexpected_not_null:
+    #     error_msg += f"Unexpected non-null columns in result: {unexpected_not_null}\n"
+
+    
+    if error_msg:
+        raise ValidationError(f"Validation errors:\n{error_msg}")
+
+def execute_code(file_path, source_dfs, target_df,target_sap_fields):
     """Execute a Python file and return the result or detailed error traceback"""
     try:
         # Add the current directory to sys.path to ensure utilities can be imported
@@ -119,8 +175,10 @@ def execute_code(file_path, source_dfs, target_df):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
-        result = module.analyze_data(source_dfs, target_df)          
-        return result
+        result = module.analyze_data(source_dfs, target_df)
+        validation_handling(source_dfs,target_df,result,target_sap_fields)
+        target_df[target_sap_fields] = result[target_sap_fields]          
+        return target_df
     except Exception as e:
         # Capture the full traceback with detailed information
         import traceback
