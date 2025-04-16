@@ -574,6 +574,10 @@ Return ONLY the classification name with no explanation.
     12. Only give the analyze_data function and do not add any other functions or classes
     13. Do not make any mock transform_utils functions by youself based upon the prompt, just use them as they are already implemented and ready to be imported.
     14. Do not make any mock utils function, import them from the transform_utils module, Assume it already exists and is ready to be imported.
+
+    Note:
+    - save transformation as intermediates in the code and at the end merge and return the final target dataframe.
+
     Make the function like this :
 
     from transform_utils import *
@@ -1118,7 +1122,7 @@ else:
                                 is_double=True,
                             )
                             fixed_result = execute_code(
-                                fixed_code_file, source_dfs, target_df
+                                fixed_code_file, source_dfs, target_df, target_sap_fields
                             )
 
                             # If the fixed code worked (result is not an error dictionary), use it

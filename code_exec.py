@@ -113,7 +113,7 @@ def validation_handling(source_df,target_df, result, target_sap_fields):
     error_msg = ""
     
     # Check 1: Length validation - target_df should never be smaller than result
-    if len(target_df) < len(result) or len(target_df) == 0:
+    if len(target_df) < len(result) and len(target_df) != 0:
         error_msg += f"Error: Target dataframe has fewer rows than result. Target: {len(target_df)}, Result: {len(result)}\n"
     
     # Get non-null columns in both dataframes
