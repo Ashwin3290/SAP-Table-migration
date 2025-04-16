@@ -766,7 +766,7 @@ def process_query(
             return None
 
         # Handle missing values in the dataframe
-        joined_df = missing_values_handling(joined_df)
+        # joined_df = missing_values_handling(joined_df)
 
         # Save joined data for debugging
         try:
