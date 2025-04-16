@@ -567,7 +567,6 @@ def parse_data_with_context(
     "source_field_names": [List of all source_fields],
     "filtering_fields": [List of filtering fields],
     "insertion_fields": [List of fields to be inserted],
-    "transformation_logic": [Detailed transformation logic that uses key mappings],
     "Resolved_query": [Rephrased query with resolved data]
     }}
     ```
@@ -669,7 +668,6 @@ def parse_data_with_context(
                     "source_field_names",
                     "filtering_fields",
                     "insertion_fields",
-                    "transformation_logic",
                     "Resolved_query",
                 ]
 
@@ -936,7 +934,6 @@ def process_info(resolved_data, conn, target_sap_fields):
             "source_field_names",
             "target_table",
             "filtering_fields",
-            "transformation_logic",
             "Resolved_query",
             "insertion_fields",
         ]
@@ -953,7 +950,6 @@ def process_info(resolved_data, conn, target_sap_fields):
             "target_table_name": resolved_data["target_table"],
             "target_sap_fields": target_sap_fields,
             "filtering_fields": resolved_data["filtering_fields"],
-            "transformation_logic": resolved_data["transformation_logic"],
             "restructured_query": resolved_data["Resolved_query"],
             "insertion_fields": resolved_data["insertion_fields"],
         }

@@ -100,7 +100,6 @@ class TableLLM:
                 # Query understanding
                 "original_query": resolved_data.get("original_query", ""),
                 "restructured_query": resolved_data.get("restructured_query", ""),
-                "transformation_logic": resolved_data.get("transformation_logic", ""),
                 # Session information
                 "session_id": resolved_data.get("session_id", ""),
             }
@@ -196,7 +195,6 @@ class TableLLM:
                 "original_query": "",
                 "restructured_query": "",
                 "key_columns": [],
-                "transformation_logic": "",
                 "session_id": (
                     resolved_data.get("session_id", "") if resolved_data else ""
                 ),
@@ -245,7 +243,7 @@ Return ONLY the classification name with no explanation.
 """
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash", contents=prompt
+                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt
                 )
 
                 # Validate response
@@ -316,7 +314,6 @@ Return ONLY the classification name with no explanation.
 
     QUERY DETAILS:
     User's intent: {planner_info.get('restructured_query', 'Transform data')}
-    # Transformation logic: {planner_info.get('transformation_logic', 'Simple transformation')}
     Resolved Query: {planner_info.get('restructured_query', 'Transform data')}
     Source table: {planner_info.get('source_table', ['source_table'])}
     Target table: {planner_info.get('target_table', ['target_table'])}
@@ -381,7 +378,7 @@ Return ONLY the classification name with no explanation.
             try:
                 print(base_prompt)
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash", contents=base_prompt
+                    model="gemini-2.0-flash-thinking-exp-01-21", contents=base_prompt
                 )
 
                 # Validate response
@@ -577,7 +574,6 @@ Return ONLY the classification name with no explanation.
     12. Only give the analyze_data function and do not add any other functions or classes
     13. Do not make any mock transform_utils functions by youself based upon the prompt, just use them as they are already implemented and ready to be imported.
     14. Do not make any mock utils function, import them from the transform_utils module, Assume it already exists and is ready to be imported.
-    15. Add/Update the Transformed data to target_df and just return that only.
     Make the function like this :
 
     from transform_utils import *
@@ -598,7 +594,7 @@ Return ONLY the classification name with no explanation.
 
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash", contents=prompt
+                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt
                 )
 
                 # Validate response
@@ -733,7 +729,7 @@ Return ONLY the classification name with no explanation.
             # Call the AI to fix the code
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash", contents=prompt
+                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt
                 )
 
                 # Validate response
@@ -1086,7 +1082,7 @@ else:
                 # 7. Execute the generated code with error handling
                 try:
                     code_file = create_code_file(code_content, query, is_double=True)
-                    result = execute_code(code_file, source_dfs, target_df)
+                    result = execute_code(code_file, source_dfs, target_df, target_sap_fields)
 
                     # Check if result is an error (now it's a dictionary with traceback information)
                     if isinstance(result, dict) and "error_type" in result:
