@@ -1,137 +1,137 @@
 fields,description,isMandatory,isKey,sap_structure,source_table,source_field_name,target_sap_table,target_sap_field,segement_name,table_name
 PRODUCT,Product Number,True,True,S_MARA,MARA,MATNR,S_MARA,PRODUCT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
 MTART,Product Type,True,True,S_MARA,"MARA,MARA_500,MARA_700",MTART,S_MARA,MTART,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-ATTYP,Product Category,False,False,S_MARA,MARA,ATTYP,S_MARA,ATTYP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-SATNR,Configuration Product for Retail Variant,False,False,S_MARA,MARA,SATNR,S_MARA,SATNR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MATKL,Product Group,False,False,S_MARA,MARA,MATKL,S_MARA,MATKL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MBRSH,Industry Sector,False,False,S_MARA,MARA,MBRSH,S_MARA,MBRSH,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MAKTX,Description,True,False,S_MARA,MARA,MAKTX,S_MARA,MAKTX,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-SPRAS,Language Key,True,False,S_MARA,MARA,SPRAS,S_MARA,SPRAS,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+ATTYP,Product Category,False,False,S_MARA,,,S_MARA,ATTYP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+SATNR,Configuration Product for Retail Variant,False,False,S_MARA,,,S_MARA,SATNR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MATKL,Product Group,False,False,S_MARA,,,S_MARA,MATKL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MBRSH,Industry Sector,False,False,S_MARA,,,S_MARA,MBRSH,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MAKTX,Description,True,False,S_MARA,,,S_MARA,MAKTX,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+SPRAS,Language Key,True,False,S_MARA,,,S_MARA,SPRAS,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
 MEINS,Base Unit of Measure (ISO Format),True,False,S_MARA,"MARA,MARA_500,MARA_700",MEINS,S_MARA,MEINS,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-AENNR,Change Number,False,False,S_MARA,MARA,AENNR,S_MARA,AENNR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-REVLV,Revision Level,False,False,S_MARA,MARA,REVLV,S_MARA,REVLV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-EAN11,GTIN,False,False,S_MARA,MARA,EAN11,S_MARA,EAN11,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-NUMTP,GTIN Category,False,False,S_MARA,MARA,NUMTP,S_MARA,NUMTP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-SPART,Division,False,False,S_MARA,MARA,SPART,S_MARA,SPART,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-BISMT,Old Product Number,False,False,S_MARA,MARA,BISMT,S_MARA,BISMT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-PRDHA,Product Hierarchy,False,False,S_MARA,MARA,PRDHA,S_MARA,PRDHA,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-BRAND_ID,Brand,False,False,S_MARA,MARA,BRAND_ID,S_MARA,BRAND_ID,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-XCHPF,Batch Management Required Ind.,False,False,S_MARA,MARA,XCHPF,S_MARA,XCHPF,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MLGUT,Has Empties,False,False,S_MARA,MARA,MLGUT,S_MARA,MLGUT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-DATAB,Valid From,False,False,S_MARA,MARA,DATAB,S_MARA,DATAB,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-LIQDT,Deletion Date,False,False,S_MARA,MARA,LIQDT,S_MARA,LIQDT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-KUNNR,Competitor,False,False,S_MARA,MARA,KUNNR,S_MARA,KUNNR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-NORMT,Industry Standard Description,False,False,S_MARA,MARA,NORMT,S_MARA,NORMT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-GROES,Size/Dimensions,False,False,S_MARA,MARA,GROES,S_MARA,GROES,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-LABOR,Laboratory / Design Office,False,False,S_MARA,MARA,LABOR,S_MARA,LABOR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-INHAL,Net Contents,False,False,S_MARA,MARA,INHAL,S_MARA,INHAL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-INHME,Net Contents Unit (ISO Format),False,False,S_MARA,MARA,INHME,S_MARA,INHME,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-INHBR,Gross Contens,False,False,S_MARA,MARA,INHBR,S_MARA,INHBR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-VPREH,Comparison Price Unit,False,False,S_MARA,MARA,VPREH,S_MARA,VPREH,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-EXTWG,External Product Group,False,False,S_MARA,MARA,EXTWG,S_MARA,EXTWG,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MTPOS_MARA,General Item Category Group,False,False,S_MARA,MARA,MTPOS_MARA,S_MARA,MTPOS_MARA,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-BEGRU,Authorization Group,False,False,S_MARA,MARA,BEGRU,S_MARA,BEGRU,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MSTAE,Cross-Plant Product Status,False,False,S_MARA,MARA,MSTAE,S_MARA,MSTAE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MSTDE,Valid-From Date,False,False,S_MARA,MARA,MSTDE,S_MARA,MSTDE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-SERLV,Level of Explicitness for Serial Number,False,False,S_MARA,MARA,SERLV,S_MARA,SERLV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-QMPUR,Quality Manag. in Procurement Is Active,False,False,S_MARA,MARA,QMPUR,S_MARA,QMPUR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-ANIMAL_ORIGIN,Animal Origin,False,False,S_MARA,MARA,ANIMAL_ORIGIN,S_MARA,ANIMAL_ORIGIN,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-ANP,ANP Code,False,False,S_MARA,MARA,ANP,S_MARA,ANP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-BRGEW,Gross Weight,False,False,S_MARA,MARA,BRGEW,S_MARA,BRGEW,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-NTGEW,Net Weight,False,False,S_MARA,MARA,NTGEW,S_MARA,NTGEW,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-GEWEI,Unit of Weight (ISO Format),False,False,S_MARA,MARA,GEWEI,S_MARA,GEWEI,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-LAENG,Length,False,False,S_MARA,MARA,LAENG,S_MARA,LAENG,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-BREIT,Width,False,False,S_MARA,MARA,BREIT,S_MARA,BREIT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-HOEHE,Height,False,False,S_MARA,MARA,HOEHE,S_MARA,HOEHE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MEABM,Unit for Length/Width/Height(ISO Format),False,False,S_MARA,MARA,MEABM,S_MARA,MEABM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-VOLUM,Volume,False,False,S_MARA,MARA,VOLUM,S_MARA,VOLUM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-VOLEH,Volume Unit,False,False,S_MARA,MARA,VOLEH,S_MARA,VOLEH,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-CAPAUSE,Capacity Usage,False,False,S_MARA,MARA,CAPAUSE,S_MARA,CAPAUSE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-CHML_CMPLNC_RLVNCE_IND,Compliance Relevant,False,False,S_MARA,MARA,CHML_CMPLNC_RLVNCE_IND,S_MARA,CHML_CMPLNC_RLVNCE_IND,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-KZKFG,Product Is Configurable,False,False,S_MARA,MARA,KZKFG,S_MARA,KZKFG,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-BSTME,Order Unit of Measure (ISO Format),False,False,S_MARA,MARA,BSTME,S_MARA,BSTME,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-EKWSL,Purchasing Value Key,False,False,S_MARA,MARA,EKWSL,S_MARA,EKWSL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-VABME,State of Variable Purchase Order Unit,False,False,S_MARA,MARA,VABME,S_MARA,VABME,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-BMATN,Internal Product Number,False,False,S_MARA,MARA,BMATN,S_MARA,BMATN,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MFRPN,Manufacturer Part Number,False,False,S_MARA,MARA,MFRPN,S_MARA,MFRPN,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MFRNR,Manufacturer Number,False,False,S_MARA,MARA,MFRNR,S_MARA,MFRNR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MPROF,Manufacturer Part Profile,False,False,S_MARA,MARA,MPROF,S_MARA,MPROF,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-TRAGR,Transportation Group,False,False,S_MARA,MARA,TRAGR,S_MARA,TRAGR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MSTAV,Cross-Distribution Chain Product Status,False,False,S_MARA,MARA,MSTAV,S_MARA,MSTAV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MSTDV,Valid From Date for Status,False,False,S_MARA,MARA,MSTDV,S_MARA,MSTDV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-PMATA,Pricing Reference Product,False,False,S_MARA,MARA,PMATA,S_MARA,PMATA,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-SPROF,Pricing Profile for Variants,False,False,S_MARA,MARA,SPROF,S_MARA,SPROF,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-ALLOW_PMAT_IGNO,Variant Price Allowed,False,False,S_MARA,MARA,ALLOW_PMAT_IGNO,S_MARA,ALLOW_PMAT_IGNO,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-SOM_CYCLE,Billing Cycle,False,False,S_MARA,MARA,SOM_CYCLE,S_MARA,SOM_CYCLE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-SOM_CYCLE_RULE,Billing Cycle Determination Rule,False,False,S_MARA,MARA,SOM_CYCLE_RULE,S_MARA,SOM_CYCLE_RULE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-SOM_TC_SCHEMA,Assignment Schema,False,False,S_MARA,MARA,SOM_TC_SCHEMA,S_MARA,SOM_TC_SCHEMA,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-BBTYP,Assortment List Type,False,False,S_MARA,MARA,BBTYP,S_MARA,BBTYP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-SERVV,Service Agreement,False,False,S_MARA,MARA,SERVV,S_MARA,SERVV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MAGRV,Product Group: Packaging Materials,False,False,S_MARA,MARA,MAGRV,S_MARA,MAGRV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-VHIART,Packaging Product Type,False,False,S_MARA,MARA,VHIART,S_MARA,VHIART,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-ERGEW,Allowed Packaging Weight,False,False,S_MARA,MARA,ERGEW,S_MARA,ERGEW,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-ERGEI,Unit of Allowed Packaging Weight,False,False,S_MARA,MARA,ERGEI,S_MARA,ERGEI,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-GEWTO,Excess Weight Tolerance for HU,False,False,S_MARA,MARA,GEWTO,S_MARA,GEWTO,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-ERVOL,Allowed Packaging Volume,False,False,S_MARA,MARA,ERVOL,S_MARA,ERVOL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-ERVOE,Unit of Allowed Packaging Volume,False,False,S_MARA,MARA,ERVOE,S_MARA,ERVOE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-KZGVH,Packaging Product Is Closed Packaging,False,False,S_MARA,MARA,KZGVH,S_MARA,KZGVH,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-VOLTO,Excess Volume Tolerance for HU,False,False,S_MARA,MARA,VOLTO,S_MARA,VOLTO,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-IPRKZ,Period Indicator for Shelf Life,False,False,S_MARA,MARA,IPRKZ,S_MARA,IPRKZ,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-RAUBE,Storage Conditions,False,False,S_MARA,MARA,RAUBE,S_MARA,RAUBE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-TEMPB,Temperature Conditions Indicator,False,False,S_MARA,MARA,TEMPB,S_MARA,TEMPB,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-BEHVO,Container Requirements,False,False,S_MARA,MARA,BEHVO,S_MARA,BEHVO,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-STOFF,Hazardous Product Number,False,False,S_MARA,MARA,STOFF,S_MARA,STOFF,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-ETIAR,Label Type,False,False,S_MARA,MARA,ETIAR,S_MARA,ETIAR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-ETIFO,Label Form,False,False,S_MARA,MARA,ETIFO,S_MARA,ETIFO,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-WESCH,Number of Goods Receipt/Issue Slips,False,False,S_MARA,MARA,WESCH,S_MARA,WESCH,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-XGCHP,Indicator: Approved Batch Rec. Required,False,False,S_MARA,MARA,XGCHP,S_MARA,XGCHP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MHDHB,Total Shelf Life,False,False,S_MARA,MARA,MHDHB,S_MARA,MHDHB,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MHDRZ,Minimum Remaining Shelf Life,False,False,S_MARA,MARA,MHDRZ,S_MARA,MHDRZ,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-SLED_BBD,Indi. for the Shelf Life Expiration Date,False,False,S_MARA,MARA,SLED_BBD,S_MARA,SLED_BBD,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MHDLP,Storage Percentage,False,False,S_MARA,MARA,MHDLP,S_MARA,MHDLP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-RDMHD,Rounding Rule for Calculation of SLED,False,False,S_MARA,MARA,RDMHD,S_MARA,RDMHD,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-HNDLCODE,Handling Indicator,False,False,S_MARA,MARA,HNDLCODE,S_MARA,HNDLCODE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-WHMATGR,Warehouse Product Group,False,False,S_MARA,MARA,WHMATGR,S_MARA,WHMATGR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-WHSTC,Warehouse Storage Condition,False,False,S_MARA,MARA,WHSTC,S_MARA,WHSTC,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-HUTYP_DFLT,Standard Handling Unit Type,False,False,S_MARA,MARA,HUTYP_DFLT,S_MARA,HUTYP_DFLT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-SERIAL,Serial Number Profile,False,False,S_MARA,MARA,SERIAL,S_MARA,SERIAL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-PILFERABLE,Pilferable,False,False,S_MARA,MARA,PILFERABLE,S_MARA,PILFERABLE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-HAZMAT,Relevant for Hazardous Substances,False,False,S_MARA,MARA,HAZMAT,S_MARA,HAZMAT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-QQTIME,Quarantine Period,False,False,S_MARA,MARA,QQTIME,S_MARA,QQTIME,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-QQTIMEUOM,Time Unit for Quarantine Period,False,False,S_MARA,MARA,QQTIMEUOM,S_MARA,QQTIMEUOM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-QGRP,Quality Inspection Group,False,False,S_MARA,MARA,QGRP,S_MARA,QGRP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-HUTYP,Handling Unit Type,False,False,S_MARA,MARA,HUTYP,S_MARA,HUTYP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MAXC,Maximum Capacity,False,False,S_MARA,MARA,MAXC,S_MARA,MAXC,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MAXC_TOL,Overcapacity Tolerance,False,False,S_MARA,MARA,MAXC_TOL,S_MARA,MAXC_TOL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-TARE_VAR,Variable Tare Weight,False,False,S_MARA,MARA,TARE_VAR,S_MARA,TARE_VAR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MAXL,Max. Pack. Length,False,False,S_MARA,MARA,MAXL,S_MARA,MAXL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MAXDIM_UOM,UoM for Max. Pack. Length (ISO Format),False,False,S_MARA,MARA,MAXDIM_UOM,S_MARA,MAXDIM_UOM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MAXB,Max. Pack. Width,False,False,S_MARA,MARA,MAXB,S_MARA,MAXB,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-MAXH,Max. Pack. Height,False,False,S_MARA,MARA,MAXH,S_MARA,MAXH,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-RBNRM,Catalog Profile,False,False,S_MARA,MARA,RBNRM,S_MARA,RBNRM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-SSTUF,Assortment Grade,False,False,S_MARA,MARA,SSTUF,S_MARA,SSTUF,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-LSTVZ,Listing Procedure,False,False,S_MARA,MARA,LSTVZ,S_MARA,LSTVZ,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-LDVZL,Listing Period Start Date,False,False,S_MARA,MARA,LDVZL,S_MARA,LDVZL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-LDBZL,Listing Period End Date,False,False,S_MARA,MARA,LDBZL,S_MARA,LDBZL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-LSTFL,Listing Procedure,False,False,S_MARA,MARA,LSTFL,S_MARA,LSTFL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-LDVFL,Listing Period Start Date,False,False,S_MARA,MARA,LDVFL,S_MARA,LDVFL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-LDBFL,Listing Period End Date,False,False,S_MARA,MARA,LDBFL,S_MARA,LDBFL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-VDVZL,Sales Period Start Date,False,False,S_MARA,MARA,VDVZL,S_MARA,VDVZL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-VDBZL,Sales Period End Date,False,False,S_MARA,MARA,VDBZL,S_MARA,VDBZL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-VDVFL,Sales Period Start Date,False,False,S_MARA,MARA,VDVFL,S_MARA,VDVFL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-VDBFL,Sales Period End Date,False,False,S_MARA,MARA,VDBFL,S_MARA,VDBFL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-WAUSM,Delivery Unit of Measure (ISO Format),False,False,S_MARA,MARA,WAUSM,S_MARA,WAUSM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-WVRKM,Sales Unit of Measure (ISO Format),False,False,S_MARA,MARA,WVRKM,S_MARA,WVRKM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-WMAAB,ABC Indicator,False,False,S_MARA,MARA,WMAAB,S_MARA,WMAAB,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-WBKLA,Valuation Class,False,False,S_MARA,MARA,WBKLA,S_MARA,WBKLA,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-WHERL,Country/Region of Origin,False,False,S_MARA,MARA,WHERL,S_MARA,WHERL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-WHERR,Region of Origin,False,False,S_MARA,MARA,WHERR,S_MARA,WHERR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-WEKGR,Purchasing Group,False,False,S_MARA,MARA,WEKGR,S_MARA,WEKGR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-BWSCL,Source of Supply,False,False,S_MARA,MARA,BWSCL,S_MARA,BWSCL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-TAKLV,Tax Classification,False,False,S_MARA,MARA,TAKLV,S_MARA,TAKLV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-WLADG,Loading Group,False,False,S_MARA,MARA,WLADG,S_MARA,WLADG,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-WBWSP,Valuation Margin,False,False,S_MARA,MARA,WBWSP,S_MARA,WBWSP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-PSTATQ,Indicator: Quality,False,False,S_MARA,MARA,PSTATQ,S_MARA,PSTATQ,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-PSTATV,Indicator: Sales,False,False,S_MARA,MARA,PSTATV,S_MARA,PSTATV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-PSTATL,Indicator: Storage,False,False,S_MARA,MARA,PSTATL,S_MARA,PSTATL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
-PSTATE,Indicator: Purchasing,False,False,S_MARA,MARA,PSTATE,S_MARA,PSTATE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+AENNR,Change Number,False,False,S_MARA,,,S_MARA,AENNR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+REVLV,Revision Level,False,False,S_MARA,,,S_MARA,REVLV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+EAN11,GTIN,False,False,S_MARA,,,S_MARA,EAN11,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+NUMTP,GTIN Category,False,False,S_MARA,,,S_MARA,NUMTP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+SPART,Division,False,False,S_MARA,,,S_MARA,SPART,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+BISMT,Old Product Number,False,False,S_MARA,,,S_MARA,BISMT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+PRDHA,Product Hierarchy,False,False,S_MARA,,,S_MARA,PRDHA,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+BRAND_ID,Brand,False,False,S_MARA,,,S_MARA,BRAND_ID,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+XCHPF,Batch Management Required Ind.,False,False,S_MARA,,,S_MARA,XCHPF,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MLGUT,Has Empties,False,False,S_MARA,,,S_MARA,MLGUT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+DATAB,Valid From,False,False,S_MARA,,,S_MARA,DATAB,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+LIQDT,Deletion Date,False,False,S_MARA,,,S_MARA,LIQDT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+KUNNR,Competitor,False,False,S_MARA,,,S_MARA,KUNNR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+NORMT,Industry Standard Description,False,False,S_MARA,,,S_MARA,NORMT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+GROES,Size/Dimensions,False,False,S_MARA,,,S_MARA,GROES,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+LABOR,Laboratory / Design Office,False,False,S_MARA,,,S_MARA,LABOR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+INHAL,Net Contents,False,False,S_MARA,,,S_MARA,INHAL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+INHME,Net Contents Unit (ISO Format),False,False,S_MARA,,,S_MARA,INHME,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+INHBR,Gross Contens,False,False,S_MARA,,,S_MARA,INHBR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+VPREH,Comparison Price Unit,False,False,S_MARA,,,S_MARA,VPREH,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+EXTWG,External Product Group,False,False,S_MARA,,,S_MARA,EXTWG,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MTPOS_MARA,General Item Category Group,False,False,S_MARA,,,S_MARA,MTPOS_MARA,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+BEGRU,Authorization Group,False,False,S_MARA,,,S_MARA,BEGRU,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MSTAE,Cross-Plant Product Status,False,False,S_MARA,,,S_MARA,MSTAE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MSTDE,Valid-From Date,False,False,S_MARA,,,S_MARA,MSTDE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+SERLV,Level of Explicitness for Serial Number,False,False,S_MARA,,,S_MARA,SERLV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+QMPUR,Quality Manag. in Procurement Is Active,False,False,S_MARA,,,S_MARA,QMPUR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+ANIMAL_ORIGIN,Animal Origin,False,False,S_MARA,,,S_MARA,ANIMAL_ORIGIN,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+ANP,ANP Code,False,False,S_MARA,,,S_MARA,ANP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+BRGEW,Gross Weight,False,False,S_MARA,,,S_MARA,BRGEW,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+NTGEW,Net Weight,False,False,S_MARA,,,S_MARA,NTGEW,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+GEWEI,Unit of Weight (ISO Format),False,False,S_MARA,,,S_MARA,GEWEI,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+LAENG,Length,False,False,S_MARA,,,S_MARA,LAENG,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+BREIT,Width,False,False,S_MARA,,,S_MARA,BREIT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+HOEHE,Height,False,False,S_MARA,,,S_MARA,HOEHE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MEABM,Unit for Length/Width/Height(ISO Format),False,False,S_MARA,,,S_MARA,MEABM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+VOLUM,Volume,False,False,S_MARA,,,S_MARA,VOLUM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+VOLEH,Volume Unit,False,False,S_MARA,,,S_MARA,VOLEH,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+CAPAUSE,Capacity Usage,False,False,S_MARA,,,S_MARA,CAPAUSE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+CHML_CMPLNC_RLVNCE_IND,Compliance Relevant,False,False,S_MARA,,,S_MARA,CHML_CMPLNC_RLVNCE_IND,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+KZKFG,Product Is Configurable,False,False,S_MARA,,,S_MARA,KZKFG,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+BSTME,Order Unit of Measure (ISO Format),False,False,S_MARA,,,S_MARA,BSTME,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+EKWSL,Purchasing Value Key,False,False,S_MARA,,,S_MARA,EKWSL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+VABME,State of Variable Purchase Order Unit,False,False,S_MARA,,,S_MARA,VABME,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+BMATN,Internal Product Number,False,False,S_MARA,,,S_MARA,BMATN,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MFRPN,Manufacturer Part Number,False,False,S_MARA,,,S_MARA,MFRPN,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MFRNR,Manufacturer Number,False,False,S_MARA,,,S_MARA,MFRNR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MPROF,Manufacturer Part Profile,False,False,S_MARA,,,S_MARA,MPROF,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+TRAGR,Transportation Group,False,False,S_MARA,,,S_MARA,TRAGR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MSTAV,Cross-Distribution Chain Product Status,False,False,S_MARA,,,S_MARA,MSTAV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MSTDV,Valid From Date for Status,False,False,S_MARA,,,S_MARA,MSTDV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+PMATA,Pricing Reference Product,False,False,S_MARA,,,S_MARA,PMATA,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+SPROF,Pricing Profile for Variants,False,False,S_MARA,,,S_MARA,SPROF,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+ALLOW_PMAT_IGNO,Variant Price Allowed,False,False,S_MARA,,,S_MARA,ALLOW_PMAT_IGNO,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+SOM_CYCLE,Billing Cycle,False,False,S_MARA,,,S_MARA,SOM_CYCLE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+SOM_CYCLE_RULE,Billing Cycle Determination Rule,False,False,S_MARA,,,S_MARA,SOM_CYCLE_RULE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+SOM_TC_SCHEMA,Assignment Schema,False,False,S_MARA,,,S_MARA,SOM_TC_SCHEMA,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+BBTYP,Assortment List Type,False,False,S_MARA,,,S_MARA,BBTYP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+SERVV,Service Agreement,False,False,S_MARA,,,S_MARA,SERVV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MAGRV,Product Group: Packaging Materials,False,False,S_MARA,,,S_MARA,MAGRV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+VHIART,Packaging Product Type,False,False,S_MARA,,,S_MARA,VHIART,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+ERGEW,Allowed Packaging Weight,False,False,S_MARA,,,S_MARA,ERGEW,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+ERGEI,Unit of Allowed Packaging Weight,False,False,S_MARA,,,S_MARA,ERGEI,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+GEWTO,Excess Weight Tolerance for HU,False,False,S_MARA,,,S_MARA,GEWTO,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+ERVOL,Allowed Packaging Volume,False,False,S_MARA,,,S_MARA,ERVOL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+ERVOE,Unit of Allowed Packaging Volume,False,False,S_MARA,,,S_MARA,ERVOE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+KZGVH,Packaging Product Is Closed Packaging,False,False,S_MARA,,,S_MARA,KZGVH,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+VOLTO,Excess Volume Tolerance for HU,False,False,S_MARA,,,S_MARA,VOLTO,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+IPRKZ,Period Indicator for Shelf Life,False,False,S_MARA,,,S_MARA,IPRKZ,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+RAUBE,Storage Conditions,False,False,S_MARA,,,S_MARA,RAUBE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+TEMPB,Temperature Conditions Indicator,False,False,S_MARA,,,S_MARA,TEMPB,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+BEHVO,Container Requirements,False,False,S_MARA,,,S_MARA,BEHVO,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+STOFF,Hazardous Product Number,False,False,S_MARA,,,S_MARA,STOFF,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+ETIAR,Label Type,False,False,S_MARA,,,S_MARA,ETIAR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+ETIFO,Label Form,False,False,S_MARA,,,S_MARA,ETIFO,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+WESCH,Number of Goods Receipt/Issue Slips,False,False,S_MARA,,,S_MARA,WESCH,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+XGCHP,Indicator: Approved Batch Rec. Required,False,False,S_MARA,,,S_MARA,XGCHP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MHDHB,Total Shelf Life,False,False,S_MARA,,,S_MARA,MHDHB,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MHDRZ,Minimum Remaining Shelf Life,False,False,S_MARA,,,S_MARA,MHDRZ,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+SLED_BBD,Indi. for the Shelf Life Expiration Date,False,False,S_MARA,,,S_MARA,SLED_BBD,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MHDLP,Storage Percentage,False,False,S_MARA,,,S_MARA,MHDLP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+RDMHD,Rounding Rule for Calculation of SLED,False,False,S_MARA,,,S_MARA,RDMHD,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+HNDLCODE,Handling Indicator,False,False,S_MARA,,,S_MARA,HNDLCODE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+WHMATGR,Warehouse Product Group,False,False,S_MARA,,,S_MARA,WHMATGR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+WHSTC,Warehouse Storage Condition,False,False,S_MARA,,,S_MARA,WHSTC,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+HUTYP_DFLT,Standard Handling Unit Type,False,False,S_MARA,,,S_MARA,HUTYP_DFLT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+SERIAL,Serial Number Profile,False,False,S_MARA,,,S_MARA,SERIAL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+PILFERABLE,Pilferable,False,False,S_MARA,,,S_MARA,PILFERABLE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+HAZMAT,Relevant for Hazardous Substances,False,False,S_MARA,,,S_MARA,HAZMAT,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+QQTIME,Quarantine Period,False,False,S_MARA,,,S_MARA,QQTIME,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+QQTIMEUOM,Time Unit for Quarantine Period,False,False,S_MARA,,,S_MARA,QQTIMEUOM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+QGRP,Quality Inspection Group,False,False,S_MARA,,,S_MARA,QGRP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+HUTYP,Handling Unit Type,False,False,S_MARA,,,S_MARA,HUTYP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MAXC,Maximum Capacity,False,False,S_MARA,,,S_MARA,MAXC,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MAXC_TOL,Overcapacity Tolerance,False,False,S_MARA,,,S_MARA,MAXC_TOL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+TARE_VAR,Variable Tare Weight,False,False,S_MARA,,,S_MARA,TARE_VAR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MAXL,Max. Pack. Length,False,False,S_MARA,,,S_MARA,MAXL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MAXDIM_UOM,UoM for Max. Pack. Length (ISO Format),False,False,S_MARA,,,S_MARA,MAXDIM_UOM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MAXB,Max. Pack. Width,False,False,S_MARA,,,S_MARA,MAXB,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+MAXH,Max. Pack. Height,False,False,S_MARA,,,S_MARA,MAXH,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+RBNRM,Catalog Profile,False,False,S_MARA,,,S_MARA,RBNRM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+SSTUF,Assortment Grade,False,False,S_MARA,,,S_MARA,SSTUF,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+LSTVZ,Listing Procedure,False,False,S_MARA,,,S_MARA,LSTVZ,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+LDVZL,Listing Period Start Date,False,False,S_MARA,,,S_MARA,LDVZL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+LDBZL,Listing Period End Date,False,False,S_MARA,,,S_MARA,LDBZL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+LSTFL,Listing Procedure,False,False,S_MARA,,,S_MARA,LSTFL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+LDVFL,Listing Period Start Date,False,False,S_MARA,,,S_MARA,LDVFL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+LDBFL,Listing Period End Date,False,False,S_MARA,,,S_MARA,LDBFL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+VDVZL,Sales Period Start Date,False,False,S_MARA,,,S_MARA,VDVZL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+VDBZL,Sales Period End Date,False,False,S_MARA,,,S_MARA,VDBZL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+VDVFL,Sales Period Start Date,False,False,S_MARA,,,S_MARA,VDVFL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+VDBFL,Sales Period End Date,False,False,S_MARA,,,S_MARA,VDBFL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+WAUSM,Delivery Unit of Measure (ISO Format),False,False,S_MARA,,,S_MARA,WAUSM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+WVRKM,Sales Unit of Measure (ISO Format),False,False,S_MARA,,,S_MARA,WVRKM,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+WMAAB,ABC Indicator,False,False,S_MARA,,,S_MARA,WMAAB,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+WBKLA,Valuation Class,False,False,S_MARA,,,S_MARA,WBKLA,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+WHERL,Country/Region of Origin,False,False,S_MARA,,,S_MARA,WHERL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+WHERR,Region of Origin,False,False,S_MARA,,,S_MARA,WHERR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+WEKGR,Purchasing Group,False,False,S_MARA,,,S_MARA,WEKGR,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+BWSCL,Source of Supply,False,False,S_MARA,,,S_MARA,BWSCL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+TAKLV,Tax Classification,False,False,S_MARA,,,S_MARA,TAKLV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+WLADG,Loading Group,False,False,S_MARA,,,S_MARA,WLADG,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+WBWSP,Valuation Margin,False,False,S_MARA,,,S_MARA,WBWSP,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+PSTATQ,Indicator: Quality,False,False,S_MARA,,,S_MARA,PSTATQ,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+PSTATV,Indicator: Sales,False,False,S_MARA,,,S_MARA,PSTATV,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+PSTATL,Indicator: Storage,False,False,S_MARA,,,S_MARA,PSTATL,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext
+PSTATE,Indicator: Purchasing,False,False,S_MARA,,,S_MARA,PSTATE,Basic Data (mandatory),t_24_Product_Basic_Data_mandatory_Ext

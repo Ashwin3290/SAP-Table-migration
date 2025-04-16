@@ -379,6 +379,7 @@ Return ONLY the classification name with no explanation.
     """
 
             try:
+                print(base_prompt)
                 response = self.client.models.generate_content(
                     model="gemini-2.0-flash", contents=base_prompt
                 )
@@ -1171,6 +1172,7 @@ else:
                 if isinstance(result, pd.DataFrame):
                     try:
                         result = self.post_proccess_result(result)
+                        print(result.columns)
                         save_success = save_session_target_df(session_id, result)
                         if not save_success:
                             logger.warning("Failed to save target dataframe")

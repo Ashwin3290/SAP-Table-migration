@@ -119,7 +119,8 @@ def execute_code(file_path, source_dfs, target_df):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
-        result = module.analyze_data(source_dfs, target_df)          
+        result = module.analyze_data(source_dfs, target_df)     
+             
         return result
     except Exception as e:
         # Capture the full traceback with detailed information
