@@ -799,103 +799,105 @@ def process_query(
 
         # Process key mapping with error handling and primary key validation
         key_mapping = []
-        try:
-            # Check if we have a target field and it's a key
-            target_field_filter = joined_df["target_sap_field"] == target_sap_fields
-            if (
-                target_field_filter.any()
-                and joined_df[target_field_filter]["isKey"].values[0] == "True"
-            ):
-                # We're working with a primary key field
-                logger.info(
-                    f"Target field '{target_sap_fields}' is identified as a primary key"
-                )
-
-                # Check if we have insertion fields to map
-                if results["insertion_fields"] and len(results["insertion_fields"]) > 0:
-                    source_field = results["insertion_fields"][0]
-                    source_table = (
-                        results["source_table_name"][0]
-                        if results["source_table_name"]
-                        else None
+        key_mapping = context_manager.get_key_mapping(session_id)
+        if not key_mapping:
+            try:
+                # Check if we have a target field and it's a key
+                target_field_filter = joined_df["target_sap_field"] == target_sap_fields
+                if (
+                    target_field_filter.any()
+                    and joined_df[target_field_filter]["isKey"].values[0] == "True"
+                ):
+                    # We're working with a primary key field
+                    logger.info(
+                        f"Target field '{target_sap_fields}' is identified as a primary key"
                     )
 
-                    # Verify the source data meets primary key requirements
-                    if source_table and source_field:
-                        error = None
-                        try:
-                            # Get the source data
-                            source_df = None
+                    # Check if we have insertion fields to map
+                    if results["insertion_fields"] and len(results["insertion_fields"]) > 0:
+                        source_field = results["insertion_fields"][0]
+                        source_table = (
+                            results["source_table_name"][0]
+                            if results["source_table_name"]
+                            else None
+                        )
+
+                        # Verify the source data meets primary key requirements
+                        if source_table and source_field:
+                            error = None
                             try:
-                                # Validate table and field names to prevent SQL injection
-                                safe_table = validate_sql_identifier(source_table)
-                                safe_field = validate_sql_identifier(source_field)
-                                query = f"SELECT {safe_field} FROM {safe_table}"
-                                source_df = pd.read_sql_query(query, conn)
-                            except Exception as e:
-                                logger.error(f"Failed to query source data: {e}")
+                                # Get the source data
                                 source_df = None
+                                try:
+                                    # Validate table and field names to prevent SQL injection
+                                    safe_table = validate_sql_identifier(source_table)
+                                    safe_field = validate_sql_identifier(source_field)
+                                    query = f"SELECT {safe_field} FROM {safe_table}"
+                                    source_df = pd.read_sql_query(query, conn)
+                                except Exception as e:
+                                    logger.error(f"Failed to query source data: {e}")
+                                    source_df = None
 
-                            if source_df is not None:
-                                # Check for uniqueness and non-null values
-                                has_nulls = source_df[source_field].isna().any()
-                                has_duplicates = (
-                                    source_df[source_field].duplicated().any()
-                                )
-
-                                # Only proceed if the data satisfies primary key requirements
-                                # or if the query explicitly indicates working with distinct values
-                                if has_nulls or has_duplicates:
-                                    # Check if the query is requesting distinct values
-                                    is_distinct_query = check_distinct_requirement(
-                                        query
-                                    ) or check_distinct_requirement(
-                                        results.get("restructured_query", "")
+                                if source_df is not None:
+                                    # Check for uniqueness and non-null values
+                                    has_nulls = source_df[source_field].isna().any()
+                                    has_duplicates = (
+                                        source_df[source_field].duplicated().any()
                                     )
 
-                                    if not is_distinct_query:
-                                        # The data doesn't meet primary key requirements and query doesn't indicate distinct values
-                                        error_msg = f"Cannot use '{source_field}' as a primary key: "
-                                        if has_nulls and has_duplicates:
-                                            error_msg += "contains null values and duplicate entries"
-                                        elif has_nulls:
-                                            error_msg += "contains null values"
-                                        else:
-                                            error_msg += "contains duplicate entries"
-
-                                        logger.error(error_msg)
-                                        error = error_msg
-
-                                        # Return None to signal that execution should stop
-                                        if conn:
-                                            conn.close()
-                                    else:
-                                        logger.info(
-                                            f"Source data has integrity issues but query suggests distinct values will be used"
+                                    # Only proceed if the data satisfies primary key requirements
+                                    # or if the query explicitly indicates working with distinct values
+                                    if has_nulls or has_duplicates:
+                                        # Check if the query is requesting distinct values
+                                        is_distinct_query = check_distinct_requirement(
+                                            query
+                                        ) or check_distinct_requirement(
+                                            results.get("restructured_query", "")
                                         )
-                        except Exception as e:
-                            logger.error(f"Error during primary key validation: {e}")
-                            # If we can't validate, we err on the side of caution and don't proceed
-                            if conn:
-                                conn.close()
-                            return None
-                    if not error:
-                        # If we've reached here, it's safe to add the key mapping
-                        key_mapping = context_manager.add_key_mapping(
-                            session_id, target_sap_fields, source_field
-                        )
+
+                                        if not is_distinct_query:
+                                            # The data doesn't meet primary key requirements and query doesn't indicate distinct values
+                                            error_msg = f"Cannot use '{source_field}' as a primary key: "
+                                            if has_nulls and has_duplicates:
+                                                error_msg += "contains null values and duplicate entries"
+                                            elif has_nulls:
+                                                error_msg += "contains null values"
+                                            else:
+                                                error_msg += "contains duplicate entries"
+
+                                            logger.error(error_msg)
+                                            error = error_msg
+
+                                            # Return None to signal that execution should stop
+                                            if conn:
+                                                conn.close()
+                                        else:
+                                            logger.info(
+                                                f"Source data has integrity issues but query suggests distinct values will be used"
+                                            )
+                            except Exception as e:
+                                logger.error(f"Error during primary key validation: {e}")
+                                # If we can't validate, we err on the side of caution and don't proceed
+                                if conn:
+                                    conn.close()
+                                return None
+                        if not error:
+                            # If we've reached here, it's safe to add the key mapping
+                            key_mapping = context_manager.add_key_mapping(
+                                session_id, target_sap_fields, source_field
+                            )
+                        else:
+                            key_mapping = [error]
                     else:
-                        key_mapping = [error]
+                        logger.warning("No insertion fields found for key mapping")
+                        key_mapping = context_manager.get_key_mapping(session_id)
                 else:
-                    logger.warning("No insertion fields found for key mapping")
+                    # Not a key field, just get existing mappings
                     key_mapping = context_manager.get_key_mapping(session_id)
-            else:
-                # Not a key field, just get existing mappings
-                key_mapping = context_manager.get_key_mapping(session_id)
-        except Exception as e:
-            logger.error(f"Error processing key mapping: {e}")
-            # Continue with empty key mapping
-            key_mapping = []
+            except Exception as e:
+                logger.error(f"Error processing key mapping: {e}")
+                # Continue with empty key mapping
+                key_mapping = []
 
         # Safely add key mapping to results
         results["key_mapping"] = key_mapping
