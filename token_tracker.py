@@ -109,7 +109,7 @@ def track_token_usage(log_to_file: bool = True, log_path: str = 'token_usage.log
             }
             
             # Log usage data
-            logger.info(f"API Call - {usage_data}")
+            # logger.info(f"API Call - {usage_data}")
             
             # Log to file if requested
             if log_to_file:
@@ -145,7 +145,7 @@ def reset_token_usage_stats() -> None:
     TOTAL_INPUT_TOKENS = 0
     TOTAL_OUTPUT_TOKENS = 0
     TOTAL_API_CALLS = 0
-    logger.info("Token usage statistics have been reset")
+    # logger.info("Token usage statistics have been reset")
 
 # Function to estimate cost based on token usage (if pricing is available)
 def estimate_cost(input_tokens: int, output_tokens: int, model: str = "gemini-pro") -> float:

@@ -1,53 +1,28 @@
 {
-  "query_terms_matched": [
-    "Product",
-    "Product Type"
+  "source_table_name": [
+    "MARA_500",
+    "MARA_700",
+    "MARA"
   ],
-  "target_sap_fields": [
-    "PRODUCT",
-    "MTART"
-  ],
-  "target_table_name": "t_24_Product_Basic_Data_mandatory",
-  "source_table_name": "MARA",
-  "sap_structure": "S_MARA",
   "source_field_names": [
     "MATNR",
-    "MTART"
+    "MEINS"
   ],
-  "target_sap_table": "S_MARA",
-  "segment_name": "Basic Data (mandatory)",
   "filtering_fields": [
-    "MTART"
+    "MATNR"
   ],
   "insertion_fields": [
-    {
-      "source_field": "MATNR",
-      "target_field": "PRODUCT"
-    }
+    "MEINS"
   ],
-  "restructured_question": "Bring MATNR with MTART = ROH from MARA Table",
-  "context": {
-    "transformation_history": [
-      {
-        "description": "Populated PRODUCT with MATNR values where MTART = 'ROH'",
-        "fields_modified": [
-          "PRODUCT"
-        ],
-        "filter_conditions": {
-          "MTART": "ROH"
-        }
-      }
-    ],
-    "target_table_state": {
-      "populated_fields": [
-        "PRODUCT"
-      ],
-      "remaining_mandatory_fields": [
-        "MTART",
-        "MAKTX",
-        "SPRAS",
-        "MEINS"
-      ]
+  "transformation_logic": "The transformation logic involves checking for materials in MARA_500, MARA_700, and MARA tables and bringing the Unit of Measure (MEINS) to the target table. The 'PRODUCT:MATNR' key mapping is used to match entries between the target table and the source tables.\n\n1. **Check MARA_500:**\n   - Match entries from the target table (PRODUCT) to the MARA_500 table (MATNR) using the key mapping. Since the current target table state is known, the transformation will check if 'RM120', 'RM28', 'RM129', 'RM20', and 'RM128' exist in MARA_500.MATNR.\n   - IF a matching entry is found, retrieve the value of MEINS from MARA_500 and insert it into the target table.\n\n2. **Check MARA_700 (if not found in MARA_500):**\n   - IF no matching entry is found in MARA_500, match entries from the target table (PRODUCT) to the MARA_700 table (MATNR) using the key mapping.\n   - IF a matching entry is found, retrieve the value of MEINS from MARA_700 and insert it into the target table.\n\n3. **Check MARA (if not found in MARA_700):**\n   - IF no matching entry is found in MARA_700, match entries from the target table (PRODUCT) to the MARA table (MATNR) using the key mapping.\n   - IF a matching entry is found, retrieve the value of MEINS from MARA and insert it into the target table.",
+  "Resolved_query": "Check materials (MATNR) from the existing target table (containing PRODUCT values 'RM120', 'RM28', 'RM129', 'RM20', 'RM128') in the MARA_500 table. If matching entries are found based on the PRODUCT:MATNR key mapping, then retrieve the Unit of Measure (MEINS) from MARA_500 and insert it into the target table. Otherwise, check for the same materials (MATNR) in the MARA_700 table. If matching entries are found, then retrieve the Unit of Measure (MEINS) from MARA_700 and insert it into the target table. If no entries are found in MARA_700, retrieve the Unit of Measure (MEINS) from the MARA table and insert it into the target table.",
+  "target_table": [
+    "t_24_Product_Basic_Data_mandatory_Ext"
+  ],
+  "key_mapping": [
+    {
+      "target_col": "PRODUCT",
+      "source_col": "MATNR"
     }
-  }
+  ]
 }

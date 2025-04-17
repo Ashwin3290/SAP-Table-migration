@@ -1,0 +1,13 @@
+session_id,source_table,target_table,transformations,fields_modified_count,target_rows
+109e9789-84b2-4edb-8d5e-ed312f72b7c5,MARA,t_24_Product_Basic_Data_mandatory,1,1,412
+1162d760-178b-4439-b7a8-bc7c122df01f,MARA,t_24_Product_Basic_Data_mandatory,1,1,412
+40ca28e6-6bef-407e-b73e-d9f06565a8ff,MARA,t_24_Product_Basic_Data_mandatory,3,2,412
+4daf0a23-76b7-4480-977c-9e0e82436b69,MARA,t_24_Product_Basic_Data_mandatory,1,1,0
+4e30bcbd-55a7-4bc8-a930-b3da5419c276,MARA,t_24_Product_Basic_Data_mandatory,4,2,412
+52809a2f-2f43-4478-a116-e81e3b2bdba0,MARA,t_24_Product_Basic_Data_mandatory,2,2,2017
+5af975c2-54f5-41e5-be95-690ad9086dc8,MARA,t_24_Product_Basic_Data_mandatory,1,1,1605
+8264cd83-6919-4a1a-bfd0-770de3b09198,MARA,t_24_Product_Basic_Data_mandatory,2,2,412
+828ad48f-5a6c-4bd1-9db2-15ecdc858198,MARA,t_24_Product_Basic_Data_mandatory,1,1,1605
+b266e24c-3974-49d8-afb5-09a32f58dd75,MARA,t_24_Product_Basic_Data_mandatory,1,1,1605
+c0b2a3e7-28d2-4e46-a64d-54a93a3c41be,MARA,t_24_Product_Basic_Data_mandatory,1,1,0
+e7188c59-c110-4f8b-bcda-067b2ff74673,MARA,t_24_Product_Basic_Data_mandatory,2,2,1605
