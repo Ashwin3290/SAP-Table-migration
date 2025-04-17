@@ -307,73 +307,55 @@ Return ONLY the classification name with no explanation.
                     )
                     conditions_str = str(planner_info["extracted_conditions"])
 
-            # Generate prompt with focus on utility functions
+                        # Generate prompt with focus on utility functions
             base_prompt = f"""
-    Create a step-by-step plan for code that will perform this data transformation operation.
-    Focus on using the available utility functions with their EXACT parameter formats.
+            Create a step-by-step plan for code that will perform this data transformation operation.
+            Focus on using the available utility functions with their EXACT parameter formats.
 
-    QUERY DETAILS:
-    User's intent: {planner_info.get('restructured_query', 'Transform data')}
-    Resolved Query: {planner_info.get('restructured_query', 'Transform data')}
-    Source table: {planner_info.get('source_table', ['source_table'])}
-    Target table: {planner_info.get('target_table', ['target_table'])}
-    Source field(s): {source_fields}
-    Target field(s): {target_fields}
-    Filtering field(s): {planner_info.get('filtering_fields', [])}
-    Filtering conditions: {conditions_str}
-    Insertion field(s): {planner_info.get('insertion_fields', [])}
+            QUERY DETAILS:
+            User's intent: {planner_info.get('restructured_query', 'Transform data')}
+            Resolved Query: {planner_info.get('restructured_query', 'Transform data')}
+            Source table: {planner_info.get('source_table', ['source_table'])}
+            Target table: {planner_info.get('target_table', ['target_table'])}
+            Source field(s): {source_fields}
+            Target field(s): {target_fields}
+            Filtering field(s): {planner_info.get('filtering_fields', [])}
+            Filtering conditions: {conditions_str}
+            Insertion field(s): {planner_info.get('insertion_fields', [])}
 
-    AVAILABLE UTILITY FUNCTIONS AND THEIR PARAMETER FORMATS:
-    1. filter_dataframe(df, field, condition_type, value)
-    - condition_type MUST be one of: 'equals', 'not_equals', 'contains', 'greater_than', 'less_than', 'in_list', 'not_in_list', 'is_null', 'is_not_null'
+            KEY MAPPING (CRITICALLY IMPORTANT):
+            Key columns for mapping between source and target: {planner_info.get('key_columns', [])}
 
-    2. map_fields(source_df, target_df, field_mapping, key_field_pair=None)
-    - field_mapping format: {{'TARGET_FIELD1': 'SOURCE_FIELD1', 'TARGET_FIELD2': 'SOURCE_FIELD2'}}
-    - key_field_pair format: ('TARGET_KEY', 'SOURCE_KEY')
+            IMPORTANT RULES FOR KEY COLUMNS:
+            1. You MUST use the key columns for ANY operation that reads from or writes to the target table
+            2. Key columns are used to match records between source and target tables
+            3. NEVER skip key column mapping - it is required even if not explicitly mentioned in the query
+            4. For insert operations, key columns must be included in the inserted data
+            5. For update operations, key columns are used to identify which records to update
+            6. For filter operations, ensure key columns are preserved during filtering
 
-    3. match_by_keys(source_df, target_df, key_mapping)
-    - key_mapping format: {{'TARGET_KEY': 'SOURCE_KEY'}}
+            IMPORTANT RULES FOR FILTER CONDITIONS:
+            1. Filter conditions must be applied EXACTLY as specified
+            2. When multiple conditions exist, combine them with proper logical operators (AND/OR)
+            3. Filter operations should be performed BEFORE any mapping or transformation
+            4. Always validate that filtered data maintains all required key columns
+            5. For complex filters, break down into multiple steps for clarity
 
-    4. conditional_mapping(source_df, condition_field, conditions, value_field=None, value_map=None, default=None)
-    - conditions format: ["== 'ROH'", "== 'HALB'", "> 100"]
-    - value_map format: ['Raw Material', 'Semi-Finished', 'High Value']
+            Write a numbered, step-by-step plan for a code generator that will perform this data transformation operation.
 
-    5. initialize_target(target_df, required_columns)
-    - required_columns format: ['FIELD1', 'FIELD2', 'FIELD3']
+            Note:
+            - ALWAYS use the key mapping in your plan - this is NOT optional
+            - Verify key columns exist in both source and target before performing operations
+            - If working with multiple source tables, ensure key relationships are maintained
+            - When filtering data, preserve the integrity of key columns
+            - For updates, explicitly check for existing records using key columns
+            - For inserts, always include key columns in the new records
+            - DO NOT CREATE YOUR OWN COLUMNS
+            - STRICTLY STICK TO WHAT IS MENTIONED IN THE PROMPT.
+            - Use If/else logic in the plan when the query calls for it.
 
-    6. join_tables(main_df, other_df, main_key, other_key, fields_to_add)
-    - fields_to_add format: ['FIELD1', 'FIELD2', 'FIELD3']
-
-    7. SAP-specific functions:
-    - map_material_type(source_df, source_field='MTART')
-    - convert_sap_date(source_df, date_field, output_format='YYYY-MM-DD')
-    - map_sap_language_code(source_df, lang_field='SPRAS')
-    - map_sap_unit_of_measure(source_df, uom_field='MEINS')
-    - handle_sap_leading_zeros(source_df, field, length=10)
-
-    Write a numbered, step-by-step plan that outlines EXACTLY how to perform the transformation.
-    Use utility functions whenever possible.
-    Specify the EXACT parameter values for each function.
-    Be specific about fields, values, and data types.
-
-    Note:
-    - If the query has If/Else logic then make sure to add if else conditions in the plan, rather than removing that from the prompt.
-    - Revolve your plans around using keys in the source and target tables to correct add or update data.
-    - Use the utility functions as much as possible to avoid writing custom code.
-    - If a query talks about if data in source table then he is meaning to look for key values that are common in the target table and source table.
-    - Do not give code or code snippets. Just write the plan.
-    - Do not use any other columns in the target table other than the ones mentioned in the prompt.
-
-    Example:
-    1. Import utility functions from transform_utils
-    2. Get source dataframe from source_dfs dictionary using 'MARA' key
-    3. Initialize target dataframe with required columns ['PRODUCT', 'MTART', 'MEINS']
-    4. Filter source dataframe using filter_dataframe(source_df, 'MTART', 'equals', 'ROH')
-    5. Map fields using map_fields(filtered_df, target_df, {{'PRODUCT': 'MATNR', 'MTART': 'MTART', 'MEINS': 'MEINS'}})
-    6. Return the updated target dataframe
-
-    Your step-by-step plan (5-10 steps):
-    """
+            Your step-by-step plan (5-10 steps):
+            """
 
             try:
                 print(base_prompt)
@@ -427,175 +409,150 @@ Return ONLY the classification name with no explanation.
 
             # Create template with the simple plan as a guide and utility functions information
             prompt = f"""
-    Write Python code that follows these EXACT steps:
+Write Python code that follows these EXACT steps:
 
-    {simple_plan}
+{simple_plan}
 
-    DETAILED INFORMATION:
-    - Source tables: {source_tables_str}
-    - Target table: {planner_info.get('target_table', [])}
-    - Source field(s): {source_fields}
-    - Target field(s): {target_fields}
-    - Filtering field(s): {planner_info.get('filtering_fields', [])}
-    - Filtering conditions: {json.dumps(planner_info.get('extracted_conditions', {}), indent=2)}
-    - Key mapping: {planner_info.get('key_columns', [])}
+DETAILED INFORMATION:
+- Source tables: {source_tables_str}
+- Target table: {planner_info.get('target_table', [])}
+- Source field(s): {source_fields}
+- Target field(s): {target_fields}
+- Filtering field(s): {planner_info.get('filtering_fields', [])}
+- Filtering conditions: {json.dumps(planner_info.get('extracted_conditions', {}), indent=2)}
 
-    UTILITY FUNCTIONS REFERENCE:
-    ===================================================================================
+KEY MAPPING (CRITICALLY IMPORTANT):
+- Key columns for mapping between source and target: {planner_info.get('key_columns', [])}
+- You MUST implement these key mappings in your code
+- Every operation that accesses the target table MUST use these key columns
 
-    1. filter_dataframe(df: pd.DataFrame, field: str, condition_type: str, value: Any) -> pd.DataFrame
+SAMPLE DATA:
+Source data samples:
+{json.dumps(planner_info.get('source_data', {}).get('sample', {}), indent=2)}
 
-    PARAMETERS:
-    - df: Source pandas DataFrame
-    - field: Column name to filter on (must be exact string match)
-    - condition_type: MUST be one of these exact strings:
-        * 'equals' - Field equals value (==)
-        * 'not_equals' - Field not equal to value (!=)
-        * 'contains' - Field contains substring (str.contains)
-        * 'greater_than' - Field greater than value (>)
-        * 'less_than' - Field less than value (<)
-        * 'in_list' - Field value is in provided list (isin)
-        * 'not_in_list' - Field value is not in provided list (~isin)
-        * 'is_null' - Field is null (isna)
-        * 'is_not_null' - Field is not null (~isna)
-    - value: Value to compare against (not used for is_null/is_not_null)
-    
-    EXAMPLE: filtered_df = filter_dataframe(source_df, 'MTART', 'equals', 'ROH')
+Target data sample:
+{json.dumps(planner_info.get('target_data', {}).get('sample', []), indent=2)}
 
-    ===================================================================================
+FILTERING AND CONDITION IMPLEMENTATION:
+1. For simple equality filters:
+   - Use: df[df['column'] == value]
+   - Example: source_df[source_df['STATUS'] == 'ACTIVE']
 
-    2. map_fields(source_df: pd.DataFrame, target_df: pd.DataFrame, field_mapping: Dict[str, str], key_field_pair: Optional[Tuple[str, str]] = None) -> pd.DataFrame
+2. For IN conditions:
+   - Use: df[df['column'].isin([val1, val2, ...])]
+   - Example: source_df[source_df['TYPE'].isin(['A', 'B', 'C'])]
 
-    PARAMETERS:
-    - source_df: Source pandas DataFrame
-    - target_df: Target pandas DataFrame to update
-    - field_mapping: Dictionary with format {{'TARGET_FIELD': 'SOURCE_FIELD'}} 
-    - key_field_pair: Optional tuple with format (target_key_field, source_key_field)
-    
-    EXAMPLE: result_df = map_fields(source_df, target_df, {{'PRODUCT': 'MATNR', 'MTART': 'MTART'}}, ('PRODUCT', 'MATNR'))
+3. For numeric comparisons:
+   - Use: df[df['column'] > value]
+   - Example: source_df[source_df['COUNT'] > 100]
 
-    ===================================================================================
+4. For text patterns:
+   - Use: df[df['column'].str.contains(pattern)]
+   - Example: source_df[source_df['NAME'].str.contains('Test')]
 
-    3. match_by_keys(source_df: pd.DataFrame, target_df: pd.DataFrame, key_mapping: Dict[str, str]) -> pd.DataFrame
+5. Combining conditions:
+   - AND: df[(condition1) & (condition2)]
+   - OR: df[(condition1) | (condition2)]
+   - Example: source_df[(source_df['STATUS'] == 'ACTIVE') & (source_df['COUNT'] > 100)]
 
-    PARAMETERS:
-    - source_df: Source pandas DataFrame
-    - target_df: Target pandas DataFrame
-    - key_mapping: Dictionary mapping target keys to source keys {{'TARGET_KEY': 'SOURCE_KEY'}}
-    
-    EXAMPLE: result_df = match_by_keys(source_df, target_df, {{'PRODUCT': 'MATNR'}})
+KEY MAPPING IMPLEMENTATION:
+1. For inserting new records:
+   ```python
+   # Extract key columns from source
+   new_records = source_df[key_columns + target_fields].copy()
+   # Append to target
+   updated_target = pd.concat([target_df, new_records], ignore_index=True)
 
-    ===================================================================================
+For updating existing records:
+python# For each source record
+for _, source_row in source_df.iterrows():
+    # Find matching target rows using ALL key columns
+    mask = pd.Series(True, index=target_df.index)
+    for key in key_columns:
+        mask &= target_df[key] == source_row[key]
+    # Update fields in matching rows
+    if mask.any():
+        target_df.loc[mask, target_field] = source_row[source_field]
 
-    4. conditional_mapping(source_df: pd.DataFrame, condition_field: str, conditions: List[str], value_field: Optional[str] = None, value_map: Optional[List[Any]] = None, default: Optional[Any] = None) -> pd.Series
+For checking existence before insert:
+python# For each source record
+for _, source_row in source_df.iterrows():
+    # Create match condition using ALL key columns
+    exists = False
+    mask = pd.Series(True, index=target_df.index)
+    for key in key_columns:
+        mask &= target_df[key] == source_row[key]
+    exists = mask.any()
+    # Insert only if not exists
+    if not exists:
+        new_row = pd.DataFrame([source_row[key_columns + target_fields]])
+        target_df = pd.concat([target_df, new_row], ignore_index=True)
 
-    PARAMETERS:
-    - source_df: Source pandas DataFrame
-    - condition_field: Field to apply conditions to
-    - conditions: List of condition strings in these EXACT formats:
-        * "== 'ROH'"      (equals string value - note single quotes)
-        * "== 50"         (equals numeric value)
-        * "!= 'FERT'"     (not equals string value)
-        * "> 100"         (greater than numeric value)
-        * "< 200"         (less than numeric value)
-        * "in ['A', 'B']" (value in list)
-    - value_field: Field to get values from if value_map not provided
-    - value_map: List of values corresponding to conditions
-    - default: Value when no conditions match
-    
-    EXAMPLE: result_df['CATEGORY'] = conditional_mapping(source_df, 'MTART', ["== 'ROH'", "== 'HALB'"], value_map=['Raw', 'Semi'], default='Other')
 
-    ===================================================================================
+SAP-specific utils functions in transform_utils.py:
 
-    5. initialize_target(target_df: Optional[pd.DataFrame], required_columns: List[str]) -> pd.DataFrame
+map_material_type(source_df, source_field='MTART')
+convert_sap_date(source_df, date_field, output_format='YYYY-MM-DD')
+map_sap_language_code(source_df, lang_field='SPRAS')
+map_sap_unit_of_measure(source_df, uom_field='MEINS')
+handle_sap_leading_zeros(source_df, field, length=10)
 
-    PARAMETERS:
-    - target_df: Target pandas DataFrame, can be None
-    - required_columns: List of column names that must exist in result
-    
-    EXAMPLE: target_df = initialize_target(target_df, ['PRODUCT', 'MTART', 'MEINS'])
+COMMON MISTAKES TO AVOID:
 
-    ===================================================================================
+DO NOT skip key column validation
+DO NOT create new key columns - use only provided ones
+DO NOT modify key column values during transformation
+DO NOT assume single-column keys - always use ALL provided key columns
+DO NOT ignore filtering conditions - apply them EXACTLY as specified
+DO NOT add columns not specified in target fields
+DO NOT transform data that isn't needed in the target
+DO NOT use incompatible data types in comparisons
+DO NOT drop or ignore key columns during any operation
 
-    6. join_tables(main_df: pd.DataFrame, other_df: pd.DataFrame, main_key: str, other_key: str, fields_to_add: List[str]) -> pd.DataFrame
+REQUIREMENTS:
 
-    PARAMETERS:
-    - main_df: Main pandas DataFrame to update
-    - other_df: Other pandas DataFrame to get data from
-    - main_key: Key field in main_df
-    - other_key: Key field in other_df
-    - fields_to_add: List of field names from other_df to add to main_df
-    
-    EXAMPLE: result_df = join_tables(source_df, target_df, 'MATNR', 'PRODUCT', ['MAKTX', 'MEINS'])
+Follow the provided step-by-step plan in the exact order given.
+Use the provided source_dfs and target_df dataframes.
+Properly map source and target fields using key mapping provided.
+For conditional operations (e.g., filter_dataframe), use ONLY the specified condition_type strings.
+For conditional_mapping, ensure condition strings and value maps strictly follow the provided formats.
+Always import transform_utils at the top of the function.
+Handle both empty and non-empty target dataframes correctly.
+The function must return the modified target dataframe (target_df).
+Use numpy (np) for conditional logic only if necessary (already imported).
+Support multiple source tables as described in the prompt.
+Do NOT create or use sample dataframes; only use the data provided in the prompt.
+Only define the analyze_data function; do NOT add other functions or classes.
+Do NOT add or remove columns from the target except as specified.
+Do NOT output explanations, comments, or extra text—only the code.
+Use transform_utils module for sap utils functions.
 
-    ===================================================================================
+Make the function like this:
+def analyze_data(source_dfs, target_df):
+# Import required utilities
+# source_dfs is a dictionary where keys are table names and values are dataframes
+# Example: source_dfs = {{'table1': df1, 'table2': df2}}
+# target_df is the target dataframe to update
 
-    7. aggregate_data(df: pd.DataFrame, group_by: Union[str, List[str]], agg_functions: Dict[str, Union[str, List[str]]]) -> pd.DataFrame
+# Get list of source tables for easier reference
+source_tables = list(source_dfs.keys())
 
-    PARAMETERS:
-    - df: Pandas DataFrame to aggregate
-    - group_by: Column(s) to group by (string or list of strings)
-    - agg_functions: Dictionary mapping columns to agg functions. Functions MUST be one of: 'sum', 'mean', 'min', 'max', 'count'
-    
-    EXAMPLE: result_df = aggregate_data(source_df, 'WERKS', {{'STOCK': 'sum', 'PRICE': 'mean'}})
+# Your implementation of the steps above
 
-    ===================================================================================
+# VALIDATION: Verify key columns exist in the result
+key_columns = {json.dumps(planner_info.get('key_columns', []))}
+for key in key_columns:
+    if key not in target_df.columns:
+        # If missing, try to add from source if possible
+        for source_table in source_tables:
+            if key in source_dfs[source_table].columns:
+                # This is a fallback, proper implementation should handle keys correctly
+                target_df[key] = source_dfs[source_table][key]
+                break
 
-    8. safe_combine_tables(df1: Optional[pd.DataFrame], df2: Optional[pd.DataFrame], key: Optional[str] = None) -> pd.DataFrame
-
-    PARAMETERS:
-    - df1: First pandas DataFrame, can be None
-    - df2: Second pandas DataFrame, can be None
-    - key: Optional key field for matching records
-    
-    EXAMPLE: result_df = safe_combine_tables(target_df, new_data, key='PRODUCT')
-
-    ===================================================================================
-
-    SAMPLE DATA:
-    Source data samples:
-    {json.dumps(planner_info.get('source_data', {}).get('sample', {}), indent=2)}
-
-    Target data sample:
-    {json.dumps(planner_info.get('target_data', {}).get('sample', []), indent=2)}
-
-    REQUIREMENTS:
-    1. Follow the steps PRECISELY in order
-    2. Use the utility functions whenever appropriate
-    3. ALWAYS match the exact parameter names and formats shown in the reference above
-    4. For conditional operations like filter_dataframe, use ONLY the exact condition_type strings listed
-    5. When constructing conditions for conditional_mapping, use the EXACT formats shown
-    6. Always import transform_utils at the beginning and do not try to implement it yourself
-    7. Handle both empty and non-empty target dataframes
-    8. Return the modified target dataframe (target_df)
-    9. Use numpy for conditional logic if needed (already imported as np)
-    10. Make sure to handle multiple source tables correctly
-    11. Do not create sample dataframes and just use the data given in the prompt
-    12. Only give the analyze_data function and do not add any other functions or classes
-    13. Do not make any mock transform_utils functions by youself based upon the prompt, just use them as they are already implemented and ready to be imported.
-    14. Do not make any mock utils function, import them from the transform_utils module, Assume it already exists and is ready to be imported.
-
-    Note:
-    - save transformation as intermediates in the code and at the end merge and return the final target dataframe.
-
-    Make the function like this :
-
-    from transform_utils import *
-
-    def analyze_data(source_dfs, target_df):
-        # source_dfs is a dictionary where keys are table names and values are dataframes
-        # Example: source_dfs = {{'table1': df1, 'table2': df2}}
-        # target_df is the target dataframe to update
-        
-        # Get list of source tables for easier reference
-        source_tables = list(source_dfs.keys())
-        
-        # Your implementation of the steps above
-
-        # Make sure to return the modified target_df
-        return target_df
-    """
-
+# Make sure to return the modified target_df
+return target_df
+"""
             try:
                 response = self.client.models.generate_content(
                     model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt
@@ -650,7 +607,6 @@ Return ONLY the classification name with no explanation.
             # Generate a safe default function if all else fails
             return """def analyze_data(source_dfs, target_df):
         # Import the utility functions
-        from transform_utils import *
         
         # Get list of source tables
         source_tables = list(source_dfs.keys())

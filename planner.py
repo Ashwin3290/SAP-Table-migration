@@ -559,7 +559,11 @@ def parse_data_with_context(
     - if the user says about something that previous transformations, use target table as a way to know what is already done.
     - properly make logic about if else cases.
     - Do not use markdown format for the JSON response.
+    - There can be cases where where user is reclassifing a a column , in that case filtering  field and insertion field will be the same.
+    - Do not pick Key values to be inserted.
     - if a user talks about matching entries then use the key mappings to determine the relationship between source and target fields and match entries from target table to source table.
+    - if you are not sure about the filtering field but have a insertion field, then treat the query as one that deals with filtering and insertion of same column.
+    
     Respond with:
     ```json
     {{
