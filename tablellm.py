@@ -61,7 +61,7 @@ class TableLLM:
                 raise APIError("Gemini API key not configured")
 
             self.client = genai.Client(api_key=api_key)
-
+ 
             # Load code templates
             self.code_templates = self._initialize_templates()
 
@@ -102,6 +102,7 @@ class TableLLM:
                 "restructured_query": resolved_data.get("restructured_query", ""),
                 # Session information
                 "session_id": resolved_data.get("session_id", ""),
+                "key_columns": resolved_data.get("key_mapping", []),
             }
 
             # Safely process source data samples
@@ -309,53 +310,38 @@ Return ONLY the classification name with no explanation.
 
                         # Generate prompt with focus on utility functions
             base_prompt = f"""
-            Create a step-by-step plan for code that will perform this data transformation operation.
-            Focus on using the available utility functions with their EXACT parameter formats.
+You are an expert data transformation architect. Create a detailed, step-by-step plan for the following data transformation task.
 
-            QUERY DETAILS:
-            User's intent: {planner_info.get('restructured_query', 'Transform data')}
-            Resolved Query: {planner_info.get('restructured_query', 'Transform data')}
-            Source table: {planner_info.get('source_table', ['source_table'])}
-            Target table: {planner_info.get('target_table', ['target_table'])}
-            Source field(s): {source_fields}
-            Target field(s): {target_fields}
-            Filtering field(s): {planner_info.get('filtering_fields', [])}
-            Filtering conditions: {conditions_str}
-            Insertion field(s): {planner_info.get('insertion_fields', [])}
+TASK CONTEXT:
+- Query: {planner_info.get('restructured_query', 'Transform data')}
+- Source tables: {planner_info.get('source_table', [])}
+- Target table: {planner_info.get('target_table', [])}
+- Source fields: {planner_info.get('source_fields', [])}
+- Target fields: {planner_info.get('target_fields', [])}
+- Filtering fields: {planner_info.get('filtering_fields', [])}
+- Key columns: {planner_info.get('key_columns', [])}
 
-            KEY MAPPING (CRITICALLY IMPORTANT):
-            Key columns for mapping between source and target: {planner_info.get('key_columns', [])}
+PLAN REQUIREMENTS:
+1. Begin with data validation steps for all source tables and fields
+2. Include clear steps for filtering if filtering fields are specified
+3. Address how both empty AND populated target dataframes will be handled
+4. Explicitly include key column mapping between source and target
+5. Include steps for handling edge cases like missing data and type mismatches
+6. Ensure the plan is complete with no steps missing
+7. Ensure all target fields will be populated in the result
+8. End with validation of the result before returning
 
-            IMPORTANT RULES FOR KEY COLUMNS:
-            1. You MUST use the key columns for ANY operation that reads from or writes to the target table
-            2. Key columns are used to match records between source and target tables
-            3. NEVER skip key column mapping - it is required even if not explicitly mentioned in the query
-            4. For insert operations, key columns must be included in the inserted data
-            5. For update operations, key columns are used to identify which records to update
-            6. For filter operations, ensure key columns are preserved during filtering
+FORMAT:
+- Number each step sequentially
+- Make each step clear and actionable
+- Include 8-12 detailed steps, covering all necessary operations
+- Be specific about which fields and tables are used in each step
 
-            IMPORTANT RULES FOR FILTER CONDITIONS:
-            1. Filter conditions must be applied EXACTLY as specified
-            2. When multiple conditions exist, combine them with proper logical operators (AND/OR)
-            3. Filter operations should be performed BEFORE any mapping or transformation
-            4. Always validate that filtered data maintains all required key columns
-            5. For complex filters, break down into multiple steps for clarity
+Example of a good step: "Filter the source_table dataframe where field_name matches the condition value"
+Example of a bad step: "Apply filtering as needed"
 
-            Write a numbered, step-by-step plan for a code generator that will perform this data transformation operation.
-
-            Note:
-            - ALWAYS use the key mapping in your plan - this is NOT optional
-            - Verify key columns exist in both source and target before performing operations
-            - If working with multiple source tables, ensure key relationships are maintained
-            - When filtering data, preserve the integrity of key columns
-            - For updates, explicitly check for existing records using key columns
-            - For inserts, always include key columns in the new records
-            - DO NOT CREATE YOUR OWN COLUMNS
-            - STRICTLY STICK TO WHAT IS MENTIONED IN THE PROMPT.
-            - Use If/else logic in the plan when the query calls for it.
-
-            Your step-by-step plan (5-10 steps):
-            """
+Return ONLY the numbered plan with no explanations or additional text.
+"""
 
             try:
                 print(base_prompt)

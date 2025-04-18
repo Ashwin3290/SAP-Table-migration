@@ -1,18 +1,20 @@
 {
   "source_table_name": [
-    "MARA",
-    "MARA_500"
+    "MARA_500",
+    "MARA_700",
+    "MARA"
   ],
   "source_field_names": [
-    "Industry Sector"
+    "MATNR",
+    "MTART"
   ],
   "filtering_fields": [
-    "Industry Sector"
+    "PRODUCT"
   ],
   "insertion_fields": [
-    "Industry Sector"
+    "MTART"
   ],
-  "Resolved_query": "For each record in the target table, if the Industry Sector from MARA is null, then retrieve the Industry Sector from MARA_500. If the Industry Sector is still null after checking MARA_500, then hardcode the Industry Sector to 'M'.",
+  "Resolved_query": "Check for 'ROH' material type in the MARA_500 table using 'PRODUCT' (mapped from source field 'MATNR'). If a match is found in the target table, retrieve the 'MTART' field from MARA_500 and insert it into the target table. If no match is found in MARA_500, check for 'ROH' material type in the MARA_700 table using 'PRODUCT'. If a match is found, retrieve the 'MTART' field from MARA_700 and insert it into the target table. Otherwise, retrieve the 'MTART' field from the MARA table and insert it into the target table.",
   "target_table": [
     "t_24_Product_Basic_Data_mandatory_Ext"
   ],

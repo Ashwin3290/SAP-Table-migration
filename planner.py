@@ -329,16 +329,11 @@ def fetch_data_by_ids(object_id, segment_id, project_id, conn):
 
         joined_query = """
         SELECT 
-            f.fields,
             f.description,
             f.isMandatory,
             f.isKey,
-            f.sap_structure,
-            r.source_table,
             r.source_field_name,
-            r.target_sap_table,
             r.target_sap_field,
-            s.segement_name,
             s.table_name
         FROM connection_fields f
         LEFT JOIN (
@@ -546,24 +541,15 @@ def parse_data_with_context(
        - Use the provided key mappings to connect source and target fields correctly
        - Consider the current state of the target data shown above
      
-    4. Provide a summary of the identified transformation in both natural language and structured format.
+    4. Create a resolved query that takes the actual field and table names, and does not change what is said in the 
 
-    5. For the insertion fields, identify the fields that need to be inserted into the target table based on the transformation logic. Take note to not add the filtering fields to the insertion fields if not specifically requested.
+    5. For the insertion fields, identify the fields that need to be inserted into the target table based on the User query. Take note to not add the filtering fields to the insertion fields if not specifically requested.
 
-    6. Restructure the user query with resolved data and transformation logic.
+    6. Restructure the user query with resolved data types and field names.
 
     Note:
-    - When working with key mappings, make sure your transformation logic uses them to properly match records between source and target tables.
-    - Use the key mappings to determine the relationship between source and target fields (format is target_field:source_field).
-    - Consider the current state of the target table when determining what needs to be inserted or updated.
-    - if the user says about something that previous transformations, use target table as a way to know what is already done.
-    - properly make logic about if else cases.
-    - Do not use markdown format for the JSON response.
-    - There can be cases where where user is reclassifing a a column , in that case filtering  field and insertion field will be the same.
-    - Do not pick Key values to be inserted.
-    - if a user talks about matching entries then use the key mappings to determine the relationship between source and target fields and match entries from target table to source table.
-    - if you are not sure about the filtering field but have a insertion field, then treat the query as one that deals with filtering and insertion of same column.
-    
+    - 
+
     Respond with:
     ```json
     {{
@@ -622,7 +608,7 @@ def parse_data_with_context(
             logger.warning(f"Failed to save joined_data.csv: {e}")
 
         # Format the prompt with all inputs
-        table_desc = joined_df[joined_df.columns.tolist()[1:7]]
+        table_desc = joined_df[joined_df.columns.tolist()[:-1]] 
         formatted_prompt = prompt.format(
             question=query,
             table_desc=list(table_desc.itertuples(index=False)),
