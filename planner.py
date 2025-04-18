@@ -514,9 +514,6 @@ def parse_data_with_context(
     
     CURRENT TARGET TABLE STATE:
     {target_df_sample}
-    
-    KEY MAPPINGS (target_field:source_field format):
-    {key_mapping}
      
     USER QUERY: {question}
 
@@ -548,7 +545,8 @@ def parse_data_with_context(
     6. Restructure the user query with resolved data types and field names.
 
     Note:
-    - 
+    - In the Restrucutured query, only replace the textual descriptions with the field names.
+    - Do not change the query itself, just replace the field names with the actual field names.
 
     Respond with:
     ```json
@@ -756,7 +754,7 @@ def process_query(
             return None
 
         # Handle missing values in the dataframe
-        # joined_df = missing_values_handling(joined_df)
+        joined_df = missing_values_handling(joined_df)
 
         # Save joined data for debugging
         try:
