@@ -346,7 +346,8 @@ Return ONLY the numbered plan with no explanations or additional text.
             try:
                 print(base_prompt)
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash-thinking-exp-01-21", contents=base_prompt
+                    model="gemini-2.0-flash-thinking-exp-01-21", contents=base_prompt,
+                    config=types.GenerateContentConfig(temperature=0.2)
                 )
 
                 # Validate response
@@ -541,7 +542,8 @@ return target_df
 """
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt
+                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt,
+                    config=types.GenerateContentConfig(temperature=0.25, top_p=0.9)
                 )
 
                 # Validate response
@@ -675,7 +677,8 @@ return target_df
             # Call the AI to fix the code
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt
+                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt,
+                    config=types.GenerateContentConfig(temperature=0.25)
                 )
 
                 # Validate response
