@@ -1,20 +1,15 @@
 {
   "source_table_name": [
-    "MARA_500",
-    "MARA_700",
     "MARA"
   ],
-  "source_field_names": [
-    "MATNR",
-    "MTART"
-  ],
+  "source_field_names": [],
   "filtering_fields": [
-    "PRODUCT"
+    "MATKL"
   ],
   "insertion_fields": [
-    "MTART"
+    "PRODUCT"
   ],
-  "Resolved_query": "Check for 'ROH' material type in the MARA_500 table using 'PRODUCT' (mapped from source field 'MATNR'). If a match is found in the target table, retrieve the 'MTART' field from MARA_500 and insert it into the target table. If no match is found in MARA_500, check for 'ROH' material type in the MARA_700 table using 'PRODUCT'. If a match is found, retrieve the 'MTART' field from MARA_700 and insert it into the target table. Otherwise, retrieve the 'MTART' field from the MARA table and insert it into the target table.",
+  "Resolved_query": "IF Product Group (MATKL) in ( L002, ZMGRP1, 202R ) THEN set Product Number (PRODUCT) to 'GENAI01'. ELSE IF Product Group (MATKL) in ( '01', 'L001', 'ZSUK1RM1') THEN set Product Number (PRODUCT) to 'GENAI02'. ELSE IF Product Group (MATKL) in ( 'CH001', '02') THEN set Product Number (PRODUCT) to 'GenAI03'. ELSE set Product Number (PRODUCT) to 'GenAINo'.",
   "target_table": [
     "t_24_Product_Basic_Data_mandatory_Ext"
   ],
