@@ -178,3 +178,6 @@ generated_code/
 sessions/
 *.csv
 *.json
+*.xlsx
+joined_data.csv
+response.json

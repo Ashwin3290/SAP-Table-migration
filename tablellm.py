@@ -532,6 +532,64 @@ else:
     # Filter second table by the same value
     filtered_secondary = source_dfs['SECONDARY_TABLE'][source_dfs['SECONDARY_TABLE']['SOME_FIELD'] == 'SOME_VALUE']
     # This approach incorrectly uses filtering instead of existence checking
+
+5. CONDITIONAL VALUE ASSIGNMENT WITH MULTIPLE FILTERS (correct implementation):
+    ```python
+    # CORRECT - Implement multi-level conditional logic with IN clauses
+    # Initialize result field with default value
+    target_df['TARGET_FIELD'] = 'DEFAULT_VALUE'
+
+    # Apply first level condition
+    material_type_condition = source_dfs['SOURCE_TABLE']['MATERIAL_TYPE'].isin(['ROH', 'FERT', 'HALB'])
+    filtered_source = source_dfs['SOURCE_TABLE'][material_type_condition]
+
+    for idx, target_row in target_df.iterrows():
+        key_value = target_row['KEY_COLUMN']
+        
+        # Find matching rows in filtered source
+        matching_rows = filtered_source[filtered_source['KEY_COLUMN'] == key_value]
+        
+        if not matching_rows.empty:
+            # Found match for first condition, check second condition
+            material_group = matching_rows.iloc[0]['MATERIAL_GROUP']
+            
+            if material_group in ['1000', '2000', 'YBMM01']:
+                # Second condition is true
+                target_df.loc[idx, 'TARGET_FIELD'] = 'VALUE_1'
+            else:
+                # Check another table for the second condition
+                secondary_matches = source_dfs['SECONDARY_TABLE'][
+                    (source_dfs['SECONDARY_TABLE']['KEY_COLUMN'] == key_value) & 
+                    (source_dfs['SECONDARY_TABLE']['MATERIAL_GROUP'].isin(['L001', 'YBMM01']))
+                ]
+                
+                if not secondary_matches.empty:
+                    target_df.loc[idx, 'TARGET_FIELD'] = 'VALUE_2'
+                else:
+                    target_df.loc[idx, 'TARGET_FIELD'] = 'DEFAULT_VALUE'
+
+    CONDITIONAL VALUE ASSIGNMENT WITH MULTIPLE FILTERS (incorrect implementation - avoid this):
+
+    python# INCORRECT - This misinterprets the filtering conditions as existence checks
+
+    # This incorrectly checks if ANY row has these material types
+    # instead of filtering to those specific material types
+    has_material_types = source_dfs['SOURCE_TABLE']['MATERIAL_TYPE'].isin(['ROH', 'FERT', 'HALB']).any()
+
+    if has_material_types:
+        # This treats the condition as a global check rather than per record
+        has_material_groups = source_dfs['SOURCE_TABLE']['MATERIAL_GROUP'].isin(['1000', '2000', 'YBMM01']).any()
+        
+        if has_material_groups:
+            target_df['TARGET_FIELD'] = 'VALUE_1'
+        else:
+            # More incorrect global checks
+            has_secondary_groups = source_dfs['SECONDARY_TABLE']['MATERIAL_GROUP'].isin(['L001', 'YBMM01']).any()
+            if has_secondary_groups:
+                target_df['TARGET_FIELD'] = 'VALUE_2'
+            else:
+                target_df['TARGET_FIELD'] = 'DEFAULT_VALUE'
+
 CRITICAL REQUIREMENTS:
 
 ALWAYS use key-based matching to check for record existence, not filtering by field values

@@ -544,9 +544,71 @@ def parse_data_with_context(
 
     6. Restructure the user query with resolved data types and field names.
 
-    Note:
-    - In the Restrucutured query, only replace the textual descriptions with the field names.
-    - Do not change the query itself, just replace the field names with the actual field names.
+    QUERY INTERPRETATION GUIDELINES:
+
+    1. EXISTENCE CHECKS vs FILTERING:
+    When a query mentions "check X in Y table", this typically means to check if records with matching keys exist in table Y, NOT to filter rows where a field equals X.
+
+    EXAMPLES:
+    - "Check Material in MARA_500 table" means: For each record in the target table, check if a matching record with the same key value exists in MARA_500.
+    - "Check if Customer exists in CUSTOMER table" means: Look up customer records by key value, not filtering where a field equals "Customer".
+
+    2. CONDITIONAL LOGIC WITH MULTIPLE TABLES:
+    When a query has "IF... THEN... ELSE..." structure with multiple tables, this indicates a lookup sequence that should be followed in order.
+
+    EXAMPLES:
+    - "Check Material in TABLE1 and IF matching entries found, bring Type field from TABLE1 ELSE check Material in TABLE2" means:
+        1. First try to find matching records in TABLE1 by key
+        2. Only if no matching record is found in TABLE1, then try TABLE2
+        3. The conditional is about record existence, not field values
+
+    3. FIELD NAMES vs FILTER VALUES:
+    Words like "Material", "Customer", "Type", "ROH" often refer to field names or concepts, not specific values to filter by.
+
+    EXAMPLES:
+    - "Bring Material Type from MATERIAL table" means: Copy the "Material Type" field, not filter where type = "Material"
+    - "Check ROH Material in TABLE" means: Look up materials by key value, not filter where Material = "ROH"
+
+    4. CONDITIONAL VALUE ASSIGNMENT BASED ON MULTIPLE FIELDS:
+    When a query specifies conditions across multiple fields and uses IN clauses with multiple values, this indicates conditional logic for setting a specific value.
+
+    EXAMPLES:
+    - "If MATERIAL TYPE IN (ROH, FERT, HALB), then check material group" means:
+        1. First filter records where MATERIAL TYPE is one of these values
+        2. Then apply additional conditions only to those filtered records
+        3. This is an explicit filtering condition, not an existence check
+
+    - "If field1 in (value1, value2, value3) then hardcode as 'X' else hardcode as 'Y'" means:
+        1. Check if the field value is in the specified list
+        2. Assign different hardcoded values based on the condition result
+        3. These are explicit filter conditions intended for value assignment
+
+    - "If field1 in (value1, value2) then check field2, if field2 in (value3, value4) then hardcode as 'X'" means:
+        1. Apply nested conditions where the second condition is only checked if the first is true
+        2. The insertion field is the field receiving the hardcoded value
+        3. Multiple filtering fields are used as conditions, not for data retrieval
+
+    5. HANDLING IN CLAUSES WITH MULTIPLE VALUES:
+    When values are listed in parentheses with "IN" keyword, this explicitly means to filter for records matching any of those values.
+
+    EXAMPLES:
+    - "if material group in (1000, 2000, YBMM01) then..." means:
+        1. Filter where material group equals any of these specific values
+        2. This is an explicit filtering condition
+        3. The values in parentheses are literal values, not field names
+
+    - "if field1 in (X, Y, Z) then..." vs "check field1 in table" meanings:
+        * "if field1 in (X, Y, Z)": Filter records where field1 equals X, Y, or Z
+        * "check field1 in table": Check existence of records by key matching
+
+    - "DEFAULT TO 'value'" means:
+        1. If none of the previous conditions match, use this hardcoded value
+        2. This is the final fallback for the conditional logic
+        
+    Remember:
+    - Identify whether terms represent field names or filter values based on context
+    - For multi-table conditions, focus on record existence by key matching
+    - Don't assume capitalized terms are filter values - they are often field names
 
     Respond with:
     ```json
