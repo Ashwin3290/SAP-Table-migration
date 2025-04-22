@@ -204,82 +204,6 @@ class TableLLM:
             return minimal_context
 
     @track_token_usage()
-    def _classify_query(self, query, planner_info):
-        """
-        Classify the query type to determine code generation approach
-        Uses extracted planner information for better context
-        """
-        try:
-            # Validate inputs
-            if not query:
-                logger.warning("Empty query provided to _classify_query")
-                return "EXTRACTION"  # Default classification
-
-            if not planner_info:
-                logger.warning("No planner info provided to _classify_query")
-                return "EXTRACTION"  # Default classification
-
-            # Create a comprehensive prompt with detailed context
-            prompt = f"""
-Classify this data transformation query into ONE of these categories:
-- FILTER_AND_EXTRACT: Filtering records from source and extracting specific fields
-- UPDATE_EXISTING: Updating values in existing target records only
-- CONDITIONAL_MAPPING: Applying if/else logic to determine values
-- EXTRACTION: Extracting data from source to target without complex filtering
-- TIERED_LOOKUP: Looking up data in multiple tables in a specific order
-- AGGREGATION: Performing calculations or aggregations on source data
-
-QUERY INFORMATION:
-Original query: {query}
-Restructured query: {planner_info.get('restructured_query', '')}
-Source fields: {planner_info.get('source_fields', [])}
-Target fields: {planner_info.get('target_fields', [])}
-Filter fields: {planner_info.get('filtering_fields', [])}
-Insertion fields: {planner_info.get('insertion_fields', [])}
-
-EXTRACTED CONDITIONS:
-{json.dumps(planner_info.get('extracted_conditions', {}), indent=2)}
-
-Return ONLY the classification name with no explanation.
-"""
-            try:
-                response = self.client.models.generate_content(
-                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt
-                )
-
-                # Validate response
-                if not response or not hasattr(response, "text") or not response.text:
-                    logger.warning(
-                        "Invalid response from Gemini API in _classify_query"
-                    )
-                    return "EXTRACTION"  # Default classification
-
-                # Return the classification
-                classification = response.text.strip()
-
-                # Validate that classification is one of the allowed values
-                allowed_classifications = [
-                    "FILTER_AND_EXTRACT",
-                    "UPDATE_EXISTING",
-                    "CONDITIONAL_MAPPING",
-                    "EXTRACTION",
-                    "TIERED_LOOKUP",
-                    "AGGREGATION",
-                ]
-
-                if classification not in allowed_classifications:
-                    logger.warning(f"Invalid classification returned: {classification}")
-                    return "EXTRACTION"  # Default to safest option
-
-                return classification
-            except Exception as e:
-                logger.error(f"Error calling Gemini API in _classify_query: {e}")
-                return "EXTRACTION"  # Default classification
-        except Exception as e:
-            logger.error(f"Error in _classify_query: {e}")
-            return "EXTRACTION"  # Default classification
-
-    @track_token_usage()
     def _generate_simple_plan(self, planner_info):
         """
         Generate a simple, step-by-step plan in natural language
@@ -322,14 +246,13 @@ TASK CONTEXT:
 - Key columns: {planner_info.get('key_columns', [])}
 
 PLAN REQUIREMENTS:
-1. Begin with data validation steps for all source tables and fields
-2. Include clear steps for filtering if filtering fields are specified
-3. Address how both empty AND populated target dataframes will be handled
-4. Explicitly include key column mapping between source and target
-5. Include steps for handling edge cases like missing data and type mismatches
-6. Ensure the plan is complete with no steps missing
-7. Ensure all target fields will be populated in the result
-8. End with validation of the result before returning
+1. Include clear steps for filtering if filtering fields are specified
+2. Address how both empty AND populated target dataframes will be handled
+3. Explicitly include key column mapping between source and target
+4. Include steps for handling edge cases like missing data and type mismatches
+5. Ensure the plan is complete with no steps missing
+6. Ensure all target fields will be populated in the result
+7. End with validation of the result before returning
 
 FORMAT:
 - Number each step sequentially
@@ -339,6 +262,39 @@ FORMAT:
 
 Example of a good step: "Filter the source_table dataframe where field_name matches the condition value"
 Example of a bad step: "Apply filtering as needed"
+
+COMMON QUERY PATTERNS AND HOW TO IMPLEMENT THEM:
+
+1. EXISTENCE CHECK PATTERN:
+   "Check Field in Table"
+
+   Implementation Plan:
+   - Loop through target records
+   - For each record, check if matching key exists in source table
+   - If match exists, use data from that source record
+   - Do NOT filter source table by any field value unless explicitly stated
+
+2. MULTI-TABLE FALLBACK PATTERN:
+   "Check Table1, if not found check Table2, else use Table3"
+
+   Implementation Plan:
+   - Create sequential lookup logic
+   - Try first table, then only if no match is found, try second table
+   - Only use third table if no matches in first two tables
+   - Follow key-based matching, not filtering by values
+
+3. CONDITIONAL VALUE MAPPING:
+   "If Field1 is Value1, set Field2 to Value2"
+
+   Implementation Plan:
+   - Create explicit conditional logic for value mapping
+   - Apply conditions based on specified field values
+   - Update target fields according to the mapping rules
+
+4. IMPORTANT FIELD NAMING CONSIDERATIONS:
+   - Terms like "Material", "Type", "ROH", "Customer" are typically field names
+   - Don't interpret these as filter values unless explicitly part of a condition
+   - Capitalized terms almost always refer to field names or concepts, not values
 
 Return ONLY the numbered plan with no explanations or additional text.
 """
@@ -512,6 +468,76 @@ Only define the analyze_data function; do NOT add other functions or classes.
 Do NOT add or remove columns from the target except as specified.
 Do NOT output explanations, comments, or extra text—only the code.
 Use transform_utils module for sap utils functions.
+
+EXAMPLE IMPLEMENTATIONS FOR COMMON PATTERNS:
+
+1. EXISTENCE CHECK (correct implementation):
+```python
+# CORRECT - Check if records exist in source_table by key matching
+for idx, target_row in target_df.iterrows():
+    key_value = target_row['KEY_COLUMN']
+    matching_rows = source_dfs['SOURCE_TABLE'][source_dfs['SOURCE_TABLE']['KEY_COLUMN'] == key_value]
+    
+    if not matching_rows.empty:
+        # Found matching record - use its values
+        target_df.loc[idx, 'TARGET_FIELD'] = matching_rows.iloc[0]['SOURCE_FIELD']
+
+EXISTENCE CHECK (incorrect implementation - avoid this):
+
+python# INCORRECT - This filters by a value rather than checking existence
+filtered_source = source_dfs['SOURCE_TABLE'][source_dfs['SOURCE_TABLE']['SOME_FIELD'] == 'FIELD_NAME']
+
+# This ignores the key-based matching requirement
+for idx, row in filtered_source.iterrows():
+    target_df.loc[target_df['KEY_COLUMN'] == row['KEY_COLUMN'], 'TARGET_FIELD'] = row['SOURCE_FIELD']
+
+MULTI-TABLE FALLBACK (correct implementation):
+
+python# CORRECT - Try tables in sequence, only moving to next if no match found
+for idx, target_row in target_df.iterrows():
+    key_value = target_row['KEY_COLUMN']
+    
+    # Try first table
+    primary_matches = source_dfs['PRIMARY_TABLE'][source_dfs['PRIMARY_TABLE']['KEY_COLUMN'] == key_value]
+    
+    if not primary_matches.empty:
+        # Found in primary table
+        target_df.loc[idx, 'TARGET_FIELD'] = primary_matches.iloc[0]['SOURCE_FIELD']
+    else:
+        # Not found in primary, try secondary table
+        secondary_matches = source_dfs['SECONDARY_TABLE'][source_dfs['SECONDARY_TABLE']['KEY_COLUMN'] == key_value]
+        
+        if not secondary_matches.empty:
+            # Found in secondary table
+            target_df.loc[idx, 'TARGET_FIELD'] = secondary_matches.iloc[0]['SOURCE_FIELD']
+        else:
+            # Not found in either table, use fallback
+            fallback_value = source_dfs['FALLBACK_TABLE'].iloc[0]['SOURCE_FIELD']
+            target_df.loc[idx, 'TARGET_FIELD'] = fallback_value
+
+MULTI-TABLE FALLBACK (incorrect implementation - avoid this):
+
+python# INCORRECT - This incorrectly filters each table by a field value
+# Rather than checking existence by key
+
+# Filter first table by some field value
+filtered_primary = source_dfs['PRIMARY_TABLE'][source_dfs['PRIMARY_TABLE']['SOME_FIELD'] == 'SOME_VALUE']
+
+if not filtered_primary.empty:
+    # Use filtered primary records
+    for idx, row in filtered_primary.iterrows():
+        target_df.loc[target_df['KEY_COLUMN'] == row['KEY_COLUMN'], 'TARGET_FIELD'] = row['SOURCE_FIELD']
+else:
+    # Filter second table by the same value
+    filtered_secondary = source_dfs['SECONDARY_TABLE'][source_dfs['SECONDARY_TABLE']['SOME_FIELD'] == 'SOME_VALUE']
+    # This approach incorrectly uses filtering instead of existence checking
+CRITICAL REQUIREMENTS:
+
+ALWAYS use key-based matching to check for record existence, not filtering by field values
+For multi-table fallbacks, ALWAYS check tables in sequence, only moving to next if no match found
+NEVER interpret field names as filter values - terms like "Material", "Type", "ROH" are typically fields
+ALWAYS prioritize matching records by key columns, not by other field values
+When looping through records, check existence in source tables for EACH target record
 
 Make the function like this:
 def analyze_data(source_dfs, target_df):

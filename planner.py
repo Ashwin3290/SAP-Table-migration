@@ -541,14 +541,41 @@ def parse_data_with_context(
        - Use the provided key mappings to connect source and target fields correctly
        - Consider the current state of the target data shown above
      
-    4. Create a resolved query that takes the actual field and table names, and does not change what is said in the 
+    4. Create a resolved query with replacing the column name description with the resolved filtering and insertion fields.
 
     5. For the insertion fields, identify the fields that need to be inserted into the target table based on the User query. Take note to not add the filtering fields to the insertion fields if not specifically requested.
 
     6. Restructure the user query with resolved data types and field names.
 
-    Note:
-    - 
+    QUERY INTERPRETATION GUIDELINES:
+
+        1. EXISTENCE CHECKS vs FILTERING:
+        When a query mentions "check X in Y table", this typically means to check if records with matching keys exist in table Y, NOT to filter rows where a field equals X.
+
+        EXAMPLES:
+        - "Check Material in MARA_500 table" means: For each record in the target table, check if a matching record with the same key value exists in MARA_500.
+        - "Check if Customer exists in CUSTOMER table" means: Look up customer records by key value, not filtering where a field equals "Customer".
+
+        2. CONDITIONAL LOGIC WITH MULTIPLE TABLES:
+        When a query has "IF... THEN... ELSE..." structure with multiple tables, this indicates a lookup sequence that should be followed in order.
+
+        EXAMPLES:
+        - "Check Material in TABLE1 and IF matching entries found, bring Type field from TABLE1 ELSE check Material in TABLE2" means:
+            1. First try to find matching records in TABLE1 by key
+            2. Only if no matching record is found in TABLE1, then try TABLE2
+            3. The conditional is about record existence, not field values
+
+        3. FIELD NAMES vs FILTER VALUES:
+        Words like "Material", "Customer", "Type", "ROH" often refer to field names or concepts, not specific values to filter by.
+
+        EXAMPLES:
+        - "Bring Material Type from MATERIAL table" means: Copy the "Material Type" field, not filter where type = "Material"
+        - "Check ROH Material in TABLE" means: Look up materials by key value, not filter where Material = "ROH"
+
+Remember:
+- Identify whether terms represent field names or filter values based on context
+- For multi-table conditions, focus on record existence by key matching
+- Don't assume capitalized terms are filter values - they are often field names
 
     Respond with:
     ```json
@@ -561,13 +588,6 @@ def parse_data_with_context(
     }}
     ```
         """
-
-        # Format the previous context for the prompt
-        context_str = (
-            "None"
-            if previous_context is None
-            else json.dumps(previous_context, indent=2)
-        )
 
         # Format key mapping for the prompt
         key_mapping_str = "No key mappings available"
