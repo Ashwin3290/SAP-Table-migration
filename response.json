@@ -2,14 +2,14 @@
   "source_table_name": [
     "MARA"
   ],
-  "source_field_names": [],
-  "filtering_fields": [
-    "MATKL"
+  "source_field_names": [
+    "MBRSH"
   ],
+  "filtering_fields": [],
   "insertion_fields": [
-    "PRODUCT"
+    "MBRSH"
   ],
-  "Resolved_query": "IF Product Group (MATKL) in ( L002, ZMGRP1, 202R ) THEN set Product Number (PRODUCT) to 'GENAI01'. ELSE IF Product Group (MATKL) in ( '01', 'L001', 'ZSUK1RM1') THEN set Product Number (PRODUCT) to 'GENAI02'. ELSE IF Product Group (MATKL) in ( 'CH001', '02') THEN set Product Number (PRODUCT) to 'GenAI03'. ELSE set Product Number (PRODUCT) to 'GenAINo'.",
+  "Resolved_query": "IF Industry Sector (MBRSH) is null ( from MARA ) then try to bring from MARA_500 even if MARA_500 has null value for Industry Sector (MBRSH), then hardcode as 'M'",
   "target_table": [
     "t_24_Product_Basic_Data_mandatory_Ext"
   ],

@@ -1,137 +1,137 @@
 description,isMandatory,isKey,source_field_name,target_sap_field,table_name
 Product Number,True,True,MATNR,PRODUCT,t_24_Product_Basic_Data_mandatory_Ext
 Product Type,True,True,MTART,MTART,t_24_Product_Basic_Data_mandatory_Ext
-Product Category,False,False,,ATTYP,t_24_Product_Basic_Data_mandatory_Ext
-Configuration Product for Retail Variant,False,False,,SATNR,t_24_Product_Basic_Data_mandatory_Ext
-Product Group,False,False,,MATKL,t_24_Product_Basic_Data_mandatory_Ext
-Industry Sector,False,False,,MBRSH,t_24_Product_Basic_Data_mandatory_Ext
-Description,True,False,,MAKTX,t_24_Product_Basic_Data_mandatory_Ext
-Language Key,True,False,,SPRAS,t_24_Product_Basic_Data_mandatory_Ext
+Product Category,False,False,ATTYP,ATTYP,t_24_Product_Basic_Data_mandatory_Ext
+Configuration Product for Retail Variant,False,False,SATNR,SATNR,t_24_Product_Basic_Data_mandatory_Ext
+Product Group,False,False,MATKL,MATKL,t_24_Product_Basic_Data_mandatory_Ext
+Industry Sector,False,False,MBRSH,MBRSH,t_24_Product_Basic_Data_mandatory_Ext
+Description,True,False,MAKTX,MAKTX,t_24_Product_Basic_Data_mandatory_Ext
+Language Key,True,False,SPRAS,SPRAS,t_24_Product_Basic_Data_mandatory_Ext
 Base Unit of Measure (ISO Format),True,False,MEINS,MEINS,t_24_Product_Basic_Data_mandatory_Ext
-Change Number,False,False,,AENNR,t_24_Product_Basic_Data_mandatory_Ext
-Revision Level,False,False,,REVLV,t_24_Product_Basic_Data_mandatory_Ext
-GTIN,False,False,,EAN11,t_24_Product_Basic_Data_mandatory_Ext
-GTIN Category,False,False,,NUMTP,t_24_Product_Basic_Data_mandatory_Ext
-Division,False,False,,SPART,t_24_Product_Basic_Data_mandatory_Ext
-Old Product Number,False,False,,BISMT,t_24_Product_Basic_Data_mandatory_Ext
-Product Hierarchy,False,False,,PRDHA,t_24_Product_Basic_Data_mandatory_Ext
-Brand,False,False,,BRAND_ID,t_24_Product_Basic_Data_mandatory_Ext
-Batch Management Required Ind.,False,False,,XCHPF,t_24_Product_Basic_Data_mandatory_Ext
-Has Empties,False,False,,MLGUT,t_24_Product_Basic_Data_mandatory_Ext
-Valid From,False,False,,DATAB,t_24_Product_Basic_Data_mandatory_Ext
-Deletion Date,False,False,,LIQDT,t_24_Product_Basic_Data_mandatory_Ext
-Competitor,False,False,,KUNNR,t_24_Product_Basic_Data_mandatory_Ext
-Industry Standard Description,False,False,,NORMT,t_24_Product_Basic_Data_mandatory_Ext
-Size/Dimensions,False,False,,GROES,t_24_Product_Basic_Data_mandatory_Ext
-Laboratory / Design Office,False,False,,LABOR,t_24_Product_Basic_Data_mandatory_Ext
-Net Contents,False,False,,INHAL,t_24_Product_Basic_Data_mandatory_Ext
-Net Contents Unit (ISO Format),False,False,,INHME,t_24_Product_Basic_Data_mandatory_Ext
-Gross Contens,False,False,,INHBR,t_24_Product_Basic_Data_mandatory_Ext
-Comparison Price Unit,False,False,,VPREH,t_24_Product_Basic_Data_mandatory_Ext
-External Product Group,False,False,,EXTWG,t_24_Product_Basic_Data_mandatory_Ext
-General Item Category Group,False,False,,MTPOS_MARA,t_24_Product_Basic_Data_mandatory_Ext
-Authorization Group,False,False,,BEGRU,t_24_Product_Basic_Data_mandatory_Ext
-Cross-Plant Product Status,False,False,,MSTAE,t_24_Product_Basic_Data_mandatory_Ext
-Valid-From Date,False,False,,MSTDE,t_24_Product_Basic_Data_mandatory_Ext
-Level of Explicitness for Serial Number,False,False,,SERLV,t_24_Product_Basic_Data_mandatory_Ext
-Quality Manag. in Procurement Is Active,False,False,,QMPUR,t_24_Product_Basic_Data_mandatory_Ext
-Animal Origin,False,False,,ANIMAL_ORIGIN,t_24_Product_Basic_Data_mandatory_Ext
-ANP Code,False,False,,ANP,t_24_Product_Basic_Data_mandatory_Ext
-Gross Weight,False,False,,BRGEW,t_24_Product_Basic_Data_mandatory_Ext
-Net Weight,False,False,,NTGEW,t_24_Product_Basic_Data_mandatory_Ext
-Unit of Weight (ISO Format),False,False,,GEWEI,t_24_Product_Basic_Data_mandatory_Ext
-Length,False,False,,LAENG,t_24_Product_Basic_Data_mandatory_Ext
-Width,False,False,,BREIT,t_24_Product_Basic_Data_mandatory_Ext
-Height,False,False,,HOEHE,t_24_Product_Basic_Data_mandatory_Ext
-Unit for Length/Width/Height(ISO Format),False,False,,MEABM,t_24_Product_Basic_Data_mandatory_Ext
-Volume,False,False,,VOLUM,t_24_Product_Basic_Data_mandatory_Ext
-Volume Unit,False,False,,VOLEH,t_24_Product_Basic_Data_mandatory_Ext
-Capacity Usage,False,False,,CAPAUSE,t_24_Product_Basic_Data_mandatory_Ext
-Compliance Relevant,False,False,,CHML_CMPLNC_RLVNCE_IND,t_24_Product_Basic_Data_mandatory_Ext
-Product Is Configurable,False,False,,KZKFG,t_24_Product_Basic_Data_mandatory_Ext
-Order Unit of Measure (ISO Format),False,False,,BSTME,t_24_Product_Basic_Data_mandatory_Ext
-Purchasing Value Key,False,False,,EKWSL,t_24_Product_Basic_Data_mandatory_Ext
-State of Variable Purchase Order Unit,False,False,,VABME,t_24_Product_Basic_Data_mandatory_Ext
-Internal Product Number,False,False,,BMATN,t_24_Product_Basic_Data_mandatory_Ext
-Manufacturer Part Number,False,False,,MFRPN,t_24_Product_Basic_Data_mandatory_Ext
-Manufacturer Number,False,False,,MFRNR,t_24_Product_Basic_Data_mandatory_Ext
-Manufacturer Part Profile,False,False,,MPROF,t_24_Product_Basic_Data_mandatory_Ext
-Transportation Group,False,False,,TRAGR,t_24_Product_Basic_Data_mandatory_Ext
-Cross-Distribution Chain Product Status,False,False,,MSTAV,t_24_Product_Basic_Data_mandatory_Ext
-Valid From Date for Status,False,False,,MSTDV,t_24_Product_Basic_Data_mandatory_Ext
-Pricing Reference Product,False,False,,PMATA,t_24_Product_Basic_Data_mandatory_Ext
-Pricing Profile for Variants,False,False,,SPROF,t_24_Product_Basic_Data_mandatory_Ext
-Variant Price Allowed,False,False,,ALLOW_PMAT_IGNO,t_24_Product_Basic_Data_mandatory_Ext
-Billing Cycle,False,False,,SOM_CYCLE,t_24_Product_Basic_Data_mandatory_Ext
-Billing Cycle Determination Rule,False,False,,SOM_CYCLE_RULE,t_24_Product_Basic_Data_mandatory_Ext
-Assignment Schema,False,False,,SOM_TC_SCHEMA,t_24_Product_Basic_Data_mandatory_Ext
-Assortment List Type,False,False,,BBTYP,t_24_Product_Basic_Data_mandatory_Ext
-Service Agreement,False,False,,SERVV,t_24_Product_Basic_Data_mandatory_Ext
-Product Group: Packaging Materials,False,False,,MAGRV,t_24_Product_Basic_Data_mandatory_Ext
-Packaging Product Type,False,False,,VHIART,t_24_Product_Basic_Data_mandatory_Ext
-Allowed Packaging Weight,False,False,,ERGEW,t_24_Product_Basic_Data_mandatory_Ext
-Unit of Allowed Packaging Weight,False,False,,ERGEI,t_24_Product_Basic_Data_mandatory_Ext
-Excess Weight Tolerance for HU,False,False,,GEWTO,t_24_Product_Basic_Data_mandatory_Ext
-Allowed Packaging Volume,False,False,,ERVOL,t_24_Product_Basic_Data_mandatory_Ext
-Unit of Allowed Packaging Volume,False,False,,ERVOE,t_24_Product_Basic_Data_mandatory_Ext
-Packaging Product Is Closed Packaging,False,False,,KZGVH,t_24_Product_Basic_Data_mandatory_Ext
-Excess Volume Tolerance for HU,False,False,,VOLTO,t_24_Product_Basic_Data_mandatory_Ext
-Period Indicator for Shelf Life,False,False,,IPRKZ,t_24_Product_Basic_Data_mandatory_Ext
-Storage Conditions,False,False,,RAUBE,t_24_Product_Basic_Data_mandatory_Ext
-Temperature Conditions Indicator,False,False,,TEMPB,t_24_Product_Basic_Data_mandatory_Ext
-Container Requirements,False,False,,BEHVO,t_24_Product_Basic_Data_mandatory_Ext
-Hazardous Product Number,False,False,,STOFF,t_24_Product_Basic_Data_mandatory_Ext
-Label Type,False,False,,ETIAR,t_24_Product_Basic_Data_mandatory_Ext
-Label Form,False,False,,ETIFO,t_24_Product_Basic_Data_mandatory_Ext
-Number of Goods Receipt/Issue Slips,False,False,,WESCH,t_24_Product_Basic_Data_mandatory_Ext
-Indicator: Approved Batch Rec. Required,False,False,,XGCHP,t_24_Product_Basic_Data_mandatory_Ext
-Total Shelf Life,False,False,,MHDHB,t_24_Product_Basic_Data_mandatory_Ext
-Minimum Remaining Shelf Life,False,False,,MHDRZ,t_24_Product_Basic_Data_mandatory_Ext
-Indi. for the Shelf Life Expiration Date,False,False,,SLED_BBD,t_24_Product_Basic_Data_mandatory_Ext
-Storage Percentage,False,False,,MHDLP,t_24_Product_Basic_Data_mandatory_Ext
-Rounding Rule for Calculation of SLED,False,False,,RDMHD,t_24_Product_Basic_Data_mandatory_Ext
-Handling Indicator,False,False,,HNDLCODE,t_24_Product_Basic_Data_mandatory_Ext
-Warehouse Product Group,False,False,,WHMATGR,t_24_Product_Basic_Data_mandatory_Ext
-Warehouse Storage Condition,False,False,,WHSTC,t_24_Product_Basic_Data_mandatory_Ext
-Standard Handling Unit Type,False,False,,HUTYP_DFLT,t_24_Product_Basic_Data_mandatory_Ext
-Serial Number Profile,False,False,,SERIAL,t_24_Product_Basic_Data_mandatory_Ext
-Pilferable,False,False,,PILFERABLE,t_24_Product_Basic_Data_mandatory_Ext
-Relevant for Hazardous Substances,False,False,,HAZMAT,t_24_Product_Basic_Data_mandatory_Ext
-Quarantine Period,False,False,,QQTIME,t_24_Product_Basic_Data_mandatory_Ext
-Time Unit for Quarantine Period,False,False,,QQTIMEUOM,t_24_Product_Basic_Data_mandatory_Ext
-Quality Inspection Group,False,False,,QGRP,t_24_Product_Basic_Data_mandatory_Ext
-Handling Unit Type,False,False,,HUTYP,t_24_Product_Basic_Data_mandatory_Ext
-Maximum Capacity,False,False,,MAXC,t_24_Product_Basic_Data_mandatory_Ext
-Overcapacity Tolerance,False,False,,MAXC_TOL,t_24_Product_Basic_Data_mandatory_Ext
-Variable Tare Weight,False,False,,TARE_VAR,t_24_Product_Basic_Data_mandatory_Ext
-Max. Pack. Length,False,False,,MAXL,t_24_Product_Basic_Data_mandatory_Ext
-UoM for Max. Pack. Length (ISO Format),False,False,,MAXDIM_UOM,t_24_Product_Basic_Data_mandatory_Ext
-Max. Pack. Width,False,False,,MAXB,t_24_Product_Basic_Data_mandatory_Ext
-Max. Pack. Height,False,False,,MAXH,t_24_Product_Basic_Data_mandatory_Ext
-Catalog Profile,False,False,,RBNRM,t_24_Product_Basic_Data_mandatory_Ext
-Assortment Grade,False,False,,SSTUF,t_24_Product_Basic_Data_mandatory_Ext
-Listing Procedure,False,False,,LSTVZ,t_24_Product_Basic_Data_mandatory_Ext
-Listing Period Start Date,False,False,,LDVZL,t_24_Product_Basic_Data_mandatory_Ext
-Listing Period End Date,False,False,,LDBZL,t_24_Product_Basic_Data_mandatory_Ext
-Listing Procedure,False,False,,LSTFL,t_24_Product_Basic_Data_mandatory_Ext
-Listing Period Start Date,False,False,,LDVFL,t_24_Product_Basic_Data_mandatory_Ext
-Listing Period End Date,False,False,,LDBFL,t_24_Product_Basic_Data_mandatory_Ext
-Sales Period Start Date,False,False,,VDVZL,t_24_Product_Basic_Data_mandatory_Ext
-Sales Period End Date,False,False,,VDBZL,t_24_Product_Basic_Data_mandatory_Ext
-Sales Period Start Date,False,False,,VDVFL,t_24_Product_Basic_Data_mandatory_Ext
-Sales Period End Date,False,False,,VDBFL,t_24_Product_Basic_Data_mandatory_Ext
-Delivery Unit of Measure (ISO Format),False,False,,WAUSM,t_24_Product_Basic_Data_mandatory_Ext
-Sales Unit of Measure (ISO Format),False,False,,WVRKM,t_24_Product_Basic_Data_mandatory_Ext
-ABC Indicator,False,False,,WMAAB,t_24_Product_Basic_Data_mandatory_Ext
-Valuation Class,False,False,,WBKLA,t_24_Product_Basic_Data_mandatory_Ext
-Country/Region of Origin,False,False,,WHERL,t_24_Product_Basic_Data_mandatory_Ext
-Region of Origin,False,False,,WHERR,t_24_Product_Basic_Data_mandatory_Ext
-Purchasing Group,False,False,,WEKGR,t_24_Product_Basic_Data_mandatory_Ext
-Source of Supply,False,False,,BWSCL,t_24_Product_Basic_Data_mandatory_Ext
-Tax Classification,False,False,,TAKLV,t_24_Product_Basic_Data_mandatory_Ext
-Loading Group,False,False,,WLADG,t_24_Product_Basic_Data_mandatory_Ext
-Valuation Margin,False,False,,WBWSP,t_24_Product_Basic_Data_mandatory_Ext
-Indicator: Quality,False,False,,PSTATQ,t_24_Product_Basic_Data_mandatory_Ext
-Indicator: Sales,False,False,,PSTATV,t_24_Product_Basic_Data_mandatory_Ext
-Indicator: Storage,False,False,,PSTATL,t_24_Product_Basic_Data_mandatory_Ext
-Indicator: Purchasing,False,False,,PSTATE,t_24_Product_Basic_Data_mandatory_Ext
+Change Number,False,False,AENNR,AENNR,t_24_Product_Basic_Data_mandatory_Ext
+Revision Level,False,False,REVLV,REVLV,t_24_Product_Basic_Data_mandatory_Ext
+GTIN,False,False,EAN11,EAN11,t_24_Product_Basic_Data_mandatory_Ext
+GTIN Category,False,False,NUMTP,NUMTP,t_24_Product_Basic_Data_mandatory_Ext
+Division,False,False,SPART,SPART,t_24_Product_Basic_Data_mandatory_Ext
+Old Product Number,False,False,BISMT,BISMT,t_24_Product_Basic_Data_mandatory_Ext
+Product Hierarchy,False,False,PRDHA,PRDHA,t_24_Product_Basic_Data_mandatory_Ext
+Brand,False,False,BRAND_ID,BRAND_ID,t_24_Product_Basic_Data_mandatory_Ext
+Batch Management Required Ind.,False,False,XCHPF,XCHPF,t_24_Product_Basic_Data_mandatory_Ext
+Has Empties,False,False,MLGUT,MLGUT,t_24_Product_Basic_Data_mandatory_Ext
+Valid From,False,False,DATAB,DATAB,t_24_Product_Basic_Data_mandatory_Ext
+Deletion Date,False,False,LIQDT,LIQDT,t_24_Product_Basic_Data_mandatory_Ext
+Competitor,False,False,KUNNR,KUNNR,t_24_Product_Basic_Data_mandatory_Ext
+Industry Standard Description,False,False,NORMT,NORMT,t_24_Product_Basic_Data_mandatory_Ext
+Size/Dimensions,False,False,GROES,GROES,t_24_Product_Basic_Data_mandatory_Ext
+Laboratory / Design Office,False,False,LABOR,LABOR,t_24_Product_Basic_Data_mandatory_Ext
+Net Contents,False,False,INHAL,INHAL,t_24_Product_Basic_Data_mandatory_Ext
+Net Contents Unit (ISO Format),False,False,INHME,INHME,t_24_Product_Basic_Data_mandatory_Ext
+Gross Contens,False,False,INHBR,INHBR,t_24_Product_Basic_Data_mandatory_Ext
+Comparison Price Unit,False,False,VPREH,VPREH,t_24_Product_Basic_Data_mandatory_Ext
+External Product Group,False,False,EXTWG,EXTWG,t_24_Product_Basic_Data_mandatory_Ext
+General Item Category Group,False,False,MTPOS_MARA,MTPOS_MARA,t_24_Product_Basic_Data_mandatory_Ext
+Authorization Group,False,False,BEGRU,BEGRU,t_24_Product_Basic_Data_mandatory_Ext
+Cross-Plant Product Status,False,False,MSTAE,MSTAE,t_24_Product_Basic_Data_mandatory_Ext
+Valid-From Date,False,False,MSTDE,MSTDE,t_24_Product_Basic_Data_mandatory_Ext
+Level of Explicitness for Serial Number,False,False,SERLV,SERLV,t_24_Product_Basic_Data_mandatory_Ext
+Quality Manag. in Procurement Is Active,False,False,QMPUR,QMPUR,t_24_Product_Basic_Data_mandatory_Ext
+Animal Origin,False,False,ANIMAL_ORIGIN,ANIMAL_ORIGIN,t_24_Product_Basic_Data_mandatory_Ext
+ANP Code,False,False,ANP,ANP,t_24_Product_Basic_Data_mandatory_Ext
+Gross Weight,False,False,BRGEW,BRGEW,t_24_Product_Basic_Data_mandatory_Ext
+Net Weight,False,False,NTGEW,NTGEW,t_24_Product_Basic_Data_mandatory_Ext
+Unit of Weight (ISO Format),False,False,GEWEI,GEWEI,t_24_Product_Basic_Data_mandatory_Ext
+Length,False,False,LAENG,LAENG,t_24_Product_Basic_Data_mandatory_Ext
+Width,False,False,BREIT,BREIT,t_24_Product_Basic_Data_mandatory_Ext
+Height,False,False,HOEHE,HOEHE,t_24_Product_Basic_Data_mandatory_Ext
+Unit for Length/Width/Height(ISO Format),False,False,MEABM,MEABM,t_24_Product_Basic_Data_mandatory_Ext
+Volume,False,False,VOLUM,VOLUM,t_24_Product_Basic_Data_mandatory_Ext
+Volume Unit,False,False,VOLEH,VOLEH,t_24_Product_Basic_Data_mandatory_Ext
+Capacity Usage,False,False,CAPAUSE,CAPAUSE,t_24_Product_Basic_Data_mandatory_Ext
+Compliance Relevant,False,False,CHML_CMPLNC_RLVNCE_IND,CHML_CMPLNC_RLVNCE_IND,t_24_Product_Basic_Data_mandatory_Ext
+Product Is Configurable,False,False,KZKFG,KZKFG,t_24_Product_Basic_Data_mandatory_Ext
+Order Unit of Measure (ISO Format),False,False,BSTME,BSTME,t_24_Product_Basic_Data_mandatory_Ext
+Purchasing Value Key,False,False,EKWSL,EKWSL,t_24_Product_Basic_Data_mandatory_Ext
+State of Variable Purchase Order Unit,False,False,VABME,VABME,t_24_Product_Basic_Data_mandatory_Ext
+Internal Product Number,False,False,BMATN,BMATN,t_24_Product_Basic_Data_mandatory_Ext
+Manufacturer Part Number,False,False,MFRPN,MFRPN,t_24_Product_Basic_Data_mandatory_Ext
+Manufacturer Number,False,False,MFRNR,MFRNR,t_24_Product_Basic_Data_mandatory_Ext
+Manufacturer Part Profile,False,False,MPROF,MPROF,t_24_Product_Basic_Data_mandatory_Ext
+Transportation Group,False,False,TRAGR,TRAGR,t_24_Product_Basic_Data_mandatory_Ext
+Cross-Distribution Chain Product Status,False,False,MSTAV,MSTAV,t_24_Product_Basic_Data_mandatory_Ext
+Valid From Date for Status,False,False,MSTDV,MSTDV,t_24_Product_Basic_Data_mandatory_Ext
+Pricing Reference Product,False,False,PMATA,PMATA,t_24_Product_Basic_Data_mandatory_Ext
+Pricing Profile for Variants,False,False,SPROF,SPROF,t_24_Product_Basic_Data_mandatory_Ext
+Variant Price Allowed,False,False,ALLOW_PMAT_IGNO,ALLOW_PMAT_IGNO,t_24_Product_Basic_Data_mandatory_Ext
+Billing Cycle,False,False,SOM_CYCLE,SOM_CYCLE,t_24_Product_Basic_Data_mandatory_Ext
+Billing Cycle Determination Rule,False,False,SOM_CYCLE_RULE,SOM_CYCLE_RULE,t_24_Product_Basic_Data_mandatory_Ext
+Assignment Schema,False,False,SOM_TC_SCHEMA,SOM_TC_SCHEMA,t_24_Product_Basic_Data_mandatory_Ext
+Assortment List Type,False,False,BBTYP,BBTYP,t_24_Product_Basic_Data_mandatory_Ext
+Service Agreement,False,False,SERVV,SERVV,t_24_Product_Basic_Data_mandatory_Ext
+Product Group: Packaging Materials,False,False,MAGRV,MAGRV,t_24_Product_Basic_Data_mandatory_Ext
+Packaging Product Type,False,False,VHIART,VHIART,t_24_Product_Basic_Data_mandatory_Ext
+Allowed Packaging Weight,False,False,ERGEW,ERGEW,t_24_Product_Basic_Data_mandatory_Ext
+Unit of Allowed Packaging Weight,False,False,ERGEI,ERGEI,t_24_Product_Basic_Data_mandatory_Ext
+Excess Weight Tolerance for HU,False,False,GEWTO,GEWTO,t_24_Product_Basic_Data_mandatory_Ext
+Allowed Packaging Volume,False,False,ERVOL,ERVOL,t_24_Product_Basic_Data_mandatory_Ext
+Unit of Allowed Packaging Volume,False,False,ERVOE,ERVOE,t_24_Product_Basic_Data_mandatory_Ext
+Packaging Product Is Closed Packaging,False,False,KZGVH,KZGVH,t_24_Product_Basic_Data_mandatory_Ext
+Excess Volume Tolerance for HU,False,False,VOLTO,VOLTO,t_24_Product_Basic_Data_mandatory_Ext
+Period Indicator for Shelf Life,False,False,IPRKZ,IPRKZ,t_24_Product_Basic_Data_mandatory_Ext
+Storage Conditions,False,False,RAUBE,RAUBE,t_24_Product_Basic_Data_mandatory_Ext
+Temperature Conditions Indicator,False,False,TEMPB,TEMPB,t_24_Product_Basic_Data_mandatory_Ext
+Container Requirements,False,False,BEHVO,BEHVO,t_24_Product_Basic_Data_mandatory_Ext
+Hazardous Product Number,False,False,STOFF,STOFF,t_24_Product_Basic_Data_mandatory_Ext
+Label Type,False,False,ETIAR,ETIAR,t_24_Product_Basic_Data_mandatory_Ext
+Label Form,False,False,ETIFO,ETIFO,t_24_Product_Basic_Data_mandatory_Ext
+Number of Goods Receipt/Issue Slips,False,False,WESCH,WESCH,t_24_Product_Basic_Data_mandatory_Ext
+Indicator: Approved Batch Rec. Required,False,False,XGCHP,XGCHP,t_24_Product_Basic_Data_mandatory_Ext
+Total Shelf Life,False,False,MHDHB,MHDHB,t_24_Product_Basic_Data_mandatory_Ext
+Minimum Remaining Shelf Life,False,False,MHDRZ,MHDRZ,t_24_Product_Basic_Data_mandatory_Ext
+Indi. for the Shelf Life Expiration Date,False,False,SLED_BBD,SLED_BBD,t_24_Product_Basic_Data_mandatory_Ext
+Storage Percentage,False,False,MHDLP,MHDLP,t_24_Product_Basic_Data_mandatory_Ext
+Rounding Rule for Calculation of SLED,False,False,RDMHD,RDMHD,t_24_Product_Basic_Data_mandatory_Ext
+Handling Indicator,False,False,HNDLCODE,HNDLCODE,t_24_Product_Basic_Data_mandatory_Ext
+Warehouse Product Group,False,False,WHMATGR,WHMATGR,t_24_Product_Basic_Data_mandatory_Ext
+Warehouse Storage Condition,False,False,WHSTC,WHSTC,t_24_Product_Basic_Data_mandatory_Ext
+Standard Handling Unit Type,False,False,HUTYP_DFLT,HUTYP_DFLT,t_24_Product_Basic_Data_mandatory_Ext
+Serial Number Profile,False,False,SERIAL,SERIAL,t_24_Product_Basic_Data_mandatory_Ext
+Pilferable,False,False,PILFERABLE,PILFERABLE,t_24_Product_Basic_Data_mandatory_Ext
+Relevant for Hazardous Substances,False,False,HAZMAT,HAZMAT,t_24_Product_Basic_Data_mandatory_Ext
+Quarantine Period,False,False,QQTIME,QQTIME,t_24_Product_Basic_Data_mandatory_Ext
+Time Unit for Quarantine Period,False,False,QQTIMEUOM,QQTIMEUOM,t_24_Product_Basic_Data_mandatory_Ext
+Quality Inspection Group,False,False,QGRP,QGRP,t_24_Product_Basic_Data_mandatory_Ext
+Handling Unit Type,False,False,HUTYP,HUTYP,t_24_Product_Basic_Data_mandatory_Ext
+Maximum Capacity,False,False,MAXC,MAXC,t_24_Product_Basic_Data_mandatory_Ext
+Overcapacity Tolerance,False,False,MAXC_TOL,MAXC_TOL,t_24_Product_Basic_Data_mandatory_Ext
+Variable Tare Weight,False,False,TARE_VAR,TARE_VAR,t_24_Product_Basic_Data_mandatory_Ext
+Max. Pack. Length,False,False,MAXL,MAXL,t_24_Product_Basic_Data_mandatory_Ext
+UoM for Max. Pack. Length (ISO Format),False,False,MAXDIM_UOM,MAXDIM_UOM,t_24_Product_Basic_Data_mandatory_Ext
+Max. Pack. Width,False,False,MAXB,MAXB,t_24_Product_Basic_Data_mandatory_Ext
+Max. Pack. Height,False,False,MAXH,MAXH,t_24_Product_Basic_Data_mandatory_Ext
+Catalog Profile,False,False,RBNRM,RBNRM,t_24_Product_Basic_Data_mandatory_Ext
+Assortment Grade,False,False,SSTUF,SSTUF,t_24_Product_Basic_Data_mandatory_Ext
+Listing Procedure,False,False,LSTVZ,LSTVZ,t_24_Product_Basic_Data_mandatory_Ext
+Listing Period Start Date,False,False,LDVZL,LDVZL,t_24_Product_Basic_Data_mandatory_Ext
+Listing Period End Date,False,False,LDBZL,LDBZL,t_24_Product_Basic_Data_mandatory_Ext
+Listing Procedure,False,False,LSTFL,LSTFL,t_24_Product_Basic_Data_mandatory_Ext
+Listing Period Start Date,False,False,LDVFL,LDVFL,t_24_Product_Basic_Data_mandatory_Ext
+Listing Period End Date,False,False,LDBFL,LDBFL,t_24_Product_Basic_Data_mandatory_Ext
+Sales Period Start Date,False,False,VDVZL,VDVZL,t_24_Product_Basic_Data_mandatory_Ext
+Sales Period End Date,False,False,VDBZL,VDBZL,t_24_Product_Basic_Data_mandatory_Ext
+Sales Period Start Date,False,False,VDVFL,VDVFL,t_24_Product_Basic_Data_mandatory_Ext
+Sales Period End Date,False,False,VDBFL,VDBFL,t_24_Product_Basic_Data_mandatory_Ext
+Delivery Unit of Measure (ISO Format),False,False,WAUSM,WAUSM,t_24_Product_Basic_Data_mandatory_Ext
+Sales Unit of Measure (ISO Format),False,False,WVRKM,WVRKM,t_24_Product_Basic_Data_mandatory_Ext
+ABC Indicator,False,False,WMAAB,WMAAB,t_24_Product_Basic_Data_mandatory_Ext
+Valuation Class,False,False,WBKLA,WBKLA,t_24_Product_Basic_Data_mandatory_Ext
+Country/Region of Origin,False,False,WHERL,WHERL,t_24_Product_Basic_Data_mandatory_Ext
+Region of Origin,False,False,WHERR,WHERR,t_24_Product_Basic_Data_mandatory_Ext
+Purchasing Group,False,False,WEKGR,WEKGR,t_24_Product_Basic_Data_mandatory_Ext
+Source of Supply,False,False,BWSCL,BWSCL,t_24_Product_Basic_Data_mandatory_Ext
+Tax Classification,False,False,TAKLV,TAKLV,t_24_Product_Basic_Data_mandatory_Ext
+Loading Group,False,False,WLADG,WLADG,t_24_Product_Basic_Data_mandatory_Ext
+Valuation Margin,False,False,WBWSP,WBWSP,t_24_Product_Basic_Data_mandatory_Ext
+Indicator: Quality,False,False,PSTATQ,PSTATQ,t_24_Product_Basic_Data_mandatory_Ext
+Indicator: Sales,False,False,PSTATV,PSTATV,t_24_Product_Basic_Data_mandatory_Ext
+Indicator: Storage,False,False,PSTATL,PSTATL,t_24_Product_Basic_Data_mandatory_Ext
+Indicator: Purchasing,False,False,PSTATE,PSTATE,t_24_Product_Basic_Data_mandatory_Ext
