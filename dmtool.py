@@ -10,7 +10,6 @@ from google import genai
 from google.genai import types
 from token_tracker import track_token_usage, get_token_usage_stats
 
-# Import planner functions (keeping these since they work well)
 from planner import process_query as planner_process_query
 from planner import (
     get_session_context,
@@ -38,21 +37,17 @@ load_dotenv()
 
 class CodeGenerationError(Exception):
     """Exception raised for code generation errors."""
-
     pass
-
 
 class ExecutionError(Exception):
     """Exception raised for code execution errors."""
-
     pass
 
-
-class TableLLM:
-    """Improved TableLLM with optimized code generation and better information flow"""
+class DMTool:
+    """Improved DMTool with optimized code generation and better information flow"""
 
     def __init__(self):
-        """Initialize the TableLLM instance"""
+        """Initialize the DMTool instance"""
         try:
             # Configure Gemini
             api_key = os.environ.get("GEMINI_API_KEY")
@@ -68,9 +63,9 @@ class TableLLM:
             # Current session context
             self.current_context = None
 
-            logger.info("TableLLM initialized successfully")
+            logger.info("DMTool initialized successfully")
         except Exception as e:
-            logger.error(f"Error initializing TableLLM: {e}")
+            logger.error(f"Error initializing DMTool: {e}")
             raise
 
     def _extract_planner_info(self, resolved_data):

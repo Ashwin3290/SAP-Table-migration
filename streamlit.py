@@ -6,12 +6,12 @@ import json
 from datetime import datetime
 
 from code_exec import save_file
-from tablellm import TableLLM
-from tablellm import get_session_context
+from dmtool import DMTool
+from dmtool import get_session_context
 
 # Page configuration
 st.set_page_config(
-    page_title="TableLLM", 
+    page_title="DMTool", 
     layout="wide",
     page_icon="📊"
 )
@@ -19,8 +19,8 @@ st.set_page_config(
 sqlite_conn = None
 # try:
 sqlite_conn = sqlite3.connect('db.sqlite3')
-# Initialize TableLLM
-tablellm = TableLLM()
+# Initialize DMTool
+DMTool = DMTool()
 
 # Initialize session state variables
 if 'show_code' not in st.session_state:
@@ -240,7 +240,7 @@ with col2:
         with st.spinner("Processing transformation..."):
             # try:
             # Process query with context awareness
-            code, result, session_id = tablellm.process_sequential_query(
+            code, result, session_id = DMTool.process_sequential_query(
                 query, 
                 object_id, 
                 segment_id, 

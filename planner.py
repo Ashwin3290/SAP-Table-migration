@@ -27,25 +27,20 @@ load_dotenv()
 
 class SQLInjectionError(Exception):
     """Exception raised for potential SQL injection attempts."""
-
     pass
-
 
 class SessionError(Exception):
     """Exception raised for session-related errors."""
-
     pass
 
 
 class APIError(Exception):
     """Exception raised for API-related errors."""
-
     pass
 
 
 class DataProcessingError(Exception):
     """Exception raised for data processing errors."""
-
     pass
 
 
@@ -80,7 +75,6 @@ def validate_sql_identifier(identifier):
     # Only allow alphanumeric characters, underscores, and some specific characters
     if not re.match(r"^[a-zA-Z0-9_\-\.]+$", identifier):
         raise SQLInjectionError("SQL identifier contains invalid characters")
-
     return identifier
 
 
@@ -599,12 +593,6 @@ def parse_data_with_context(
                 logger.warning(f"Error formatting target data sample: {e}")
                 target_df_sample_str = "Error processing target data sample"
 
-        # Save joined data for debugging
-        try:
-            joined_df.to_csv("joined_data.csv", index=False)
-        except Exception as e:
-            logger.warning(f"Failed to save joined_data.csv: {e}")
-
         # Format the prompt with all inputs
         table_desc = joined_df[joined_df.columns.tolist()[:-1]] 
         formatted_prompt = prompt.format(
@@ -673,13 +661,6 @@ def parse_data_with_context(
 
                 # Add key mapping information to the result
                 parsed_data["key_mapping"] = key_mapping
-
-                # Save response for debugging
-                try:
-                    with open("response.json", "w") as f:
-                        json.dump(parsed_data, f, indent=2)
-                except Exception as e:
-                    logger.warning(f"Failed to save response.json: {e}")
 
                 return parsed_data
             except json.JSONDecodeError as e:
@@ -755,12 +736,6 @@ def process_query(
 
         # Handle missing values in the dataframe
         joined_df = missing_values_handling(joined_df)
-
-        # Save joined data for debugging
-        try:
-            joined_df.to_csv("joined_data.csv", index=False)
-        except Exception as e:
-            logger.warning(f"Failed to save joined_data.csv: {e}")
 
         # Process query with context awareness
         resolved_data = parse_data_with_context(
