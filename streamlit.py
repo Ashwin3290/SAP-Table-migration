@@ -73,45 +73,299 @@ if 'transformation_history' not in st.session_state:
 # Custom CSS for better appearance
 st.markdown("""
 <style>
+/* Modern CSS for Gen-AI Data Migration Tool */
+
+/* Base styles and variables */
+:root {
+    --primary: #4361ee;
+    --primary-light: #4895ef;
+    --primary-dark: #3f37c9;
+    --secondary: #4cc9f0;
+    --success: #4ade80;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-700: #374151;
+    --gray-900: #111827;
+    --radius: 8px;
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    --transition: all 0.2s ease;
+}
+
+/* Global styling */
+.main-header {
+    font-size: 2.25rem !important;
+    font-weight: 700 !important;
+    background: linear-gradient(120deg, var(--primary), var(--secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 1.5rem;
+    letter-spacing: -0.5px;
+}
+
+.sub-header {
+    font-size: 1.5rem !important;
+    font-weight: 600 !important;
+    color: var(--gray-900);
+    margin-bottom: 1rem;
+    border-bottom: 2px solid var(--gray-200);
+    padding-bottom: 0.5rem;
+}
+
+/* Card styling */
+.card {
+    background-color: white;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    transition: var(--transition);
+}
+
+.card:hover {
+    box-shadow: var(--shadow-lg);
+}
+
+/* Form elements */
+.stTextInput > div > div > input, 
+.stNumberInput > div > div > input,
+.stTextArea > div > div > textarea,
+.stSelectbox > div > div > div {
+    border-radius: var(--radius) !important;
+    border: 1px solid var(--gray-300) !important;
+    padding: 0.75rem !important;
+    box-shadow: var(--shadow-sm) !important;
+    transition: var(--transition) !important;
+}
+
+.stTextInput > div > div > input:focus, 
+.stNumberInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus,
+.stSelectbox > div > div > div:focus {
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 2px rgba(67, 97, 238, 0.15) !important;
+}
+
+/* Buttons */
+.stButton > button {
+    border-radius: var(--radius) !important;
+    font-weight: 600 !important;
+    text-transform: none !important;
+    padding: 0.5rem 1rem !important;
+    transition: var(--transition) !important;
+    border: none !important;
+    color: white !important;
+    background-color: var(--primary) !important;
+}
+
+.stButton > button:hover {
+    background-color: var(--primary-dark) !important;
+    transform: translateY(-1px);
+}
+
+.stButton > button:active {
+    transform: translateY(0);
+}
+
+/* Success and other buttons can be styled differently */
+.success-button > button {
+    background-color: var(--success) !important;
+}
+
+.warning-button > button {
+    background-color: var(--warning) !important;
+}
+
+.danger-button > button {
+    background-color: var(--danger) !important;
+}
+
+/* Code box styling */
+.code-box {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.9rem;
+    overflow-x: auto;
+    border-left: 4px solid var(--primary);
+}
+
+/* Context info and history items */
+.context-info {
+    padding: 1.25rem;
+    background-color: rgba(67, 97, 238, 0.05);
+    border-radius: var(--radius);
+    margin-bottom: 1.5rem;
+    border-left: 4px solid var(--primary);
+    box-shadow: var(--shadow-sm);
+}
+
+.history-item {
+    padding: 1rem;
+    background-color: white;
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+    border-left: 4px solid var(--primary);
+    box-shadow: var(--shadow-sm);
+    transition: var(--transition);
+}
+
+.history-item:hover {
+    box-shadow: var(--shadow);
+}
+
+/* Example queries */
+.example-query {
+    padding: 0.75rem 1rem;
+    background-color: white;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    cursor: pointer;
+    margin-bottom: 0.75rem;
+    transition: var(--transition);
+    box-shadow: var(--shadow-sm);
+}
+
+.example-query:hover {
+    background-color: var(--gray-100);
+    border-color: var(--gray-300);
+    box-shadow: var(--shadow);
+}
+
+/* Tables and dataframes */
+.dataframe {
+    border-collapse: collapse;
+    width: 100%;
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--shadow);
+}
+
+.dataframe th {
+    background-color: var(--primary);
+    color: white;
+    font-weight: 600;
+    text-align: left;
+    padding: 0.75rem 1rem;
+}
+
+.dataframe td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.dataframe tr:nth-child(even) {
+    background-color: var(--gray-100);
+}
+
+.dataframe tr:hover {
+    background-color: rgba(67, 97, 238, 0.05);
+}
+
+/* Expanders */
+.streamlit-expanderHeader {
+    font-weight: 600 !important;
+    color: var(--gray-700) !important;
+    background-color: var(--gray-100) !important;
+    border-radius: var(--radius) !important;
+    padding: 0.75rem 1rem !important;
+}
+
+.streamlit-expanderHeader:hover {
+    background-color: var(--gray-200) !important;
+}
+
+.streamlit-expanderContent {
+    border: 1px solid var(--gray-200) !important;
+    border-top: none !important;
+    border-radius: 0 0 var(--radius) var(--radius) !important;
+    padding: 1rem !important;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background-color: #f8f9fa;
+    border-right: 1px solid var(--gray-200);
+}
+
+[data-testid="stSidebarNav"] li {
+    border-radius: var(--radius);
+    margin-bottom: 0.25rem;
+}
+
+[data-testid="stSidebarNav"] a {
+    border-radius: var(--radius) !important;
+    font-weight: 500 !important;
+}
+
+/* Loader */
+.stSpinner > div {
+    border-top-color: var(--primary) !important;
+}
+
+/* Success/Error messages */
+.element-container .stAlert {
+    border-radius: var(--radius);
+    border: none !important;
+    box-shadow: var(--shadow-sm);
+}
+
+.element-container .stAlert > div:first-child {
+    padding: 1rem !important;
+}
+
+/* Apply styles to the main content area */
+.main .block-container {
+    padding-top: 2rem !important;
+    padding-bottom: 2rem !important;
+    max-width: 1200px !important;
+}
+
+/* Increase height of selectbox */
+.stSelectbox > div > div > div {
+    height: 60px !important;  /* Increased from default */
+    min-height: 60px !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+/* Increase height of button */
+.stButton > button {
+    min-height: 48px !important;  /* Increased from default */
+    height: auto !important;
+    padding: 0.75rem 1rem !important;  /* More vertical padding */
+}
+
+/* Ensure text is vertically centered */
+.stButton > button > div {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+/* Media queries for responsiveness */
+@media (max-width: 768px) {
     .main-header {
-        font-size: 2.5rem !important;
-        font-weight: 600;
-        margin-bottom: 1rem;
+        font-size: 1.75rem !important;
     }
+    
     .sub-header {
-        font-size: 1.5rem !important;
-        font-weight: 500;
-        margin-bottom: 0.5rem;
+        font-size: 1.25rem !important;
     }
-    .code-box {
-        background-color: #f8f9fa;
-        border: 1px solid #e9ecef;
-        border-radius: 5px;
+    
+    .card {
         padding: 1rem;
-        margin-bottom: 1rem;
     }
-    .example-query {
-        padding: 0.5rem;
-        background-color: #f1f3f5;
-        border-radius: 4px;
-        cursor: pointer;
-        margin-bottom: 0.5rem;
-    }
-    .example-query:hover {
-        background-color: #e9ecef;
-    }
-    .history-item {
-        padding: 0.5rem;
-        background-color: #e9ecef;
-        border-left: 4px solid #0066cc;
-        margin-bottom: 0.5rem;
-    }
-    .context-info {
-        padding: 0.8rem;
-        background-color: #f0f7ff;
-        border-radius: 5px;
-        margin-bottom: 1rem;
-    }
+}
 </style>
 """, unsafe_allow_html=True)
 
