@@ -1,0 +1,121 @@
+"""
+Intent Agent for TableLLM
+This agent is responsible for analyzing queries and identifying the transformation intent
+"""
+import json
+from utils.logging_utils import agent_logger as logger
+from agents.base_agent import BaseAgent
+import config
+
+class IntentAgent(BaseAgent):
+    """
+    Agent for analyzing queries and identifying transformation intent
+    """
+    
+    def __init__(self, client=None):
+        """
+        Initialize the intent agent
+        
+        Parameters:
+        client (genai.Client, optional): LLM client, creates new one if None
+        """
+        super().__init__(client)
+        # Load workspace information
+        self.workspaces = config.DEFAULT_WORKSPACES
+    
+    def process(self, query, context=None):
+        """
+        Process a query to identify transformation intent and domain
+        
+        Parameters:
+        query (str): The natural language query to process
+        context (dict, optional): Additional context information
+        
+        Returns:
+        dict: {
+            "intent_type": str,
+            "workspace": str,
+            "operation": str,
+            "confidence": float
+        }
+        """
+        logger.info(f"Processing query for intent identification: {query[:100]}...")
+        
+        # Create list of available workspaces
+        available_workspaces = list(self.workspaces.keys())
+        
+        # Create intent prompt
+        prompt = f"""
+You are an expert SAP data transformation analyst. Your task is to identify the specific transformation intent in the query below.
+
+QUERY: {query}
+
+AVAILABLE WORKSPACES:
+{json.dumps(available_workspaces, indent=2)}
+
+Analyze the query and identify:
+
+1. Intent Type - One of these specific transformation patterns:
+   - FILTER_AND_EXTRACT: Filtering records from source and extracting specific fields
+   - UPDATE_EXISTING: Updating values in existing target records only
+   - CONDITIONAL_MAPPING: Applying if/else logic to determine values
+   - EXTRACTION: Simple extraction without complex filtering
+   - TIERED_LOOKUP: Looking up data in multiple tables in a specific order (e.g., check table 1, if not found check table 2, etc.)
+   - AGGREGATION: Performing calculations, grouping, or aggregations
+   - JOIN: Combining data from multiple tables
+   - VALIDATION: Validating data against reference tables
+   - CLEANSING: Removing special characters, handling formatting, etc.
+   - STRING_MANIPULATION: Performing operations on text fields (substring, concatenation, etc.)
+
+2. Workspace - Which SAP workspace this query would apply to
+
+3. Operation - A short description of the specific operation (e.g., "Extract material type from MARA table")
+
+4. Confidence - Your confidence level in this classification (0.0-1.0)
+
+Return ONLY a JSON object with these fields and no additional explanation:
+{
+  "intent_type": "INTENT_TYPE",
+  "workspace": "WORKSPACE_NAME",
+  "operation": "BRIEF_DESCRIPTION",
+  "confidence": CONFIDENCE_SCORE
+}
+"""
+        
+        # Call the LLM
+        response_text = self._call_llm(prompt, model=config.PLANNING_MODEL)
+        if not response_text:
+            logger.warning("Failed to get response from LLM for intent classification")
+            return self._get_default_intent(query)
+        
+        # Parse the response
+        intent_data = self._parse_json_response(response_text)
+        
+        # Validate the response
+        required_keys = ["intent_type", "workspace", "operation", "confidence"]
+        if not self._validate_response(intent_data, required_keys):
+            logger.warning(f"Invalid intent response: {intent_data}")
+            return self._get_default_intent(query)
+        
+        # Log the result
+        logger.info(f"Identified intent: {intent_data['intent_type']} in workspace {intent_data['workspace']} with confidence {intent_data['confidence']}")
+        
+        return intent_data
+    
+    def _get_default_intent(self, query):
+        """
+        Get default intent when classification fails
+        
+        Parameters:
+        query (str): The original query
+        
+        Returns:
+        dict: Default intent information
+        """
+        # Default to extraction as the safest intent
+        return {
+            "intent_type": "EXTRACTION",
+            "workspace": next(iter(self.workspaces.keys()), "Material_Management"),
+            "operation": "Extract data from source table",
+            "confidence": 0.5
+        }
