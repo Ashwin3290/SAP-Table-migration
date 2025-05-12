@@ -49,7 +49,7 @@ class TableLLMRelational:
             tuple: (code, result, session_id)
         """
         return self.dm_tool.process_sequential_query(
-            query, object_id, segment_id, project_id, session_id, target_sap_fields
+            query, object_id, segment_id, project_id, session_id
         )
     
     def get_session_info(self, session_id):

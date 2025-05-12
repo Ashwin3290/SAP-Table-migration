@@ -504,7 +504,7 @@ def parse_data_with_context(
         You are a data transformation assistant specializing in SAP data mappings. 
     Your task is to analyze a natural language query about data transformations and match it to the appropriate source and target tables and fields.
      
-    CONTEXT DATA SCHEMA: {table_desc}
+    Database information : {table_desc}
     
     CURRENT TARGET TABLE STATE:
     {target_df_sample}
@@ -536,6 +536,8 @@ def parse_data_with_context(
 
     5. For the insertion fields, identify the fields that need to be inserted into the target table based on the User query. Take note to not add the filtering fields to the insertion fields if not specifically requested.
 
+    6. Identify the Target field name based on the user query and the fields in the Database information.
+
     6. Restructure the user query with resolved data types and field names.
 
     Note:
@@ -549,6 +551,7 @@ def parse_data_with_context(
     "source_field_names": [List of all source_fields],
     "filtering_fields": [List of filtering fields],
     "insertion_fields": [List of fields to be inserted],
+    "target_field" : Name of the target field,
     "Resolved_query": [Rephrased query with resolved data]
     }}
     ```
@@ -678,7 +681,7 @@ def parse_data_with_context(
 
 
 def process_query(
-    object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None
+    object_id, segment_id, project_id, query, session_id=None
 ):
     """
     Process a query with context awareness
@@ -689,7 +692,6 @@ def process_query(
     project_id (int): Project ID
     query (str): The natural language query
     session_id (str): Optional session ID for context tracking
-    target_sap_fields (str/list): Optional target SAP fields
 
     Returns:
     dict: Processed information including context or None if key validation fails
@@ -744,7 +746,7 @@ def process_query(
             session_id,  # Pass session_id to access key mappings and target data
             previous_context.get("context") if previous_context else None,
         )
-
+        print(resolved_data)
         if not resolved_data:
             logger.error("Failed to resolve query")
             if conn:
@@ -752,7 +754,7 @@ def process_query(
             return None
 
         # Process the resolved data to get table information
-        results = process_info(resolved_data, conn, target_sap_fields)
+        results = process_info(resolved_data, conn)
 
         if not results:
             logger.error("Failed to process resolved data")
@@ -763,17 +765,18 @@ def process_query(
         # Process key mapping with error handling and primary key validation
         key_mapping = []
         key_mapping = context_manager.get_key_mapping(session_id)
+        print(key_mapping,resolved_data["target_sap_fields"])
         if not key_mapping:
             try:
                 # Check if we have a target field and it's a key
-                target_field_filter = joined_df["target_sap_field"] == target_sap_fields
+                target_field_filter = joined_df["target_sap_field"] == resolved_data["target_sap_fields"]
                 if (
                     target_field_filter.any()
                     and joined_df[target_field_filter]["isKey"].values[0] == "True"
                 ):
                     # We're working with a primary key field
                     logger.info(
-                        f"Target field '{target_sap_fields}' is identified as a primary key"
+                        f"Target field '{resolved_data["target_sap_fields"]}' is identified as a primary key"
                     )
 
                     # Check if we have insertion fields to map
@@ -847,7 +850,7 @@ def process_query(
                         if not error:
                             # If we've reached here, it's safe to add the key mapping
                             key_mapping = context_manager.add_key_mapping(
-                                session_id, target_sap_fields, source_field
+                                session_id, resolved_data["target_sap_fields"], source_field
                             )
                         else:
                             key_mapping = [error]
@@ -881,7 +884,7 @@ def process_query(
                 logger.error(f"Error closing database connection: {e}")
 
 
-def process_info(resolved_data, conn, target_sap_fields):
+def process_info(resolved_data, conn):
     """Process the resolved data to extract table information based on the specified JSON structure"""
     try:
         # Validate inputs
@@ -900,6 +903,7 @@ def process_info(resolved_data, conn, target_sap_fields):
             "target_table",
             "filtering_fields",
             "Resolved_query",
+            "target_field",
             "insertion_fields",
         ]
 
@@ -913,7 +917,7 @@ def process_info(resolved_data, conn, target_sap_fields):
             "source_table_name": resolved_data["source_table_name"],
             "source_field_names": resolved_data["source_field_names"],
             "target_table_name": resolved_data["target_table"],
-            "target_sap_fields": target_sap_fields,
+            "target_sap_fields": resolved_data["target_field"],
             "filtering_fields": resolved_data["filtering_fields"],
             "restructured_query": resolved_data["Resolved_query"],
             "insertion_fields": resolved_data["insertion_fields"],

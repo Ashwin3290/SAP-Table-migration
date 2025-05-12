@@ -8,3 +8,4 @@ python_docx
 seaborn
 spacy
 tiktoken==0.9.0
+streamlit
