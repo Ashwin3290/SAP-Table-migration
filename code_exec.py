@@ -109,7 +109,7 @@ import seaborn as sns
     
     return filename
 
-def validation_handling(source_df,target_df, result, target_sap_fields):
+def validation_handling(source_df, target_df, result, target_sap_fields):
     error_msg = ""
     
     # Check 1: Length validation - target_df should never be smaller than result
@@ -126,7 +126,6 @@ def validation_handling(source_df,target_df, result, target_sap_fields):
     print("Result non-null columns:", result_not_null_columns)
     print("#########################################")
     
-    
     # Check if the target_sap_field should be included
     expected_not_null_columns = target_not_null_columns.copy()
     if target_sap_fields in target_df.columns:
@@ -135,7 +134,33 @@ def validation_handling(source_df,target_df, result, target_sap_fields):
         if target_sap_fields not in target_not_null_columns or target_df[target_sap_fields].notna().any():
             expected_not_null_columns.add(target_sap_fields)
     
-    # Now validate that result has exactly the expected non-null columns
+    # Get key columns from session if available
+    key_columns = []
+    try:
+        # This assumes the session_id is available in the current context
+        # If not, you might need to modify the execute_code function to pass it
+        import os
+        import json
+        session_dirs = [d for d in os.listdir("sessions") if os.path.isdir(os.path.join("sessions", d))]
+        if session_dirs:
+            # Use most recently modified session directory
+            latest_session = max(session_dirs, key=lambda d: os.path.getmtime(os.path.join("sessions", d)))
+            key_mapping_path = os.path.join("sessions", latest_session, "key_mapping.json")
+            if os.path.exists(key_mapping_path):
+                with open(key_mapping_path, "r") as f:
+                    key_mappings = json.load(f)
+                    key_columns = [mapping.get("target_col") for mapping in key_mappings if mapping.get("target_col")]
+    except Exception as e:
+        print(f"Warning: Could not retrieve key columns: {e}")
+    
+    # Key column validation - ensure key columns are in the result
+    for key_col in key_columns:
+        if key_col not in result.columns:
+            error_msg += f"Error: Key column '{key_col}' missing in result\n"
+        elif result[key_col].isna().any():
+            error_msg += f"Error: Key column '{key_col}' contains null values\n"
+    
+    # Now validate that result has the expected non-null columns
     if result_not_null_columns != expected_not_null_columns:
         # Find specific differences
         missing_in_result = expected_not_null_columns - result_not_null_columns
@@ -152,32 +177,52 @@ def validation_handling(source_df,target_df, result, target_sap_fields):
     else:
         print("Validation passed: Result contains the correct set of non-null columns")
     
-
-    # Check for any unexpected non-null columns in result
-    # expected_not_null = set(target_not_null_columns).union(set(sap_fields_not_null))
-    # unexpected_not_null = set(result_not_null_columns) - expected_not_null
-    # if unexpected_not_null:
-    #     error_msg += f"Unexpected non-null columns in result: {unexpected_not_null}\n"
-
-    
     if error_msg:
         raise ValidationError(f"Validation errors:\n{error_msg}")
 
-def execute_code(file_path, source_dfs, target_df,target_sap_fields):
+def execute_code(file_path, source_dfs, target_df, target_sap_fields, session_id=None):
     """Execute a Python file and return the result or detailed error traceback"""
     try:
         # Add the current directory to sys.path to ensure utilities can be imported
         sys.path.append(os.path.dirname(os.path.abspath(__file__)))
         
+        # Import utility modules that might be needed by the generated code
+        try:
+            import transform_utils
+        except ImportError:
+            pass
+            
         # Import the module
         module_name = os.path.basename(file_path).replace('.py', '')
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-
+        
+        # Get key mappings if session_id is provided
+        key_mappings = []
+        if session_id:
+            try:
+                key_mapping_path = os.path.join("sessions", session_id, "key_mapping.json")
+                if os.path.exists(key_mapping_path):
+                    with open(key_mapping_path, "r") as f:
+                        key_mappings = json.load(f)
+                    print(f"Found {len(key_mappings)} key mappings for session {session_id}")
+            except Exception as e:
+                print(f"Warning: Could not load key mappings: {e}")
+        
+        # Run the generated code
         result = module.analyze_data(source_dfs, target_df)
-        validation_handling(source_dfs,target_df,result,target_sap_fields)
-        target_df[target_sap_fields] = result[target_sap_fields]          
+        
+        # Validate the result
+        validation_handling(source_dfs, target_df, result, target_sap_fields)
+        
+        # Only update the target field if it exists in both result and target_df
+        if target_sap_fields in result.columns and target_sap_fields in target_df.columns:
+            target_df[target_sap_fields] = result[target_sap_fields]
+        elif target_sap_fields in result.columns:
+            # If target_sap_fields exists in result but not in target_df, add it
+            target_df[target_sap_fields] = result[target_sap_fields]
+            
         return target_df
     except Exception as e:
         # Capture the full traceback with detailed information

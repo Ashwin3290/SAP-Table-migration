@@ -391,7 +391,7 @@ Return ONLY the numbered plan with no explanations or additional text.
 
             # Create template with the simple plan as a guide and utility functions information
             prompt = f"""
-Write Python code that follows these EXACT steps:
+Write CONCISE Python code that follows these steps:
 
 {simple_plan}
 
@@ -415,125 +415,64 @@ Source data samples:
 Target data sample:
 {json.dumps(planner_info.get('target_data', {}).get('sample', []), indent=2)}
 
-FILTERING AND CONDITION IMPLEMENTATION:
-1. For simple equality filters:
-   - Use: df[df['column'] == value]
-   - Example: source_df[source_df['STATUS'] == 'ACTIVE']
+CODE STYLE REQUIREMENTS - VERY IMPORTANT:
+1. Write MINIMAL, EFFICIENT code with NO unnecessary comments
+2. Only add comments for complex logic or non-obvious operations
+3. Use clear variable names that don't need explanation
+4. DO NOT include redundant validation checks
+5. DO NOT write step-by-step comments - let the code speak for itself
+6. DO NOT duplicate validation logic
+7. DO NOT write multi-line comments explaining basic pandas operations
+8. Use pandas vectorized operations instead of loops where possible
 
-2. For IN conditions:
-   - Use: df[df['column'].isin([val1, val2, ...])]
-   - Example: source_df[source_df['TYPE'].isin(['A', 'B', 'C'])]
+KEY MAPPING IMPLEMENTATION (CRITICAL):
+1. For data insertion or updates, ALWAYS use the key columns from the key_mapping list
+2. For new record identification, ALWAYS check if records with the same key values exist
+3. For empty target dataframes, copy the required source columns including ALL key columns
+4. For non-empty target dataframes, create proper merge conditions using ALL key columns
+5. If working with multiple source tables, ensure keys are properly propagated
 
-3. For numeric comparisons:
-   - Use: df[df['column'] > value]
-   - Example: source_df[source_df['COUNT'] > 100]
+CONCISE CODE EXAMPLES:
 
-4. For text patterns:
-   - Use: df[df['column'].str.contains(pattern)]
-   - Example: source_df[source_df['NAME'].str.contains('Test')]
+# Checking source table existence concisely:
+if 'TABLE_NAME' not in source_dfs or source_dfs['TABLE_NAME'].empty:
+    return target_df
 
-5. Combining conditions:
-   - AND: df[(condition1) & (condition2)]
-   - OR: df[(condition1) | (condition2)]
-   - Example: source_df[(source_df['STATUS'] == 'ACTIVE') & (source_df['COUNT'] > 100)]
+# Filtering concisely:
+df = source_dfs['TABLE_NAME']
+filtered_df = df[df['FIELD'] == 'VALUE'].copy()
 
-KEY MAPPING IMPLEMENTATION:
-1. For inserting new records:
-   ```python
-   # Extract key columns from source
-   new_records = source_df[key_columns + target_fields].copy()
-   # Append to target
-   updated_target = pd.concat([target_df, new_records], ignore_index=True)
+# Proper key-based operations:
+key_cols = ['KEY1', 'KEY2']
+if target_df.empty:
+    # For empty target, use relevant source columns
+    cols_to_use = key_cols + ['COL1', 'COL2']
+    return filtered_df[cols_to_use].copy()
+else:
+    # For existing target, merge on keys
+    merged = pd.merge(target_df, filtered_df[key_cols + ['COL1']], on=key_cols, how='left')
+    # Update only where needed
+    merged['COL1_y'].fillna(merged['COL1_x'], inplace=True)
+    merged.rename(columns={'COL1_y': 'COL1'}, inplace=True)
+    return merged[target_df.columns]
 
-For updating existing records:
-python# For each source record
-for _, source_row in source_df.iterrows():
-    # Find matching target rows using ALL key columns
-    mask = pd.Series(True, index=target_df.index)
-    for key in key_columns:
-        mask &= target_df[key] == source_row[key]
-    # Update fields in matching rows
-    if mask.any():
-        target_df.loc[mask, target_field] = source_row[source_field]
+THE FUNCTION MUST:
+1. Follow the provided step-by-step plan
+2. Properly handle source_dfs as a dictionary of dataframes
+3. Validate source tables exist before access
+4. Implement the key mapping correctly
+5. Return the modified target_df
+6. Be clean, concise, and efficient
 
-For checking existence before insert:
-python# For each source record
-for _, source_row in source_df.iterrows():
-    # Create match condition using ALL key columns
-    exists = False
-    mask = pd.Series(True, index=target_df.index)
-    for key in key_columns:
-        mask &= target_df[key] == source_row[key]
-    exists = mask.any()
-    # Insert only if not exists
-    if not exists:
-        new_row = pd.DataFrame([source_row[key_columns + target_fields]])
-        target_df = pd.concat([target_df, new_row], ignore_index=True)
+Return ONLY the Python function with no explanations or extra comments.
 
-
-SAP-specific utils functions in transform_utils.py:
-
-map_material_type(source_df, source_field='MTART')
-convert_sap_date(source_df, date_field, output_format='YYYY-MM-DD')
-map_sap_language_code(source_df, lang_field='SPRAS')
-map_sap_unit_of_measure(source_df, uom_field='MEINS')
-handle_sap_leading_zeros(source_df, field, length=10)
-
-COMMON MISTAKES TO AVOID:
-
-DO NOT skip key column validation
-DO NOT create new key columns - use only provided ones
-DO NOT modify key column values during transformation
-DO NOT assume single-column keys - always use ALL provided key columns
-DO NOT ignore filtering conditions - apply them EXACTLY as specified
-DO NOT add columns not specified in target fields
-DO NOT transform data that isn't needed in the target
-DO NOT use incompatible data types in comparisons
-DO NOT drop or ignore key columns during any operation
-
-REQUIREMENTS:
-
-Follow the provided step-by-step plan in the exact order given.
-Use the provided source_dfs and target_df dataframes.
-Properly map source and target fields using key mapping provided.
-For conditional operations (e.g., filter_dataframe), use ONLY the specified condition_type strings.
-For conditional_mapping, ensure condition strings and value maps strictly follow the provided formats.
-Always import transform_utils at the top of the function.
-Handle both empty and non-empty target dataframes correctly.
-The function must return the modified target dataframe (target_df).
-Use numpy (np) for conditional logic only if necessary (already imported).
-Support multiple source tables as described in the prompt.
-Do NOT create or use sample dataframes; only use the data provided in the prompt.
-Only define the analyze_data function; do NOT add other functions or classes.
-Do NOT add or remove columns from the target except as specified.
-Do NOT output explanations, comments, or extra text—only the code.
-Use transform_utils module for sap utils functions.
-
-Make the function like this:
 def analyze_data(source_dfs, target_df):
-# Import required utilities
-# source_dfs is a dictionary where keys are table names and values are dataframes
-# Example: source_dfs = {{'table1': df1, 'table2': df2}}
-# target_df is the target dataframe to update
-
-# Get list of source tables for easier reference
-source_tables = list(source_dfs.keys())
-
-# Your implementation of the steps above
-
-# VALIDATION: Verify key columns exist in the result
-key_columns = {json.dumps(planner_info.get('key_columns', []))}
-for key in key_columns:
-    if key not in target_df.columns:
-        # If missing, try to add from source if possible
-        for source_table in source_tables:
-            if key in source_dfs[source_table].columns:
-                # This is a fallback, proper implementation should handle keys correctly
-                target_df[key] = source_dfs[source_table][key]
-                break
-
-# Make sure to return the modified target_df
-return target_df
+    # Import required packages
+    import pandas as pd
+    import numpy as np
+    # Your implementation here
+    
+    return target_df
 """
             try:
                 response = self.client.models.generate_content(
@@ -1026,7 +965,8 @@ else:
                 # 7. Execute the generated code with error handling
                 try:
                     code_file = create_code_file(code_content, query, is_double=True)
-                    result = execute_code(code_file, source_dfs, target_df, target_sap_fields)
+                    # Pass session_id to execute_code to access key mappings
+                    result = execute_code(code_file, source_dfs, target_df, target_sap_fields, session_id=session_id)
 
                     # Check if result is an error (now it's a dictionary with traceback information)
                     if isinstance(result, dict) and "error_type" in result:
@@ -1062,7 +1002,7 @@ else:
                                 is_double=True,
                             )
                             fixed_result = execute_code(
-                                fixed_code_file, source_dfs, target_df, target_sap_fields
+                                fixed_code_file, source_dfs, target_df, target_sap_fields, session_id=session_id
                             )
 
                             # If the fixed code worked (result is not an error dictionary), use it

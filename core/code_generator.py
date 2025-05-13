@@ -81,9 +81,20 @@ class CodeGenerator:
                         "optional": cols["optional"]
                     }
             
+            # Check for key mappings
+            key_mappings = []
+            session_id = extracted_info.get("session_id")
+            if session_id:
+                from planner import ContextualSessionManager
+                try:
+                    context_manager = ContextualSessionManager()
+                    key_mappings = context_manager.get_key_mapping(session_id)
+                except Exception as e:
+                    logger.warning(f"Error retrieving key mapping: {e}")
+            
             # Create comprehensive prompt
             prompt = f"""
-You are an expert Python developer specializing in data transformation scripts for SAP data. Your task is to write a Python function that implements the following transformation.
+You are an expert Python developer specializing in concise, efficient data transformation for SAP data. Write a minimal Python function that implements the following transformation.
 
 ORIGINAL QUERY: {query}
 
@@ -98,37 +109,53 @@ SEGMENT INFORMATION:
 REQUIRED COLUMNS FOR EACH TABLE:
 {json.dumps(column_info_formatted, indent=2) if column_info_formatted else "Not available"}
 
+KEY MAPPINGS: {json.dumps(key_mappings) if key_mappings else "No key mappings available"}
+
 {pattern_examples if pattern_examples else ""}
 
-REQUIREMENTS:
-1. Your function must be named 'analyze_data' and take exactly two parameters:
-   - source_dfs: Dictionary where keys are table names and values are pandas DataFrames
-   - target_df: The target DataFrame to be updated
+CODE STYLE REQUIREMENTS:
+1. Write MINIMAL, EFFICIENT code with NO unnecessary comments
+2. Keep validation logic concise - one-liners where possible
+3. Use clear variable names that don't need explanation
+4. Use pandas vectorized operations instead of loops when possible
+5. Only add comments for complex logic
+6. Skip boilerplate comments on obvious operations
+7. Return the final transformed target_df
 
-2. Basic requirements:
-   - Import only necessary packages (pandas, numpy, re)
-   - Return the target_df after all transformations are applied
-   - The function should correctly handle both empty and non-empty target DataFrames
-   - Use descriptive variable names and include basic comments
-   - Do not print intermediate results - return only the final DataFrame
+KEY MAPPING IMPLEMENTATION (CRITICAL):
+1. If key mappings are available, ALWAYS use them for record matching
+2. For empty target dataframes, include required key columns in the result
+3. For non-empty target, use proper merge or update operations with key columns
+4. With multiple source tables, ensure proper join conditions using key columns
 
-3. Look for specific implementation requirements in the query, including:
-   - Filtering conditions
-   - Field mappings
-   - Conditional logic
-   - Multiple table lookups
-   - Text transformations
-   - Tiered lookup logic
+CONCISE CODE EXAMPLES:
 
-4. Exception handling:
-   - Validate that required fields exist before using them
-   - Handle missing or empty tables gracefully
-   - Check dataframe is not empty before performing operations
+# Checking source table existence concisely:
+if 'TABLE_NAME' not in source_dfs or source_dfs['TABLE_NAME'].empty:
+    return target_df
 
-Please generate only a Python function. Do not include any explanation text, just the 'analyze_data' function itself.
+# Filtering concisely:
+df = source_dfs['TABLE_NAME']
+filtered_df = df[df['FIELD'] == 'VALUE'].copy()
+
+# Handling empty/non-empty targets efficiently:
+if target_df.empty:
+    # For empty target, select needed columns
+    result_df = filtered_df[['KEY_COL', 'DATA_COL1', 'DATA_COL2']].copy()
+    return result_df
+else:
+    # For existing target, merge on keys
+    return pd.merge(target_df, filtered_df[['KEY_COL', 'DATA_COL1']], on='KEY_COL', how='left')
+
+FOCUS ON:
+1. Correct implementation of filtering conditions exactly as specified
+2. Proper mapping of fields based on query requirements
+3. Efficient handling of target dataframe state (empty vs non-empty)
+4. Correct use of any key mappings for record matching
+
+Generate ONLY the analyze_data function. No explanation text, just the function definition and implementation.
 
 def analyze_data(source_dfs, target_df):
-    # Import required packages
     import pandas as pd
     import numpy as np
     

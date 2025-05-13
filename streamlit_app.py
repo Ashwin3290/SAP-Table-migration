@@ -34,9 +34,9 @@ if "workspaces" not in st.session_state:
 if "workspace_selection" not in st.session_state:
     st.session_state.workspace_selection = None
 if "object_id" not in st.session_state:
-    st.session_state.object_id = 29
+    st.session_state.object_id = 41
 if "segment_id" not in st.session_state:
-    st.session_state.segment_id = 336
+    st.session_state.segment_id = 577
 if "project_id" not in st.session_state:
     st.session_state.project_id = 24
 

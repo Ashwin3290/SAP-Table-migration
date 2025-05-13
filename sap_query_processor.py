@@ -142,8 +142,8 @@ class SAPQueryProcessor:
             source_dfs = self._get_source_dataframes(table_info, column_info)
             target_df = self.session_manager.get_or_create_session_target_df(
                 session_id, 
-                table_info.get("target_table"),
-                self.conn
+                table_info.get("target_table")
+                # No longer passing self.conn to avoid thread safety issues
             )
             
             # 10. Execute code
@@ -235,8 +235,16 @@ class SAPQueryProcessor:
             source_dfs = {}
             source_tables = table_info.get("source_tables", [])
             
-            # Return empty dict if no source tables or no database connection
-            if not source_tables or not self.conn:
+            # Return empty dict if no source tables
+            if not source_tables:
+                return source_dfs
+            
+            # Create a new connection for this thread to avoid SQLite thread issues
+            try:
+                thread_conn = sqlite3.connect(config.DATABASE_PATH)
+                logger.info(f"Created new thread-local connection to database")
+            except Exception as e:
+                logger.error(f"Error creating thread-local database connection: {e}")
                 return source_dfs
             
             # Get dataframe for each source table
@@ -264,13 +272,16 @@ class SAPQueryProcessor:
                         columns_str = ", ".join(columns)
                         query = f"SELECT {columns_str} FROM {table}"
                     
-                    # Execute query
-                    source_dfs[table] = pd.read_sql_query(query, self.conn)
+                    # Execute query using thread-local connection
+                    source_dfs[table] = pd.read_sql_query(query, thread_conn)
                     logger.info(f"Loaded {len(source_dfs[table])} rows from {table}")
                 except Exception as e:
                     logger.error(f"Error loading source table {table}: {e}")
                     # Create empty dataframe as fallback
                     source_dfs[table] = pd.DataFrame()
+            
+            # Close thread-local connection
+            thread_conn.close()
             
             return source_dfs
         except Exception as e:

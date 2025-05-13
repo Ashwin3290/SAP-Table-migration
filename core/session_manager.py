@@ -379,12 +379,19 @@ class SessionManager:
                 except Exception as e:
                     logger.warning(f"Error reading target file for session {session_id}: {e}")
             
-            # Target file doesn't exist or couldn't be loaded, create from database if conn provided
-            if conn:
+            # Target file doesn't exist or couldn't be loaded, create from database
+            if target_table:
                 try:
+                    # Create a new thread-local SQLite connection
+                    import sqlite3
+                    thread_conn = sqlite3.connect(config.DATABASE_PATH)
+                    
                     # Get data from database
                     query = f"SELECT * FROM {target_table}"
-                    target_df = pd.read_sql_query(query, conn)
+                    target_df = pd.read_sql_query(query, thread_conn)
+                    
+                    # Close the thread-local connection
+                    thread_conn.close()
                     
                     # Save to file
                     os.makedirs(session_path, exist_ok=True)

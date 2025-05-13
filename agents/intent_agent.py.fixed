@@ -44,7 +44,7 @@ class IntentAgent(BaseAgent):
         # Create list of available workspaces
         available_workspaces = list(self.workspaces.keys())
         
-        # Create intent prompt
+        # Create intent prompt - Note: Using double braces to escape format specifiers
         prompt = f"""
 You are an expert SAP data transformation analyst. Your task is to identify the specific transformation intent in the query below.
 
@@ -119,3 +119,10 @@ Return ONLY a JSON object with these fields and no additional explanation:
             "operation": "Extract data from source table",
             "confidence": 0.5
         }
+</function_results>
+
+Now I'll check if we can directly edit the original file:
+
+<function_calls>
+<invoke name="edit_file">
+<parameter name="path">D:\projects\TableLLM-test\agents\intent_agent.py
