@@ -515,6 +515,7 @@ def parse_data_with_context(
     1. Identify key entities in the query:
        - Source table(s)
        - Source field(s)
+       - Target field
        - Filtering or transformation conditions
        - Logical flow (IF/THEN/ELSE statements)
        - insertion fields
@@ -522,7 +523,8 @@ def parse_data_with_context(
     2. Match these entities to the corresponding entries in the joined_data.csv schema
        - For each entity, find the closest match in the schema
        - Resolve ambiguities using the description field
-       - Validate that the identified fields exist in the mentioned tables
+       - Validate that the identified fields exist in the mentioned tables.
+       - Carefully extract the target_sap_field from the datascheme given.
      
     3. Generate a structured representation of the transformation logic:
        - JSON format showing the transformation flow
@@ -530,7 +532,7 @@ def parse_data_with_context(
        - Map conditional logic to proper syntax
        - Handle fallback scenarios (ELSE conditions)
        - Use the provided key mappings to connect source and target fields correctly
-       - Consider the current state of the target data shown above
+       - Consider the current state of the target data shown above.
      
     4. Create a resolved query that takes the actual field and table names, and does not change what is said in the 
 
@@ -541,6 +543,7 @@ def parse_data_with_context(
     Note:
     - In the Restrucutured query, only replace the textual descriptions with the field names.
     - Do not change the query itself, just replace the field names with the actual field names.
+    - if target_sap_field is not found in the schema, return make source_field_name the target_sap_field.
 
     Respond with:
     ```json
@@ -549,6 +552,7 @@ def parse_data_with_context(
     "source_field_names": [List of all source_fields],
     "filtering_fields": [List of filtering fields],
     "insertion_fields": [List of fields to be inserted],
+    "target_sap_fields": target_sap_fields
     "Resolved_query": [Rephrased query with resolved data]
     }}
     ```
@@ -645,6 +649,7 @@ def parse_data_with_context(
                     "filtering_fields",
                     "insertion_fields",
                     "Resolved_query",
+                    "target_sap_fields",
                 ]
 
                 for key in required_keys:
@@ -678,7 +683,7 @@ def parse_data_with_context(
 
 
 def process_query(
-    object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None
+    object_id, segment_id, project_id, query, session_id=None
 ):
     """
     Process a query with context awareness
@@ -752,7 +757,7 @@ def process_query(
             return None
 
         # Process the resolved data to get table information
-        results = process_info(resolved_data, conn, target_sap_fields)
+        results = process_info(resolved_data, conn)
 
         if not results:
             logger.error("Failed to process resolved data")
@@ -766,14 +771,14 @@ def process_query(
         if not key_mapping:
             try:
                 # Check if we have a target field and it's a key
-                target_field_filter = joined_df["target_sap_field"] == target_sap_fields
+                target_field_filter = joined_df["target_sap_field"] == resolved_data["target_sap_fields"]
                 if (
                     target_field_filter.any()
                     and joined_df[target_field_filter]["isKey"].values[0] == "True"
                 ):
                     # We're working with a primary key field
                     logger.info(
-                        f"Target field '{target_sap_fields}' is identified as a primary key"
+                        f"Target field '{resolved_data["target_sap_fields"]}' is identified as a primary key"
                     )
 
                     # Check if we have insertion fields to map
@@ -847,7 +852,7 @@ def process_query(
                         if not error:
                             # If we've reached here, it's safe to add the key mapping
                             key_mapping = context_manager.add_key_mapping(
-                                session_id, target_sap_fields, source_field
+                                session_id, resolved_data["target_sap_fields"], source_field
                             )
                         else:
                             key_mapping = [error]
@@ -881,7 +886,7 @@ def process_query(
                 logger.error(f"Error closing database connection: {e}")
 
 
-def process_info(resolved_data, conn, target_sap_fields):
+def process_info(resolved_data, conn):
     """Process the resolved data to extract table information based on the specified JSON structure"""
     try:
         # Validate inputs
@@ -901,6 +906,7 @@ def process_info(resolved_data, conn, target_sap_fields):
             "filtering_fields",
             "Resolved_query",
             "insertion_fields",
+            "target_sap_fields",
         ]
 
         for field in required_fields:
@@ -913,7 +919,7 @@ def process_info(resolved_data, conn, target_sap_fields):
             "source_table_name": resolved_data["source_table_name"],
             "source_field_names": resolved_data["source_field_names"],
             "target_table_name": resolved_data["target_table"],
-            "target_sap_fields": target_sap_fields,
+            "target_sap_fields": resolved_data["target_sap_fields"],
             "filtering_fields": resolved_data["filtering_fields"],
             "restructured_query": resolved_data["Resolved_query"],
             "insertion_fields": resolved_data["insertion_fields"],

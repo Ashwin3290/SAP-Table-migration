@@ -899,7 +899,7 @@ else:
             # 1. Process query with the planner
             logger.info(f"Processing query: {query}")
             resolved_data = planner_process_query(
-                object_id, segment_id, project_id, query, session_id, target_sap_fields
+                object_id, segment_id, project_id, query, session_id
             )
             if not resolved_data:
                 logger.error("Failed to resolve query with planner")
@@ -1026,6 +1026,8 @@ else:
                 # 7. Execute the generated code with error handling
                 try:
                     code_file = create_code_file(code_content, query, is_double=True)
+                    target_sap_fields = resolved_data.get("target_sap_fields")[0]
+                    print("*********************",target_sap_fields,"***************")
                     result = execute_code(code_file, source_dfs, target_df, target_sap_fields)
 
                     # Check if result is an error (now it's a dictionary with traceback information)
@@ -1062,7 +1064,7 @@ else:
                                 is_double=True,
                             )
                             fixed_result = execute_code(
-                                fixed_code_file, source_dfs, target_df, target_sap_fields
+                                fixed_code_file, source_dfs, target_df, resolved_data["target_sap_fields"]
                             )
 
                             # If the fixed code worked (result is not an error dictionary), use it

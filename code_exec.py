@@ -126,7 +126,8 @@ def validation_handling(source_df,target_df, result, target_sap_fields):
     print("Result non-null columns:", result_not_null_columns)
     print("#########################################")
     
-    
+    if isinstance(target_sap_fields, list):
+        target_sap_fields = target_sap_fields[0]
     # Check if the target_sap_field should be included
     expected_not_null_columns = target_not_null_columns.copy()
     if target_sap_fields in target_df.columns:
