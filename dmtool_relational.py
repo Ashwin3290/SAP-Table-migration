@@ -484,6 +484,7 @@ RETURN ONLY THE FIXED CODE WITH NO EXPLANATIONS:
         segment_id=336,
         project_id=24,
         session_id=None,
+        target_sap_fields=None,
     ):
         """
         Process a query as part of a relational multi-segment sequence
@@ -494,6 +495,7 @@ RETURN ONLY THE FIXED CODE WITH NO EXPLANATIONS:
             segment_id (int): Segment ID for mapping (can change between queries)
             project_id (int): Project ID for mapping
             session_id (str): Optional session ID, creates new session if None
+            target_sap_fields (list): Optional list of target SAP fields
             
         Returns:
             tuple: (code, result, session_id)
@@ -510,6 +512,11 @@ RETURN ONLY THE FIXED CODE WITH NO EXPLANATIONS:
                 logger.error(f"Invalid ID types: object_id={type(object_id)}, segment_id={type(segment_id)}, project_id={type(project_id)}")
                 return None, "Invalid ID types - must be integers", session_id
 
+            # Validate target_sap_fields
+            if target_sap_fields is not None and not isinstance(target_sap_fields, (str, list)):
+                logger.error(f"Invalid target_sap_fields type: {type(target_sap_fields)}")
+                return None, "target_sap_fields must be a string or list of strings", session_id
+
             # Connect to database
             try:
                 conn = sqlite3.connect("db.sqlite3")
@@ -519,18 +526,13 @@ RETURN ONLY THE FIXED CODE WITH NO EXPLANATIONS:
 
             # 1. Handle segment switching if this is an existing session
             previous_segment_id = None
-            cursor = conn.cursor()
-            cursor.execute("Select table_name from connection_segments where segment_id = ?", (segment_id,))
-            target_table = cursor.fetchone()
-            if target_table:
-                target_table = target_table[0]
             if session_id:
                 previous_segment_id, target_df = handle_segment_switch(
                     session_id, 
                     segment_id, 
                     object_id, 
                     project_id, 
-                    target_table,
+                    target_sap_fields if isinstance(target_sap_fields, str) else "target_table",
                     conn
                 )
                 
@@ -540,7 +542,7 @@ RETURN ONLY THE FIXED CODE WITH NO EXPLANATIONS:
             logger.info(f"Processing query: {query}")
             # Add segment_id to planner parameters
             resolved_data = planner_process_query(
-                object_id, segment_id, project_id, query, session_id
+                object_id, segment_id, project_id, query, session_id, target_sap_fields
             )
             
             if not resolved_data:
@@ -651,7 +653,7 @@ RETURN ONLY THE FIXED CODE WITH NO EXPLANATIONS:
                 # 10. Execute the generated code
                 try:
                     code_file = create_code_file(code_content, query, is_double=True)
-                    result = execute_code(code_file, source_dfs, target_df, resolved_data['target_sap_fields'])
+                    result = execute_code(code_file, source_dfs, target_df, target_sap_fields)
                     
                     # Check if result is an error dictionary
                     if isinstance(result, dict) and "error_type" in result:
@@ -681,7 +683,7 @@ RETURN ONLY THE FIXED CODE WITH NO EXPLANATIONS:
                                 is_double=True
                             )
                             fixed_result = execute_code(
-                                fixed_code_file, source_dfs, target_df, resolved_data['target_sap_fields']
+                                fixed_code_file, source_dfs, target_df, target_sap_fields
                             )
                             
 # If the fix worked, use it

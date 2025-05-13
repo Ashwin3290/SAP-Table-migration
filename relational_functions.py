@@ -217,6 +217,7 @@ def handle_segment_switch(session_id, segment_id, object_id, project_id, target_
         segment_id (int): New segment ID to switch to
         object_id (int): Object ID
         project_id (int): Project ID
+        target_table (str): Target table name
         conn (sqlite3.Connection): Optional database connection
         
     Returns:
