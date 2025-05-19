@@ -421,57 +421,6 @@ with col1:
                     """, unsafe_allow_html=True)
     
     # Display sample tables from database if connected
-    if sqlite_conn:
-        try:
-            cursor = sqlite_conn.cursor()
-            
-            # First get the target SAP table name from connection_segments
-            cursor.execute("""
-                SELECT table_name 
-                FROM connection_segments 
-                WHERE obj_id_id = ? 
-                AND project_id_id = ? 
-                AND segment_id = ?
-            """, (object_id, project_id, segment_id))
-            
-            target_table_result = cursor.fetchone()
-            
-            if target_table_result:
-                target_table = target_table_result[0]
-                
-                # Get columns from the target table
-                cursor.execute(f"PRAGMA table_info('{target_table}')")
-                columns = cursor.fetchall()
-                
-                if columns:
-                    # Create a searchable select box for columns
-                    column_options = [col[1] for col in columns]
-                    print(column_options)  # col[1] is the column name
-                    selected_columns = st.selectbox(
-                        f"Select columns from {target_table}",
-                        options=column_options, # Show all columns selected by default
-                        key=f"columns_{target_table}"
-                    )
-                    
-
-                    # Show sample data button
-                    if st.button(f"Preview data from {target_table}"):
-                        if selected_columns:
-                            columns_str = ", ".join([f'"{col}"' for col in selected_columns])
-                            sample_df = pd.read_sql_query(
-                                f"SELECT {columns_str} FROM '{target_table}' LIMIT 10", 
-                                sqlite_conn
-                            )
-                            st.dataframe(sample_df)
-                        else:
-                            st.warning("Please select at least one column to preview")
-                else:
-                    st.warning(f"No columns found in table {target_table}")
-            else:
-                st.warning("No target SAP table found for the given parameters")
-                
-        except Exception as e:
-            st.error(f"Error fetching table information: {e}")
 
 with col2:
     st.markdown('<p class="sub-header">Data Transformation Query</p>', unsafe_allow_html=True)
@@ -484,80 +433,75 @@ with col2:
         placeholder="Example: Bring Material Number with Material Type = ROH from MARA Table"
     )
     
-    # Submit button and progress indicator
-    col_button1, col_button2, col_button3 = st.columns([1, 1, 1])
-    with col_button3:
-        submit = st.button("🔄 Transform", key="transform_button", use_container_width=True)
-    
-    # Process the query for data transformation
+
+    submit = st.button("🔄 Transform", key="transform_button", use_container_width=True)
+
     if submit and query and sqlite_conn:
         with st.spinner("Processing transformation..."):
-            # try:
-            # Process query with context awareness
+            # Process query with context awareness and automatic query classification
             code, result, session_id = DMTool.process_sequential_query(
                 query, 
                 object_id, 
                 segment_id, 
                 project_id,
-                st.session_state['transformation_session_id'],
-                selected_columns
+                st.session_state['transformation_session_id']
             )
 
-            if code is None:
-                st.error(result)
+        if code is None:
+            st.error(result)
+        else:
+            # Update session ID if this is a new session
+            if not st.session_state['transformation_session_id']:
+                st.session_state['transformation_session_id'] = session_id
+            
+            # Get updated session info
+            session_info = get_session_context(session_id)
+            
+            # Add to history
+            st.session_state['transformation_history'].append({
+                'query': query,
+                'code': code,
+                'timestamp': datetime.now().isoformat(),
+                'description': session_info['transformation_history'][-1]['description'] 
+                    if session_info['transformation_history'] else "Unknown transformation"
+            })
+            
+            # Display results
+            st.success("Transformation complete!")
+            
+            # Display the transformation results
+            st.markdown("### Result")
+            
+            # Display code
+            if st.session_state['show_code']:
+                with st.expander("Generated Python Code", expanded=False):
+                    st.code(code, language="python")
+            
+            # Display different result types appropriately
+            if isinstance(result, pd.DataFrame):
+                filtered_result = result.dropna(axis=1, how='all') 
+                st.dataframe(filtered_result, use_container_width=True)
+                st.write("Number of rows:", len(result))
+            elif str(type(result)).find('matplotlib') != -1:
+                st.pyplot(result)
+            elif isinstance(result, (list, dict)):
+                st.json(result)
             else:
-                # Update session ID if this is a new session
-                if not st.session_state['transformation_session_id']:
-                    st.session_state['transformation_session_id'] = session_id
+                st.write(result)
+            
+            # Display summary of what happened
+            latest_tx = session_info['transformation_history'][-1] if session_info['transformation_history'] else {}
+            st.markdown(f"""
+            <div class="context-info">
+                <strong>Transformation Summary:</strong><br>
+                {latest_tx.get('description', 'Transformation completed')}<br>
+                <strong>Fields Modified:</strong> {', '.join(latest_tx.get('fields_modified', []))}<br>
+                <strong>Filter Conditions:</strong> {json.dumps(latest_tx.get('filter_conditions', {}))}
+            </div>
+            """, unsafe_allow_html=True)
                 
-                # Get updated session info
-                session_info = get_session_context(session_id)
-                
-                # Add to history
-                st.session_state['transformation_history'].append({
-                    'query': query,
-                    'code': code,
-                    'timestamp': datetime.now().isoformat(),
-                    'description': session_info['transformation_history'][-1]['description'] 
-                        if session_info['transformation_history'] else "Unknown transformation"
-                })
-                
-                # Display results
-                st.success("Transformation complete!")
-                
-                # Display the transformation results
-                st.markdown("### Result")
-                
-                # Display code
-                if st.session_state['show_code']:
-                    with st.expander("Generated Python Code", expanded=False):
-                        st.code(code, language="python")
-                
-                # Display different result types appropriately
-                if isinstance(result, pd.DataFrame):
-                    filtered_result = result.dropna(axis=1, how='all') 
-                    st.dataframe(filtered_result, use_container_width=True)
-                    st.write("Number of rows:", len(result))
-                elif str(type(result)).find('matplotlib') != -1:
-                    st.pyplot(result)
-                elif isinstance(result, (list, dict)):
-                    st.json(result)
-                else:
-                    st.write(result)
-                
-                # Display summary of what happened
-                latest_tx = session_info['transformation_history'][-1] if session_info['transformation_history'] else {}
-                st.markdown(f"""
-                <div class="context-info">
-                    <strong>Transformation Summary:</strong><br>
-                    {latest_tx.get('description', 'Transformation completed')}<br>
-                    <strong>Fields Modified:</strong> {', '.join(latest_tx.get('fields_modified', []))}<br>
-                    <strong>Filter Conditions:</strong> {json.dumps(latest_tx.get('filter_conditions', {}))}
-                </div>
-                """, unsafe_allow_html=True)
-                    
-                # except Exception as e:
-                    # st.error(f"Error processing transformation: {e}")
+            # except Exception as e:
+                # st.error(f"Error processing transformation: {e}")
     
     # Display previous transformations in this session
     if st.session_state['transformation_history']:

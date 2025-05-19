@@ -490,6 +490,7 @@ DO NOT add columns not specified in target fields
 DO NOT transform data that isn't needed in the target
 DO NOT use incompatible data types in comparisons
 DO NOT drop or ignore key columns during any operation
+DO NOT make dummy dataframes - use the provided source_dfs and target_df
 
 REQUIREMENTS:
 
@@ -851,21 +852,19 @@ else:
         object_id=29,
         segment_id=336,
         project_id=24,
-        session_id=None,
-        target_sap_fields=None,
+        session_id=None
     ):
         """
         Process a query as part of a sequential transformation
-        With improved information flow from planner and support for multiple source tables
-
+        With query classification and specialized handling for different operations
+        
         Parameters:
         query (str): The user's query
         object_id (int): Object ID for mapping
         segment_id (int): Segment ID for mapping
         project_id (int): Project ID for mapping
         session_id (str): Optional session ID, creates new session if None
-        target_sap_fields (list): Optional list of target SAP fields
-
+        
         Returns:
         tuple: (code, result, session_id)
         """
@@ -883,20 +882,7 @@ else:
                 )
                 return None, "Invalid ID types - must be integers", session_id
 
-            # Validate target_sap_fields
-            if target_sap_fields is not None and not isinstance(
-                target_sap_fields, (str, list)
-            ):
-                logger.error(
-                    f"Invalid target_sap_fields type: {type(target_sap_fields)}"
-                )
-                return (
-                    None,
-                    "target_sap_fields must be a string or list of strings",
-                    session_id,
-                )
-
-            # 1. Process query with the planner
+            # 1. Process query with the planner - now with classification
             logger.info(f"Processing query: {query}")
             resolved_data = planner_process_query(
                 object_id, segment_id, project_id, query, session_id
@@ -904,12 +890,17 @@ else:
             if not resolved_data:
                 logger.error("Failed to resolve query with planner")
                 return None, "Failed to resolve query", session_id
+                
+            # Get query type from resolved data
+            query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")
+            logger.info(f"Query type determined as: {query_type}")
+                
+            # Get session ID and segments info from the results
+            session_id = resolved_data.get("session_id")
+            visited_segments = resolved_data.get("visited_segments", {})
+            current_segment = resolved_data.get("current_segment", {})
 
             # Connect to database
-            print(resolved_data["key_mapping"])
-            if not len(resolved_data["key_mapping"]) == 0:
-                if isinstance(resolved_data["key_mapping"][0], str):
-                    return None, resolved_data["key_mapping"][0], session_id
             try:
                 conn = sqlite3.connect("db.sqlite3")
             except sqlite3.Error as e:
@@ -918,41 +909,44 @@ else:
 
             # 2. Extract and organize all relevant information from the planner
             try:
-                resolved_data["original_query"] = (
-                    query  # Add original query for context
-                )
-
-                # Get target data samples safely
+                resolved_data["original_query"] = query
+                
+                # Get target data samples safely - same for all query types
                 try:
                     if "target_table_name" in resolved_data:
                         target_table = resolved_data["target_table_name"]
                         if isinstance(target_table, list) and len(target_table) > 0:
                             target_table = target_table[0]
-
-                        # Validate table name to prevent SQL injection
                         target_table = validate_sql_identifier(target_table)
-
-                        resolved_data["target_data_samples"] = (
-                            get_or_create_session_target_df(
-                                session_id, target_table, conn
-                            ).head()
-                        )
+                        resolved_data["target_data_samples"] = get_or_create_session_target_df(
+                            session_id, target_table, conn
+                        ).head()
                 except Exception as e:
                     logger.warning(f"Error getting target data samples: {e}")
                     resolved_data["target_data_samples"] = pd.DataFrame()
 
                 # Extract and organize planner information
                 planner_info = self._extract_planner_info(resolved_data)
-
-                # Get session ID from the results
-                session_id = planner_info.get("session_id")
-                if not session_id:
-                    logger.warning("No session ID returned from planner")
-                    # Create a new session ID as fallback
-                    import uuid
-
-                    session_id = str(uuid.uuid4())
-
+                
+                # Add query type and classification details
+                planner_info["query_type"] = query_type
+                planner_info["classification_details"] = resolved_data.get("classification_details", {})
+                
+                # Add segment information to planner info
+                planner_info["visited_segments"] = visited_segments
+                planner_info["current_segment"] = current_segment
+                
+                # Add segment references based on query type
+                if query_type in ["CROSS_SEGMENT", "JOIN_OPERATION"]:
+                    # For these operations, segment references are important
+                    segment_references = resolved_data.get("segment_references", [])
+                    planner_info["segment_references"] = segment_references
+                    
+                    # For JOIN_OPERATION, also add join conditions
+                    if query_type == "JOIN_OPERATION":
+                        join_conditions = resolved_data.get("join_conditions", [])
+                        planner_info["join_conditions"] = join_conditions
+                
                 # 3. Extract table names safely
                 source_tables = planner_info.get("source_table", [])
                 if not source_tables:
@@ -962,10 +956,7 @@ else:
                     return None, "No source tables identified", session_id
 
                 target_table = None
-                if (
-                    isinstance(planner_info.get("target_table"), list)
-                    and len(planner_info["target_table"]) > 0
-                ):
+                if isinstance(planner_info.get("target_table"), list) and len(planner_info["target_table"]) > 0:
                     target_table = planner_info["target_table"][0]
                 else:
                     target_table = planner_info.get("target_table")
@@ -976,30 +967,9 @@ else:
                         conn.close()
                     return None, "No target table identified", session_id
 
-                # 4. Get source and target dataframes safely
-                source_dfs = {}
-                for table in source_tables:
-                    try:
-                        # Validate table name to prevent SQL injection
-                        safe_table = validate_sql_identifier(table)
-
-                        # Use a parameterized query for safety
-                        source_dfs[table] = pd.read_sql_query(
-                            f"SELECT * FROM {safe_table}", conn
-                        )
-                    except Exception as e:
-                        logger.warning(f"Error reading source table {table}: {e}")
-                        # Create an empty dataframe as fallback
-                        source_dfs[table] = pd.DataFrame()
-
-                # Get target dataframe
-                try:
-                    target_df = get_or_create_session_target_df(
-                        session_id, target_table, conn
-                    )
-                except Exception as e:
-                    logger.warning(f"Error getting target dataframe: {e}")
-                    target_df = pd.DataFrame()
+                # 4. Get source and target dataframes - handling depends on query type
+                source_dfs = self._load_source_tables(source_tables, visited_segments, conn, query_type, session_id=session_id)                
+                target_df = get_or_create_session_target_df(session_id, target_table, conn)
 
                 # 5. Generate a simple, step-by-step plan in natural language
                 try:
@@ -1009,16 +979,24 @@ else:
                     logger.error(f"Error generating simple plan: {e}")
                     simple_plan = "1. Make copy of the source dataframe\n2. Return the dataframe unchanged"
 
-                # 6. Generate code from the simple plan with full context
+                # 6. Generate code based on query type
                 try:
-                    code_content = self._generate_code_from_simple_plan(
-                        simple_plan, planner_info
-                    )
-                    logger.info(
-                        f"Code generated with length: {len(code_content)} chars"
-                    )
-                except CodeGenerationError as e:
-                    logger.error(f"Code generation error: {e}")
+                    # Select code generation method based on query type
+                    if query_type == "JOIN_OPERATION":
+                        code_content = self._generate_join_code(simple_plan, planner_info)
+                    elif query_type == "CROSS_SEGMENT":
+                        code_content = self._generate_cross_segment_code(simple_plan, planner_info)
+                    elif query_type == "VALIDATION_OPERATION":
+                        code_content = self._generate_validation_code(simple_plan, planner_info)
+                    elif query_type == "AGGREGATION_OPERATION":
+                        code_content = self._generate_aggregation_code(simple_plan, planner_info)
+                    else:
+                        # Default to simple transformation
+                        code_content = self._generate_code_from_simple_plan(simple_plan, planner_info)
+                        
+                    logger.info(f"Code generated with length: {len(code_content)} chars")
+                except Exception as e:
+                    logger.error(f"Error generating code: {e}")
                     if conn:
                         conn.close()
                     return None, f"Failed to generate code: {e}", session_id
@@ -1026,11 +1004,11 @@ else:
                 # 7. Execute the generated code with error handling
                 try:
                     code_file = create_code_file(code_content, query, is_double=True)
-                    target_sap_fields = resolved_data.get("target_sap_fields")[0]
-                    print("*********************",target_sap_fields,"***************")
-                    result = execute_code(code_file, source_dfs, target_df, target_sap_fields)
+                    target_sap_fields = resolved_data.get("target_sap_fields")
+                    key_mapping = resolved_data.get("key_mapping", [])
+                    result = execute_code(code_file, source_dfs, target_df, target_sap_fields, query_type=query_type, key_mapping=key_mapping)
 
-                    # Check if result is an error (now it's a dictionary with traceback information)
+                    # Handle execution errors and fix attempts
                     if isinstance(result, dict) and "error_type" in result:
                         logger.error(f"Code execution error: {result['error_message']}")
                         logger.error(f"Traceback: {result['traceback']}")
@@ -1063,27 +1041,18 @@ else:
                                 f"{query} (fixed attempt {attempt})",
                                 is_double=True,
                             )
-                            fixed_result = execute_code(
-                                fixed_code_file, source_dfs, target_df, resolved_data["target_sap_fields"]
-                            )
+                            fixed_result = execute_code(fixed_code_file, source_dfs, target_df, target_sap_fields, query_type=query_type, key_mapping=key_mapping)
 
-                            # If the fixed code worked (result is not an error dictionary), use it
-                            if (
-                                not isinstance(fixed_result, dict)
-                                or "error_type" not in fixed_result
-                            ):
-                                logger.info(
-                                    f"Successfully fixed code on attempt {attempt}"
-                                )
+                            # If the fixed code worked, use it
+                            if not isinstance(fixed_result, dict) or "error_type" not in fixed_result:
+                                logger.info(f"Successfully fixed code on attempt {attempt}")
                                 code_content = fixed_code  # Update the code content to the fixed version
                                 result = fixed_result  # Use the successful result
                                 break
                             else:
                                 # The fix didn't work, update the error for the next attempt
                                 result = fixed_result
-                                logger.error(
-                                    f"Fix attempt {attempt} failed with error: {result['error_message']}"
-                                )
+                                logger.error(f"Fix attempt {attempt} failed: {result['error_message']}")
 
                         # If we've gone through all attempts and still have an error
                         if isinstance(result, dict) and "error_type" in result:
@@ -1113,11 +1082,59 @@ else:
                 # 8. Save the updated target dataframe if it's a DataFrame
                 if isinstance(result, pd.DataFrame):
                     try:
+                        # Post-process the result dataframe
                         result = self.post_proccess_result(result)
-                        print(result.columns)
+                        
+                        # Save to session target
                         save_success = save_session_target_df(session_id, result)
                         if not save_success:
-                            logger.warning("Failed to save target dataframe")
+                            logger.warning("Failed to save target dataframe to session")
+                            
+                        # Special handling for different query types
+                        if query_type in ["CROSS_SEGMENT", "JOIN_OPERATION"]:
+                            # Save to workspace with current segment info for cross-segment use
+                            try:
+                                # Get current segment name
+                                segment_name = current_segment.get("name", f"segment_{segment_id}")
+                                
+                                # Save to workspace DB with current segment name
+                                # First make a copy to avoid modifying the original
+                                workspace_result = result.copy()
+                                key_fields = []
+                                if key_mapping:
+                                    # Extract source fields from key mappings
+                                    key_fields = [mapping.get('source_col') for mapping in key_mapping if isinstance(mapping, dict) and 'source_col' in mapping]
+
+                                # Also check for common key fields
+                                common_key_fields = ['MATNR', 'MATERIAL', 'PRODUCT', 'WERKS', 'PLANT']
+                                for key_field in common_key_fields:
+                                    if key_field not in key_fields:
+                                        key_fields.append(key_field)
+
+                                # Add necessary key fields for cross-segment compatibility
+                                for key_field in key_fields:
+                                    if key_field not in workspace_result.columns:
+                                        # Try to add key field from source
+                                        for table_name, df in source_dfs.items():
+                                            if key_field in df.columns:
+                                                logger.info(f"Adding {key_field} from {table_name} for cross-segment compatibility")
+                                                if len(df) >= len(workspace_result):
+                                                    workspace_result[key_field] = df[key_field].values[:len(workspace_result)]
+                                                else:
+                                                    field_values = [None] * len(workspace_result)
+                                                    for i in range(min(len(df), len(workspace_result))):
+                                                        field_values[i] = df[key_field].iloc[i]
+                                                    workspace_result[key_field] = field_values
+                                                break
+                                
+                                # Save to workspace
+                                if hasattr(self, 'workspace_db'):
+                                    workspace_table = self.workspace_db.save_segment_table(
+                                        session_id, segment_id, segment_name, workspace_result
+                                    )
+                                    logger.info(f"Saved result to workspace as {workspace_table} with {len(workspace_result)} rows")
+                            except Exception as e:
+                                logger.error(f"Error saving to workspace: {e}")
                     except Exception as e:
                         logger.error(f"Error saving target dataframe: {e}")
 
@@ -1142,3 +1159,545 @@ else:
                 except:
                     pass
             return None, f"An error occurred: {e}", session_id
+
+    def _load_source_tables(self, source_tables, visited_segments, conn, query_type, session_id=None):
+        """
+        Load source tables with special handling for different query types
+        
+        Parameters:
+        source_tables (list): List of source table names
+        visited_segments (dict): Dictionary of visited segments
+        conn (Connection): Database connection
+        query_type (str): Type of query
+        session_id (str, optional): Current session ID
+        
+        Returns:
+        dict: Dictionary of source DataFrames
+        """
+        source_dfs = {}
+        
+        for table in source_tables:
+            # Clean the table name first to remove suffixes like "Table"
+            from planner import clean_table_name
+            cleaned_table = clean_table_name(table)
+            
+            # Instead of hardcoding segment detection, check if table is in visited segments
+            is_workspace_table = False
+            segment_id = None
+            
+            # Check both by exact name and partial match for robust detection
+            for seg_id, segment_info in visited_segments.items():
+                table_name = segment_info.get("table_name", "")
+                if cleaned_table == table_name or (table_name and table_name.lower() in cleaned_table.lower()):
+                    is_workspace_table = True
+                    segment_id = seg_id
+                    break
+                
+            # Special handling for segment tables in CROSS_SEGMENT queries
+            if is_workspace_table and query_type in ["CROSS_SEGMENT", "JOIN_OPERATION"] and session_id and hasattr(self, 'workspace_db'):
+                try:
+                    # Get from workspace DB
+                    workspace_table = self.workspace_db.get_segment_table_name(
+                        session_id, segment_id=segment_id, segment_name=cleaned_table
+                    )
+                    
+                    if workspace_table:
+                        logger.info(f"Loading source table {cleaned_table} from workspace ({workspace_table})")
+                        source_dfs[table] = pd.read_sql_query(
+                            f"SELECT * FROM '{workspace_table}'", 
+                            self.workspace_db.conn
+                        )
+                    else:
+                        # Try with just the segment name prefix
+                        segment_name_prefix = cleaned_table.split('_')[0] if '_' in cleaned_table else cleaned_table
+                        workspace_table = self.workspace_db.get_segment_table_name(
+                            session_id, segment_name=segment_name_prefix
+                        )
+                        if workspace_table:
+                            logger.info(f"Loading {cleaned_table} using prefix {segment_name_prefix} from workspace ({workspace_table})")
+                            source_dfs[table] = pd.read_sql_query(
+                                f"SELECT * FROM '{workspace_table}'", 
+                                self.workspace_db.conn
+                            )
+                        else:
+                            logger.warning(f"Could not find workspace table for {cleaned_table}")
+                            source_dfs[table] = pd.DataFrame()
+                except Exception as e:
+                    logger.error(f"Error loading segment table {cleaned_table}: {e}")
+                    source_dfs[table] = pd.DataFrame()
+            else:
+                # Regular table from main database
+                try:
+                    # Validate table name to prevent SQL injection
+                    safe_table = validate_sql_identifier(cleaned_table)
+                    # Use a parameterized query for safety
+                    logger.info(f"Loading source table {cleaned_table} from main database")
+                    source_dfs[table] = pd.read_sql_query(
+                        f"SELECT * FROM {safe_table}", conn
+                    )
+                except Exception as e:
+                    logger.warning(f"Error reading source table {cleaned_table}: {e}")
+                    # Create an empty dataframe as fallback
+                    source_dfs[table] = pd.DataFrame()
+                    
+        return source_dfs
+    
+    def _generate_join_code(self, simple_plan, planner_info):
+        """
+        Generate code specifically for JOIN operations
+        
+        Parameters:
+        simple_plan (str): Step-by-step plan in natural language
+        planner_info (dict): Context information from planner
+        
+        Returns:
+        str: Generated code
+        """
+        # Extract join information
+        join_conditions = planner_info.get("join_conditions", [])
+        
+        prompt = f"""
+    Write Python code for a JOIN operation following these EXACT steps:
+
+    {simple_plan}
+
+    JOIN DETAILS:
+    {json.dumps(join_conditions, indent=2)}
+
+    CONTEXT INFORMATION:
+    - Source tables: {json.dumps(planner_info.get('source_table', []), indent=2)}
+    - Target table: {planner_info.get('target_table', [])}
+    - Source fields: {planner_info.get('source_fields', [])}
+    - Target fields: {planner_info.get('target_fields', [])}
+    - Filtering fields: {planner_info.get('filtering_fields', [])}
+    - Filtering conditions: {json.dumps(planner_info.get('extracted_conditions', {}), indent=2)}
+
+    SAMPLE DATA:
+    Source data samples:
+    {json.dumps(planner_info.get('source_data', {}).get('sample', {}), indent=2)}
+
+    Target data sample:
+    {json.dumps(planner_info.get('target_data', {}).get('sample', []), indent=2)}
+
+    JOIN IMPLEMENTATION REQUIREMENTS:
+    1. Use pandas.merge() for joining tables
+    2. Properly handle join types (inner, left, right, outer)
+    3. Use the exact join fields specified in the join conditions
+    4. Apply filtering conditions AFTER joining if applicable
+    5. Handle empty dataframes properly
+    6. Return a dataframe with the required target fields
+
+    The function must follow this structure:
+    def analyze_data(source_dfs, target_df):
+        # Import required libraries
+        import pandas as pd
+        import numpy as np
+        
+        # Source tables are available in the source_dfs dictionary
+        # Example: source_dfs = {{'MARA': df1, 'MARC': df2}}
+        
+        # Implement the join operations according to the plan
+        # ...
+        
+        # Return the updated target dataframe
+        return result_df
+    """
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash-thinking-exp-01-21", 
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.25, top_p=0.9)
+            )
+            
+            # Extract code from response
+            import re
+            code_match = re.search(r"```python\s*(.*?)\s*```", response.text, re.DOTALL)
+            if code_match:
+                return code_match.group(1)
+            
+            code_match = re.search(r"```\s*(.*?)\s*```", response.text, re.DOTALL)
+            if code_match:
+                return code_match.group(1)
+                
+            function_match = re.search(r"def analyze_data\s*\(.*?\).*?return\s+\w+", response.text, re.DOTALL)
+            if function_match:
+                return function_match.group(0)
+                
+            return response.text
+        except Exception as e:
+            logger.error(f"Error generating join code: {e}")
+            # Return a basic join implementation
+            return """def analyze_data(source_dfs, target_df):
+        import pandas as pd
+        import numpy as np
+        
+        # Get source tables
+        source_tables = list(source_dfs.keys())
+        if len(source_tables) < 2:
+            return target_df  # Not enough tables for join
+            
+        # Basic implementation - join first two tables
+        table1 = source_tables[0]
+        table2 = source_tables[1]
+        
+        if table1 in source_dfs and table2 in source_dfs:
+            result = pd.merge(
+                source_dfs[table1],
+                source_dfs[table2],
+                left_on='MATNR',  # Default join field
+                right_on='MATNR',
+                how='inner'
+            )
+            return result
+        else:
+            return target_df
+    """
+
+    def _generate_cross_segment_code(self, simple_plan, planner_info):
+        """
+        Generate code specifically for CROSS_SEGMENT operations
+        
+        Parameters:
+        simple_plan (str): Step-by-step plan in natural language
+        planner_info (dict): Context information from planner
+        
+        Returns:
+        str: Generated code
+        """
+        # Extract cross segment information
+        segment_references = planner_info.get("segment_references", [])
+        cross_segment_joins = planner_info.get("cross_segment_joins", [])
+        
+        prompt = f"""
+    Write Python code for a CROSS-SEGMENT operation following these EXACT steps:
+
+    {simple_plan}
+
+    SEGMENT REFERENCES:
+    {json.dumps(segment_references, indent=2)}
+
+    CROSS-SEGMENT JOINS:
+    {json.dumps(cross_segment_joins, indent=2)}
+
+    CONTEXT INFORMATION:
+    - Source tables: {json.dumps(planner_info.get('source_table', []), indent=2)}
+    - Target table: {planner_info.get('target_table', [])}
+    - Source fields: {planner_info.get('source_fields', [])}
+    - Target fields: {planner_info.get('target_fields', [])}
+    - Filtering fields: {planner_info.get('filtering_fields', [])}
+    - Filtering conditions: {json.dumps(planner_info.get('extracted_conditions', {}), indent=2)}
+
+    SAMPLE DATA:
+    Source data samples:
+    {json.dumps(planner_info.get('source_data', {}).get('sample', {}), indent=2)}
+
+    Target data sample:
+    {json.dumps(planner_info.get('target_data', {}).get('sample', []), indent=2)}
+
+    CROSS-SEGMENT IMPLEMENTATION REQUIREMENTS:
+    1. Properly access segment tables from the source_dfs dictionary
+    2. Join segment data with current data using specified join fields
+    3. Apply transformations across segments as needed
+    4. Handle empty dataframes properly
+    5. Return a dataframe with the required target fields
+    6. Make sure to handle cases where segment tables might be empty or missing
+    7. Ensure that the join conditions are met and handle any mismatches
+    8. Include error handling for potential issues during cross-segment operations
+    9. Ensure that the function is robust and can handle various edge cases
+    10. DO NOT include any print statements or debugging code in the final output
+    11. DO NOT make any dummy dataframes or tables in the final output
+
+    The function must follow this structure:
+    def analyze_data(source_dfs, target_df):
+        # Import required libraries
+        import pandas as pd
+        import numpy as np
+        
+        # Source tables are available in the source_dfs dictionary
+        # Example: source_dfs = {{'MARA': df1, 'basic_segment': df2}}
+        
+        # Implement the cross-segment operations according to the plan
+        # ...
+        
+        # Return the updated target dataframe
+        return result_df
+    """
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash-thinking-exp-01-21", 
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.25, top_p=0.9)
+            )
+            
+            # Extract code from response
+            import re
+            code_match = re.search(r"```python\s*(.*?)\s*```", response.text, re.DOTALL)
+            if code_match:
+                return code_match.group(1)
+            
+            code_match = re.search(r"```\s*(.*?)\s*```", response.text, re.DOTALL)
+            if code_match:
+                return code_match.group(1)
+                
+            function_match = re.search(r"def analyze_data\s*\(.*?\).*?return\s+\w+", response.text, re.DOTALL)
+            if function_match:
+                return function_match.group(0)
+                
+            return response.text
+        except Exception as e:
+            logger.error(f"Error generating cross-segment code: {e}")
+            # Return a basic implementation
+            return """def analyze_data(source_dfs, target_df):
+        import pandas as pd
+        import numpy as np
+        
+        # Get segment tables
+        segment_tables = [table for table in source_dfs.keys() if 'segment' in table.lower()]
+        current_tables = [table for table in source_dfs.keys() if 'segment' not in table.lower()]
+        
+        if not segment_tables or not current_tables:
+            return target_df  # Not enough tables for cross-segment operation
+            
+        # Basic implementation - use first segment table and first current table
+        segment_table = segment_tables[0]
+        current_table = current_tables[0]
+        
+        if segment_table in source_dfs and current_table in source_dfs:
+            # Join the segment data with current data
+            result = pd.merge(
+                source_dfs[segment_table],
+                source_dfs[current_table],
+                left_on='MATNR',  # Default join field
+                right_on='MATNR',
+                how='left'
+            )
+            return result
+        else:
+            return target_df
+    """
+
+    def _generate_validation_code(self, simple_plan, planner_info):
+        """
+        Generate code specifically for VALIDATION operations
+        
+        Parameters:
+        simple_plan (str): Step-by-step plan in natural language
+        planner_info (dict): Context information from planner
+        
+        Returns:
+        str: Generated code
+        """
+        validation_rules = planner_info.get("validation_rules", [])
+        
+        prompt = f"""
+    Write Python code for a DATA VALIDATION operation following these EXACT steps:
+
+    {simple_plan}
+
+    VALIDATION RULES:
+    {json.dumps(validation_rules, indent=2)}
+
+    CONTEXT INFORMATION:
+    - Source tables: {json.dumps(planner_info.get('source_table', []), indent=2)}
+    - Target table: {planner_info.get('target_table', [])}
+    - Source fields: {planner_info.get('source_fields', [])}
+    - Target fields: {planner_info.get('target_fields', [])}
+    - Filtering fields: {planner_info.get('filtering_fields', [])} if 'filtering_fields' in planner_info else []
+
+    SAMPLE DATA:
+    Source data samples:
+    {json.dumps(planner_info.get('source_data', {}).get('sample', {}), indent=2)}
+
+    Target data sample:
+    {json.dumps(planner_info.get('target_data', {}).get('sample', []), indent=2)}
+
+    VALIDATION IMPLEMENTATION REQUIREMENTS:
+    1. Check data against specified validation rules
+    2. For each record, determine if it passes or fails validation
+    3. Update target fields with validation results
+    4. Include detailed validation status where appropriate
+    5. Handle edge cases like empty values or missing fields
+
+    The function must follow this structure:
+    def analyze_data(source_dfs, target_df):
+        # Import required libraries
+        import pandas as pd
+        import numpy as np
+        
+        # Implement validation according to the plan
+        # ...
+        
+        # Return the updated target dataframe with validation results
+        return result_df
+    """
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash-thinking-exp-01-21", 
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.25, top_p=0.9)
+            )
+            
+            # Extract code from response
+            import re
+            code_match = re.search(r"```python\s*(.*?)\s*```", response.text, re.DOTALL)
+            if code_match:
+                return code_match.group(1)
+            
+            code_match = re.search(r"```\s*(.*?)\s*```", response.text, re.DOTALL)
+            if code_match:
+                return code_match.group(1)
+                
+            function_match = re.search(r"def analyze_data\s*\(.*?\).*?return\s+\w+", response.text, re.DOTALL)
+            if function_match:
+                return function_match.group(0)
+                
+            return response.text
+        except Exception as e:
+            logger.error(f"Error generating validation code: {e}")
+            # Return a basic validation implementation
+            return """def analyze_data(source_dfs, target_df):
+        import pandas as pd
+        import numpy as np
+        
+        # Get source table
+        if not source_dfs:
+            return target_df
+            
+        source_table = list(source_dfs.keys())[0]
+        source_df = source_dfs[source_table]
+        
+        # Create a copy of target df
+        result = target_df.copy()
+        
+        # Add validation status column if it doesn't exist
+        if 'VALIDATION_STATUS' not in result.columns:
+            result['VALIDATION_STATUS'] = 'VALID'
+        
+        # Basic validation - check for null values in key fields
+        for col in source_df.columns:
+            if 'MATNR' in col or 'KEY' in col.upper():
+                mask = source_df[col].isna()
+                if mask.any():
+                    # Flag invalid records
+                    invalid_indices = source_df[mask].index
+                    if len(result) >= len(invalid_indices):
+                        result.loc[invalid_indices, 'VALIDATION_STATUS'] = 'INVALID - NULL KEY'
+        
+        return result
+    """
+
+    def _generate_aggregation_code(self, simple_plan, planner_info):
+        """
+        Generate code specifically for AGGREGATION operations
+        
+        Parameters:
+        simple_plan (str): Step-by-step plan in natural language
+        planner_info (dict): Context information from planner
+        
+        Returns:
+        str: Generated code
+        """
+        aggregation_functions = planner_info.get("aggregation_functions", [])
+        group_by_fields = planner_info.get("group_by_fields", [])
+        
+        prompt = f"""
+    Write Python code for a DATA AGGREGATION operation following these EXACT steps:
+
+    {simple_plan}
+
+    AGGREGATION FUNCTIONS:
+    {json.dumps(aggregation_functions, indent=2)}
+
+    GROUP BY FIELDS:
+    {json.dumps(group_by_fields, indent=2)}
+
+    CONTEXT INFORMATION:
+    - Source tables: {json.dumps(planner_info.get('source_table', []), indent=2)}
+    - Target table: {planner_info.get('target_table', [])}
+    - Source fields: {planner_info.get('source_fields', [])}
+    - Target fields: {planner_info.get('target_fields', [])}
+    - Filtering fields: {planner_info.get('filtering_fields', [])} if 'filtering_fields' in planner_info else []
+
+    SAMPLE DATA:
+    Source data samples:
+    {json.dumps(planner_info.get('source_data', {}).get('sample', {}), indent=2)}
+
+    Target data sample:
+    {json.dumps(planner_info.get('target_data', {}).get('sample', []), indent=2)}
+
+    AGGREGATION IMPLEMENTATION REQUIREMENTS:
+    1. Group data by the specified fields
+    2. Apply the specified aggregation functions
+    3. Handle empty dataframes properly
+    4. Format results appropriately
+    5. Update the target with aggregated results
+
+    The function must follow this structure:
+    def analyze_data(source_dfs, target_df):
+        # Import required libraries
+        import pandas as pd
+        import numpy as np
+        
+        # Implement aggregation according to the plan
+        # ...
+        
+        # Return the updated target dataframe with aggregation results
+        return result_df
+    """
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash-thinking-exp-01-21", 
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.25, top_p=0.9)
+            )
+            
+            # Extract code from response
+            import re
+            code_match = re.search(r"```python\s*(.*?)\s*```", response.text, re.DOTALL)
+            if code_match:
+                return code_match.group(1)
+            
+            code_match = re.search(r"```\s*(.*?)\s*```", response.text, re.DOTALL)
+            if code_match:
+                return code_match.group(1)
+                
+            function_match = re.search(r"def analyze_data\s*\(.*?\).*?return\s+\w+", response.text, re.DOTALL)
+            if function_match:
+                return function_match.group(0)
+                
+            return response.text
+        except Exception as e:
+            logger.error(f"Error generating aggregation code: {e}")
+            # Return a basic aggregation implementation
+            return """def analyze_data(source_dfs, target_df):
+        import pandas as pd
+        import numpy as np
+        
+        # Get source table
+        if not source_dfs:
+            return target_df
+            
+        source_table = list(source_dfs.keys())[0]
+        source_df = source_dfs[source_table]
+        
+        # Create result dataframe
+        result = target_df.copy() if not target_df.empty else pd.DataFrame()
+        
+        # Find numeric columns for aggregation
+        numeric_cols = source_df.select_dtypes(include=['number']).columns.tolist()
+        if not numeric_cols:
+            return result
+            
+        # Find potential group by columns (non-numeric)
+        group_cols = [col for col in source_df.columns if col not in numeric_cols][:1]
+        if not group_cols:
+            return result
+            
+        # Simple aggregation
+        agg_df = source_df.groupby(group_cols)[numeric_cols].agg(['sum', 'mean']).reset_index()
+        
+        # Flatten multi-level columns
+        agg_df.columns = ['_'.join(col).strip() if isinstance(col, tuple) else col for col in agg_df.columns.values]
+        
+        return agg_df
+    """

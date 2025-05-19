@@ -13,7 +13,7 @@ from google.genai import types
 from token_tracker import track_token_usage, get_token_usage_stats
 from pathlib import Path
 import spacy
-
+import traceback
 
 # Set up logging
 logging.basicConfig(
@@ -24,6 +24,666 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+from spacy.matcher import Matcher
+from spacy.tokens import Span
+
+# Load spaCy model
+try:
+    nlp = spacy.load("en_core_web_md")
+except OSError:
+    # Fallback to smaller model if medium not available
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except OSError:
+        # In case no model is installed
+        print("Downloading spaCy model...")
+        from spacy.cli import download
+        download("en_core_web_sm")
+        nlp = spacy.load("en_core_web_sm")
+        
+def classify_query_with_spacy(query):
+    """
+    Use spaCy to classify the query type based on linguistic patterns
+    
+    Parameters:
+    query (str): The natural language query
+    
+    Returns:
+    str: Query classification (SIMPLE_TRANSFORMATION, JOIN_OPERATION, etc.)
+    dict: Additional details about the classification
+    """
+    doc = nlp(query.lower())
+    
+    # Initialize matcher with vocabulary
+    matcher = Matcher(nlp.vocab)
+    
+    # Define patterns for JOIN operations
+    join_patterns = [
+        [{"LOWER": "join"}, {"OP": "*"}, {"LOWER": {"IN": ["table", "tables"]}}],
+        [{"LOWER": {"IN": ["merge", "combine", "link"]}}, {"OP": "*"}, {"LOWER": {"IN": ["data", "tables", "information"]}}],
+        [{"LOWER": {"IN": ["from", "using"]}}, {"OP": "*"}, {"LOWER": {"IN": ["both", "all"]}}, {"OP": "*"}, {"LOWER": {"IN": ["tables", "segments"]}}],
+        [{"LOWER": "where"}, {"OP": "*"}, {"LOWER": {"IN": ["equals", "matches", "="]}}, {"OP": "*"}, {"LOWER": {"IN": ["matnr", "material", "number"]}}]
+    ]
+    
+    # Define patterns for CROSS_SEGMENT operations
+    segment_patterns = [
+        [{"LOWER": {"IN": ["segment", "basic", "marc", "makt", "mvke"]}}],
+        [{"LOWER": {"IN": ["previous", "prior", "last", "earlier"]}}, {"OP": "*"}, {"LOWER": {"IN": ["segment", "transformation", "data"]}}],
+        [{"LOWER": {"IN": ["use", "consider", "refer"]}}, {"OP": "*"}, {"LOWER": {"IN": ["segment", "basic", "marc", "makt"]}}]
+    ]
+    
+    # Define patterns for VALIDATION operations
+    validation_patterns = [
+        [{"LOWER": {"IN": ["check", "validate", "verify", "ensure"]}}],
+        [{"LOWER": "if"}, {"OP": "*"}, {"LOWER": {"IN": ["exists", "valid", "present", "available"]}}],
+        [{"LOWER": {"IN": ["missing", "invalid", "correct", "consistent"]}}],
+        [{"LOWER": {"IN": ["every", "all", "each"]}}, {"OP": "*"}, {"LOWER": {"IN": ["must", "should", "has to"]}}]
+    ]
+    
+    # Define patterns for AGGREGATION operations
+    aggregation_patterns = [
+        [{"LOWER": {"IN": ["count", "sum", "average", "mean", "calculate", "total"]}}],
+        [{"LOWER": "group"}, {"LOWER": "by"}],
+        [{"LOWER": {"IN": ["minimum", "maximum", "min", "max", "highest", "lowest"]}}],
+        [{"LOWER": {"IN": ["statistics", "aggregation", "aggregate", "statistical"]}}]
+    ]
+    
+    # Add patterns to matcher
+    matcher.add("JOIN", join_patterns)
+    matcher.add("SEGMENT", segment_patterns)
+    matcher.add("VALIDATION", validation_patterns)
+    matcher.add("AGGREGATION", aggregation_patterns)
+    
+    # Find matches
+    matches = matcher(doc)
+    
+    # Count match types
+    match_counts = {"JOIN": 0, "SEGMENT": 0, "VALIDATION": 0, "AGGREGATION": 0}
+    match_details = {"JOIN": [], "SEGMENT": [], "VALIDATION": [], "AGGREGATION": []}
+    
+    for match_id, start, end in matches:
+        match_type = nlp.vocab.strings[match_id]
+        match_text = doc[start:end].text
+        match_counts[match_type] += 1
+        match_details[match_type].append(match_text)
+    
+    tables_mentioned = []
+    common_sap_tables = ["MARA", "MARC", "MAKT", "MVKE", "MARM", "MLAN", "EKKO", "EKPO", "VBAK", "VBAP", "KNA1", "LFA1"]
+    segment_keywords = ["BASIC", "PLANT", "SALES", "PURCHASING", "CLASSIFICATION", "MRP", "WAREHOUSE"]
+
+    for token in doc:
+        # Check for known SAP tables
+        if token.text.upper() in common_sap_tables:
+            tables_mentioned.append(token.text.upper())
+        # Also detect uppercase tokens that might be table names
+        elif token.text.isupper() and len(token.text) >= 3 and token.text.isalpha():
+            tables_mentioned.append(token.text)
+        # Check for segment mentions
+        elif token.text.upper() in segment_keywords:
+            # This could indicate a cross-segment operation
+            if "SEGMENT" not in match_counts:
+                match_counts["SEGMENT"] = 0
+                match_details["SEGMENT"] = []
+            match_counts["SEGMENT"] += 1
+            match_details["SEGMENT"].append(f"{token.text} segment")
+    
+    # Determine primary classification based on match counts
+    if match_counts["JOIN"] > 0 or len(set(tables_mentioned)) > 1:
+        primary_class = "JOIN_OPERATION"
+    elif match_counts["SEGMENT"] > 0:
+        primary_class = "CROSS_SEGMENT"
+    elif match_counts["VALIDATION"] > 0:
+        primary_class = "VALIDATION_OPERATION"
+    elif match_counts["AGGREGATION"] > 0:
+        primary_class = "AGGREGATION_OPERATION"
+    else:
+        # Default to simple transformation
+        primary_class = "SIMPLE_TRANSFORMATION"
+    
+    # Gather details about the classification
+    details = {
+        "match_counts": match_counts,
+        "match_details": match_details,
+        "tables_mentioned": tables_mentioned,
+        "has_multiple_tables": len(set(tables_mentioned)) > 1,
+        "tokens": [token.text for token in doc]
+    }
+    
+    return primary_class, details
+
+
+PROMPT_TEMPLATES = {
+    "JOIN_OPERATION": """
+    You are a data transformation assistant specializing in SAP data mappings and JOIN operations. 
+    Your task is to analyze a natural language query about joining tables and map it to the appropriate source tables, fields, and join conditions.
+    
+    CONTEXT DATA SCHEMA: {table_desc}
+    
+    PREVIOUSLY VISITED SEGMENTS:
+    {visited_segments}
+    
+    CURRENT TARGET TABLE STATE:
+    {target_df_sample}
+    
+    USER QUERY: {question}
+    
+    INSTRUCTIONS:
+    1. Identify key entities in the join query:
+       - All source tables needed for the join
+       - Join fields for each pair of tables
+       - Fields to select from each table
+       - Filtering conditions
+       - Target fields for insertion
+    
+    2. Specifically identify the join conditions:
+       - Which table is joined to which
+       - On which fields they are joined
+       - The type of join (inner, left, right)
+    
+    3. Format your response as JSON with the following schema:
+    ```json
+    {{
+        "query_type": "JOIN_OPERATION",
+        "source_table_name": [List of all source tables, including previously visited segment tables],
+        "source_field_names": [List of all fields to select],
+        "filtering_fields": [List of filtering fields],
+        "insertion_fields": [List of fields to be inserted],
+        "target_sap_fields": [Target field(s)],
+        "join_conditions": [
+            {{
+                "left_table": "table1",
+                "right_table": "table2",
+                "left_field": "join_field_left",
+                "right_field": "join_field_right",
+                "join_type": "inner"
+            }}
+        ],
+        "Resolved_query": "Restructured query with resolved data"
+    }}
+    ```
+    """,
+    
+    "CROSS_SEGMENT": """
+    You are a data transformation assistant specializing in SAP data mappings across multiple segments. 
+    Your task is to analyze a natural language query about data transformations involving previous segments.
+    
+    CONTEXT DATA SCHEMA: {table_desc}
+    
+    PREVIOUSLY VISITED SEGMENTS:
+    {visited_segments}
+    
+    CURRENT TARGET TABLE STATE:
+    {target_df_sample}
+    
+    USER QUERY: {question}
+    
+    INSTRUCTIONS:
+    1. Identify which previous segments are referenced in the query
+    2. Determine how to link current data with segment data (join conditions)
+    3. Identify which fields to extract from each segment
+    4. Determine filtering conditions if any
+    5. Identify the target fields for insertion
+    
+    Format your response as JSON with the following schema:
+    ```json
+    {{
+        "query_type": "CROSS_SEGMENT",
+        "source_table_name": [List of all source tables, including segment tables],
+        "source_field_names": [List of all fields to select],
+        "filtering_fields": [List of filtering fields],
+        "insertion_fields": [List of fields to be inserted],
+        "target_sap_fields": [Target field(s)],
+        "segment_references": [
+            {{
+                "segment_id": "segment_id",
+                "segment_name": "segment_name",
+                "table_name": "table_name"
+            }}
+        ],
+        "cross_segment_joins": [
+            {{
+                "left_table": "segment_table",
+                "right_table": "current_table",
+                "left_field": "join_field_left",
+                "right_field": "join_field_right"
+            }}
+        ],
+        "Resolved_query": "Restructured query with resolved data"
+    }}
+    ```
+    """,
+    
+    "VALIDATION_OPERATION": """
+    You are a data validation assistant specializing in SAP data. 
+    Your task is to analyze a natural language query about data validation and map it to appropriate validation rules.
+    
+    CONTEXT DATA SCHEMA: {table_desc}
+    
+    PREVIOUSLY VISITED SEGMENTS:
+    {visited_segments}
+    
+    CURRENT TARGET TABLE STATE:
+    {target_df_sample}
+    
+    USER QUERY: {question}
+    
+    INSTRUCTIONS:
+    1. Identify the validation requirements in the query
+    2. Determine which tables and fields need to be checked
+    3. Formulate the validation rules in a structured way
+    4. Specify what should happen for validation success/failure
+    
+    Format your response as JSON with the following schema:
+    ```json
+    {{
+        "query_type": "VALIDATION_OPERATION",
+        "source_table_name": [List of tables to validate],
+        "source_field_names": [List of fields to validate],
+        "validation_rules": [
+            {{
+                "field": "field_name",
+                "rule_type": "not_null|unique|range|regex|exists_in",
+                "parameters": {{
+                    "min": minimum_value,
+                    "max": maximum_value,
+                    "pattern": "regex_pattern",
+                    "reference_table": "table_name",
+                    "reference_field": "field_name"
+                }}
+            }}
+        ],
+        "target_sap_fields": [Target field(s) to update with validation results],
+        "Resolved_query": "Restructured query with resolved data"
+    }}
+    ```
+    """,
+    
+    "AGGREGATION_OPERATION": """
+    You are a data aggregation assistant specializing in SAP data. 
+    Your task is to analyze a natural language query about data aggregation and map it to appropriate aggregation operations.
+    
+    CONTEXT DATA SCHEMA: {table_desc}
+    
+    PREVIOUSLY VISITED SEGMENTS:
+    {visited_segments}
+    
+    CURRENT TARGET TABLE STATE:
+    {target_df_sample}
+    
+    USER QUERY: {question}
+    
+    INSTRUCTIONS:
+    1. Identify the aggregation functions required (sum, count, average, etc.)
+    2. Determine which tables and fields are involved
+    3. Identify grouping fields if any
+    4. Determine filtering conditions if any
+    5. Identify where the results should be stored
+    
+    Format your response as JSON with the following schema:
+    ```json
+    {{
+        "query_type": "AGGREGATION_OPERATION",
+        "source_table_name": [Source tables],
+        "source_field_names": [Fields to aggregate],
+        "aggregation_functions": [
+            {{
+                "field": "field_name",
+                "function": "sum|count|avg|min|max",
+                "alias": "result_name"
+            }}
+        ],
+        "group_by_fields": [Fields to group by],
+        "filtering_fields": [Filtering fields],
+        "filtering_conditions": {{
+            "field_name": "condition_value"
+        }},
+        "target_sap_fields": [Target fields for results],
+        "Resolved_query": "Restructured query with resolved data"
+    }}
+    ```
+    """,
+    
+    "SIMPLE_TRANSFORMATION": """
+    You are a data transformation assistant specializing in SAP data mappings. 
+    Your task is to analyze a natural language query about data transformations and match it to the appropriate source and target tables and fields.
+    
+    CONTEXT DATA SCHEMA: {table_desc}
+    
+    PREVIOUSLY VISITED SEGMENTS:
+    {visited_segments}
+    
+    CURRENT TARGET TABLE STATE:
+    {target_df_sample}
+    
+    USER QUERY: {question}
+    
+    INSTRUCTIONS:
+    1. Identify key entities in the query:
+       - Source table(s)
+       - Source field(s)
+       - Filtering or transformation conditions
+       - Logical flow (IF/THEN/ELSE statements)
+       - Insertion fields
+    
+    2. Match these entities to the corresponding entries in the joined_data.csv schema
+       - For each entity, find the closest match in the schema
+       - Resolve ambiguities using the description field
+       - Validate that the identified fields exist in the mentioned tables
+    
+    3. Generate a structured representation of the transformation logic:
+       - JSON format showing the transformation flow
+       - Include all source tables, fields, conditions, and targets
+       - Map conditional logic to proper syntax
+       - Handle fallback scenarios (ELSE conditions)
+       - Use the provided key mappings to connect source and target fields correctly
+       - Consider the current state of the target data shown above
+    
+    4. Create a resolved query that takes the actual field and table names, and does not change what is said in the query
+    
+    5. For the insertion fields, identify the fields that need to be inserted into the target table based on the User query.
+    
+    Respond with:
+    ```json
+    {{
+        "query_type": "SIMPLE_TRANSFORMATION",
+        "source_table_name": [List of all source_tables],
+        "source_field_names": [List of all source_fields],
+        "filtering_fields": [List of filtering fields],
+        "insertion_fields": [List of fields to be inserted],
+        "target_sap_fields": [Target field(s)],
+        "Resolved_query": [Rephrased query with resolved data]
+    }}
+    ```
+    """
+}
+
+def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, query_type=None, classification_details=None, target_sap_fields=None):
+    """
+    Process a query based on its classified type
+    
+    Parameters:
+    object_id (int): Object ID
+    segment_id (int): Segment ID
+    project_id (int): Project ID
+    query (str): The natural language query
+    session_id (str): Optional session ID for context tracking
+    query_type (str): Type of query (SIMPLE_TRANSFORMATION, JOIN_OPERATION, etc.)
+    classification_details (dict): Details about the classification
+    target_sap_fields (str/list): Optional target SAP fields to override
+    
+    Returns:
+    dict: Processed information or None if errors
+    """
+    conn = None
+    try:
+        # Initialize context manager
+        context_manager = ContextualSessionManager()
+        
+        # Get existing context and visited segments
+        previous_context = context_manager.get_context(session_id) if session_id else None
+        visited_segments = previous_context.get("segments_visited", {}) if previous_context else {}
+        
+        # Connect to database
+        conn = sqlite3.connect("db.sqlite3")
+        
+        # Track current segment
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT segement_name FROM connection_segments WHERE segment_id = ?", (segment_id,))
+            segment_result = cursor.fetchone()
+            segment_name = segment_result[0] if segment_result else f"segment_{segment_id}"
+            
+            context_manager.track_segment(session_id, segment_id, segment_name, conn)
+        except Exception as e:
+            logger.warning(f"Error tracking segment: {e}")
+        
+        # Fetch mapping data
+        joined_df = fetch_data_by_ids(object_id, segment_id, project_id, conn)
+        
+        # Handle missing values
+        joined_df = missing_values_handling(joined_df)
+        
+        # Get target data sample
+        target_df_sample = None
+        try:
+            # Get the target table name from joined_df
+            target_table = joined_df["table_name"].unique().tolist()
+            if target_table and len(target_table) > 0:
+                # Get a connection to fetch current target data
+                target_df = get_or_create_session_target_df(
+                    session_id, target_table[0], conn
+                )
+                target_df_sample = (
+                    target_df.head(5).to_dict("records")
+                    if not target_df.empty
+                    else []
+                )
+        except Exception as e:
+            logger.warning(f"Error getting target data sample: {e}")
+            target_df_sample = []
+            
+        # If query_type not provided, determine it now
+        if not query_type:
+            query_type, classification_details = classify_query_with_spacy(query)
+            logger.info(f"Classified query as {query_type}")
+        
+        # Get the appropriate prompt template
+        prompt_template = PROMPT_TEMPLATES.get(query_type, PROMPT_TEMPLATES["SIMPLE_TRANSFORMATION"])
+        
+        # Format target data sample for the prompt
+        target_df_sample_str = "No current target data available"
+        if target_df_sample:
+            try:
+                target_df_sample_str = json.dumps(target_df_sample, indent=2)
+            except Exception as e:
+                logger.warning(f"Error formatting target data sample: {e}")
+                
+        # Format visited segments for the prompt
+        visited_segments_str = "No previously visited segments"
+        if visited_segments:
+            try:
+                formatted_segments = []
+                for seg_id, seg_info in visited_segments.items():
+                    formatted_segments.append(
+                        f"{seg_info.get('name')} (table: {seg_info.get('table_name')}, id: {seg_id})"
+                    )
+                visited_segments_str = "\n".join(formatted_segments)
+            except Exception as e:
+                logger.warning(f"Error formatting visited segments: {e}")
+                
+        # Format the prompt with all inputs
+        table_desc = joined_df[joined_df.columns.tolist()[:-1]]
+        formatted_prompt = prompt_template.format(
+            question=query,
+            table_desc=list(table_desc.itertuples(index=False)),
+            target_df_sample=target_df_sample_str,
+            visited_segments=visited_segments_str
+        )
+        
+        # Call Gemini API with customized prompt
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            logger.error("GEMINI_API_KEY not found in environment variables")
+            raise APIError("Gemini API key not configured")
+            
+        client = genai.Client(api_key=api_key)
+        
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-thinking-exp-01-21", 
+            contents=formatted_prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.5, top_p=0.95, top_k=40
+            ),
+        )
+        
+        # Extract and parse JSON from response
+        json_str = re.search(r"```json(.*?)```", response.text, re.DOTALL)
+        if json_str:
+            parsed_data = json.loads(json_str.group(1).strip())
+        else:
+            # Try to parse the whole response as JSON
+            parsed_data = json.loads(response.text.strip())
+            
+        # Add query type to the parsed data
+        parsed_data["query_type"] = query_type
+        
+        # Add other standard information
+        parsed_data["target_table"] = joined_df["table_name"].unique().tolist()
+        parsed_data["key_mapping"] = context_manager.get_key_mapping(session_id) if session_id else []
+        parsed_data["visited_segments"] = visited_segments
+        parsed_data["session_id"] = session_id
+        
+        # Add the classification details
+        parsed_data["classification_details"] = classification_details
+        if target_sap_fields is not None:
+            if isinstance(target_sap_fields, list):
+                parsed_data["target_sap_fields"] = target_sap_fields
+            else:
+                parsed_data["target_sap_fields"] = [target_sap_fields]
+        # Process the resolved data to get table information
+        results = process_info(parsed_data, conn)
+        
+        # Handle key mapping differently based on query type
+        if query_type == "SIMPLE_TRANSFORMATION":
+            # For simple transformations, use original key mapping logic
+            results = _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn)
+        else:
+            # For other operations, we don't enforce strict key mapping
+            # Just pass through the existing key mappings
+            results["key_mapping"] = parsed_data["key_mapping"]
+        
+        # Add session_id and other metadata
+        results["session_id"] = session_id
+        results["query_type"] = query_type
+        results["visited_segments"] = visited_segments
+        results["current_segment"] = {
+            "id": segment_id,
+            "name": segment_name if 'segment_name' in locals() else f"segment_{segment_id}"
+        }
+        
+        return results
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception as e:
+                logger.error(f"Error closing database connection: {e}")
+
+def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn):
+    """
+    Handle key mapping specifically for simple transformations
+    
+    This uses the original key mapping logic for simple transformations
+    """
+    key_mapping = []
+    key_mapping = context_manager.get_key_mapping(session_id)
+    
+    if not key_mapping:
+        try:
+            # Check if we have a target field and it's a key
+            for target_field in results["target_sap_fields"]:
+                target_field_filter = joined_df["target_sap_field"] == target_field
+                if target_field_filter.any() and joined_df[target_field_filter]["isKey"].values[0] == "True":
+                    # We're working with a primary key field
+                    logger.info(f"Target field '{target_field}' is identified as a primary key")
+
+                    # Check if we have insertion fields to map
+                    if results["insertion_fields"] and len(results["insertion_fields"]) > 0:
+                        # CRITICAL FIX: Don't use target field as source field
+                        # Instead, use the actual insertion field from source table
+                        source_field = None
+                        
+                        # First try to find a matching source field from the insertion fields
+                        for field in results["insertion_fields"]:
+                            if field in results["source_field_names"]:
+                                source_field = field
+                                break
+                                
+                        # If no direct match, take the first insertion field
+                        if not source_field and results["insertion_fields"]:
+                            source_field = results["insertion_fields"][0]
+                            
+                        # Get source table
+                        source_table = (
+                            results["source_table_name"][0]
+                            if results["source_table_name"]
+                            else None
+                        )
+
+                        # Verify the source data meets primary key requirements
+                        if source_table and source_field:
+                            error = None
+                            try:
+                                # Get the source data
+                                source_df = None
+                                try:
+                                    # Validate table and field names to prevent SQL injection
+                                    safe_table = validate_sql_identifier(source_table)
+                                    safe_field = validate_sql_identifier(source_field)
+                                    query = f"SELECT {safe_field} FROM {safe_table}"
+                                    source_df = pd.read_sql_query(query, conn)
+                                except Exception as e:
+                                    logger.error(f"Failed to query source data: {e}")
+                                    source_df = None
+
+                                if source_df is not None:
+                                    # Check for uniqueness and non-null values
+                                    has_nulls = source_df[source_field].isna().any()
+                                    has_duplicates = source_df[source_field].duplicated().any()
+
+                                    # Only proceed if the data satisfies primary key requirements
+                                    # or if the query explicitly indicates working with distinct values
+                                    if has_nulls or has_duplicates:
+                                        # Check if the query is requesting distinct values
+                                        restructured_query = results.get("restructured_query", "")
+                                        is_distinct_query = (
+                                            check_distinct_requirement(restructured_query) if restructured_query 
+                                            else False
+                                        )
+
+                                        if not is_distinct_query:
+                                            # The data doesn't meet primary key requirements and query doesn't indicate distinct values
+                                            error_msg = f"Cannot use '{source_field}' as a primary key: "
+                                            if has_nulls and has_duplicates:
+                                                error_msg += "contains null values and duplicate entries"
+                                            elif has_nulls:
+                                                error_msg += "contains null values"
+                                            else:
+                                                error_msg += "contains duplicate entries"
+
+                                            logger.error(error_msg)
+                                            error = error_msg
+                                        else:
+                                            logger.info(
+                                                f"Source data has integrity issues but query suggests distinct values will be used"
+                                            )
+                            except Exception as e:
+                                logger.error(f"Error during primary key validation: {e}")
+                                error = f"Error during key validation: {e}"
+                                
+                        if not error and source_field:
+                            # If we've reached here, it's safe to add the key mapping
+                            logger.info(f"Adding key mapping: {target_field} -> {source_field}")
+                            key_mapping = context_manager.add_key_mapping(
+                                session_id, target_field, source_field
+                            )
+                        else:
+                            key_mapping = [error] if error else []
+                    else:
+                        logger.warning("No insertion fields found for key mapping")
+                        key_mapping = context_manager.get_key_mapping(session_id)
+                else:
+                    # Not a key field, just get existing mappings
+                    key_mapping = context_manager.get_key_mapping(session_id)
+        except Exception as e:
+            logger.error(f"Error processing key mapping: {e}")
+            # Continue with empty key mapping
+            key_mapping = []
+
+    # Safely add key mapping to results
+    results["key_mapping"] = key_mapping
+    
+    return results
 
 class SQLInjectionError(Exception):
     """Exception raised for potential SQL injection attempts."""
@@ -235,6 +895,63 @@ class ContextualSessionManager:
                 f"Failed to get transformation history for session {session_id}: {e}"
             )
             return []
+    
+    def track_segment(self, session_id, segment_id, segment_name, conn=None):
+        """Track a visited segment in the session context"""
+        try:
+            if not session_id:
+                logger.warning("No session ID provided for track_segment")
+                return False
+                
+            # Get existing context or create new
+            context_path = f"{self.storage_path}/{session_id}/context.json"
+            context = None
+            
+            if os.path.exists(context_path):
+                try:
+                    with open(context_path, 'r') as f:
+                        context = json.load(f)
+                except Exception as e:
+                    logger.warning(f"Error reading context file: {e}")
+                    context = {"session_id": session_id}
+            else:
+                # Create session directory if it doesn't exist
+                os.makedirs(os.path.dirname(context_path), exist_ok=True)
+                context = {"session_id": session_id}
+                
+            # Get segment name if not provided and conn exists
+            if not segment_name and conn:
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT segement_name FROM connection_segments WHERE segment_id = ?", (segment_id,))
+                    result = cursor.fetchone()
+                    if result:
+                        segment_name = result[0]
+                    else:
+                        segment_name = f"segment_{segment_id}"
+                except Exception as e:
+                    logger.error(f"Error fetching segment name: {e}")
+                    segment_name = f"segment_{segment_id}"
+                    
+            # Initialize segments_visited if needed
+            if "segments_visited" not in context:
+                context["segments_visited"] = {}
+                
+            # Add to visited segments
+            context["segments_visited"][str(segment_id)] = {
+                "name": segment_name,
+                "visited_at": datetime.now().isoformat(),
+                "table_name": ''.join(c if c.isalnum() else '_' for c in segment_name.lower())
+            }
+            
+            # Save updated context
+            with open(context_path, 'w') as f:
+                json.dump(context, f, indent=2)
+                
+            return True
+        except Exception as e:
+            logger.error(f"Error in track_segment: {e}")
+            return False
 
     def add_key_mapping(self, session_id, target_col, source_col):
         """Add a key mapping for a session"""
@@ -311,6 +1028,94 @@ class ContextualSessionManager:
         except Exception as e:
             logger.error(f"Failed to get key mapping for session {session_id}: {e}")
             return []
+
+    def get_segment_info(self, session_id, segment_id=None, segment_name=None):
+        """
+        Get information about a specific segment
+        
+        Parameters:
+        session_id (str): Session ID
+        segment_id (str, optional): Segment ID to look for
+        segment_name (str, optional): Segment name to look for (partial match)
+        
+        Returns:
+        dict: Segment information or None if not found
+        """
+        try:
+            context = self.get_context(session_id)
+            if not context:
+                return None
+                
+            segments = context.get("segments_visited", {})
+            
+            # Direct lookup by segment_id
+            if segment_id and segment_id in segments:
+                return segments[segment_id]
+                
+            # Search by name (partial match)
+            if segment_name:
+                segment_name_lower = segment_name.lower()
+                for seg_id, info in segments.items():
+                    seg_name = info.get("name", "").lower()
+                    if segment_name_lower in seg_name or seg_name in segment_name_lower:
+                        return info
+                        
+            return None
+        except Exception as e:
+            logger.error(f"Error in get_segment_info: {e}")
+            return None
+            
+    def is_cross_segment_query(self, session_id, query):
+        """
+        Determine if a query is likely a cross-segment operation
+        
+        Parameters:
+        session_id (str): Session ID
+        query (str): The query to analyze
+        
+        Returns:
+        bool: True if likely a cross-segment query
+        """
+        try:
+            # No segments visited means it can't be cross-segment
+            context = self.get_context(session_id)
+            if not context:
+                return False
+                
+            segments = context.get("segments_visited", {})
+            if not segments:
+                return False
+                
+            # Check if query mentions any visited segments
+            query_lower = query.lower()
+            for _, info in segments.items():
+                segment_name = info.get("name", "").lower()
+                table_name = info.get("table_name", "").lower()
+                
+                # Check for segment name mentions
+                if segment_name and segment_name in query_lower:
+                    return True
+                    
+                # Check for table name mentions
+                if table_name and table_name in query_lower:
+                    return True
+                    
+            # Check for general cross-segment terminology
+            cross_segment_terms = [
+                "previous segment", "last segment", "prior segment",
+                "segment data", "from segment", "basic segment",
+                "marc segment", "makt segment"
+            ]
+            
+            for term in cross_segment_terms:
+                if term in query_lower:
+                    return True
+                    
+            return False
+        except Exception as e:
+            logger.error(f"Error in is_cross_segment_query: {e}")
+            return False
+
 
 
 def fetch_data_by_ids(object_id, segment_id, project_id, conn):
@@ -551,7 +1356,7 @@ def parse_data_with_context(
     "source_table_name": [List of all source_tables],
     "source_field_names": [List of all source_fields],
     "filtering_fields": [List of filtering fields],
-    "insertion_fields": [List of fields to be inserted],
+    "insertion_fields": [insertion_field],
     "target_sap_fields": target_sap_fields
     "Resolved_query": [Rephrased query with resolved data]
     }}
@@ -682,12 +1487,10 @@ def parse_data_with_context(
         return None
 
 
-def process_query(
-    object_id, segment_id, project_id, query, session_id=None
-):
+def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
     """
-    Process a query with context awareness
-
+    Process a query with context awareness and automatic query type detection
+    
     Parameters:
     object_id (int): Object ID
     segment_id (int): Segment ID
@@ -695,11 +1498,10 @@ def process_query(
     query (str): The natural language query
     session_id (str): Optional session ID for context tracking
     target_sap_fields (str/list): Optional target SAP fields
-
+    
     Returns:
     dict: Processed information including context or None if key validation fails
     """
-    conn = None
     try:
         # Validate inputs
         if not query or not isinstance(query, str):
@@ -720,248 +1522,80 @@ def process_query(
         if not session_id:
             session_id = context_manager.create_session()
             logger.info(f"Created new session: {session_id}")
-
-        # Get existing context
-        previous_context = context_manager.get_context(session_id)
-
-        # Connect to database
-        conn = sqlite3.connect("db.sqlite3")
-
-        # Fetch mapping data
-        joined_df = fetch_data_by_ids(object_id, segment_id, project_id, conn)
-
-        # Check if joined_df is empty
-        if joined_df.empty:
-            logger.error(
-                f"No data found for object_id={object_id}, segment_id={segment_id}, project_id={project_id}"
-            )
-            if conn:
-                conn.close()
-            return None
-
-        # Handle missing values in the dataframe
-        joined_df = missing_values_handling(joined_df)
-
-        # Process query with context awareness
-        resolved_data = parse_data_with_context(
-            joined_df,
-            query,
-            session_id,  # Pass session_id to access key mappings and target data
-            previous_context.get("context") if previous_context else None,
+        
+        # Classify the query type using spaCy
+        query_type, classification_details = classify_query_with_spacy(query)
+        logger.info(f"Query classified as {query_type} with details: {json.dumps(classification_details, default=str)}")
+        
+        # Process the query based on its type
+        return process_query_by_type(
+            object_id, 
+            segment_id, 
+            project_id, 
+            query, 
+            session_id, 
+            query_type, 
+            classification_details,
+            target_sap_fields  # Pass target_sap_fields to process_query_by_type
         )
-
-        if not resolved_data:
-            logger.error("Failed to resolve query")
-            if conn:
-                conn.close()
-            return None
-
-        # Process the resolved data to get table information
-        results = process_info(resolved_data, conn)
-
-        if not results:
-            logger.error("Failed to process resolved data")
-            if conn:
-                conn.close()
-            return None
-
-        # Process key mapping with error handling and primary key validation
-        key_mapping = []
-        key_mapping = context_manager.get_key_mapping(session_id)
-        if not key_mapping:
-            try:
-                # Check if we have a target field and it's a key
-                target_field_filter = joined_df["target_sap_field"] == resolved_data["target_sap_fields"]
-                if (
-                    target_field_filter.any()
-                    and joined_df[target_field_filter]["isKey"].values[0] == "True"
-                ):
-                    # We're working with a primary key field
-                    logger.info(
-                        f"Target field '{resolved_data["target_sap_fields"]}' is identified as a primary key"
-                    )
-
-                    # Check if we have insertion fields to map
-                    if results["insertion_fields"] and len(results["insertion_fields"]) > 0:
-                        source_field = results["insertion_fields"][0]
-                        source_table = (
-                            results["source_table_name"][0]
-                            if results["source_table_name"]
-                            else None
-                        )
-
-                        # Verify the source data meets primary key requirements
-                        if source_table and source_field:
-                            error = None
-                            try:
-                                # Get the source data
-                                source_df = None
-                                try:
-                                    # Validate table and field names to prevent SQL injection
-                                    safe_table = validate_sql_identifier(source_table)
-                                    safe_field = validate_sql_identifier(source_field)
-                                    query = f"SELECT {safe_field} FROM {safe_table}"
-                                    source_df = pd.read_sql_query(query, conn)
-                                except Exception as e:
-                                    logger.error(f"Failed to query source data: {e}")
-                                    source_df = None
-
-                                if source_df is not None:
-                                    # Check for uniqueness and non-null values
-                                    has_nulls = source_df[source_field].isna().any()
-                                    has_duplicates = (
-                                        source_df[source_field].duplicated().any()
-                                    )
-
-                                    # Only proceed if the data satisfies primary key requirements
-                                    # or if the query explicitly indicates working with distinct values
-                                    if has_nulls or has_duplicates:
-                                        # Check if the query is requesting distinct values
-                                        is_distinct_query = check_distinct_requirement(
-                                            query
-                                        ) or check_distinct_requirement(
-                                            results.get("restructured_query", "")
-                                        )
-
-                                        if not is_distinct_query:
-                                            # The data doesn't meet primary key requirements and query doesn't indicate distinct values
-                                            error_msg = f"Cannot use '{source_field}' as a primary key: "
-                                            if has_nulls and has_duplicates:
-                                                error_msg += "contains null values and duplicate entries"
-                                            elif has_nulls:
-                                                error_msg += "contains null values"
-                                            else:
-                                                error_msg += "contains duplicate entries"
-
-                                            logger.error(error_msg)
-                                            error = error_msg
-
-                                            # Return None to signal that execution should stop
-                                            if conn:
-                                                conn.close()
-                                        else:
-                                            logger.info(
-                                                f"Source data has integrity issues but query suggests distinct values will be used"
-                                            )
-                            except Exception as e:
-                                logger.error(f"Error during primary key validation: {e}")
-                                # If we can't validate, we err on the side of caution and don't proceed
-                                if conn:
-                                    conn.close()
-                                return None
-                        if not error:
-                            # If we've reached here, it's safe to add the key mapping
-                            key_mapping = context_manager.add_key_mapping(
-                                session_id, resolved_data["target_sap_fields"], source_field
-                            )
-                        else:
-                            key_mapping = [error]
-                    else:
-                        logger.warning("No insertion fields found for key mapping")
-                        key_mapping = context_manager.get_key_mapping(session_id)
-                else:
-                    # Not a key field, just get existing mappings
-                    key_mapping = context_manager.get_key_mapping(session_id)
-            except Exception as e:
-                logger.error(f"Error processing key mapping: {e}")
-                # Continue with empty key mapping
-                key_mapping = []
-
-        # Safely add key mapping to results
-        results["key_mapping"] = key_mapping
-
-        # Add session_id to the results
-        results["session_id"] = session_id
-
-        return results
     except Exception as e:
         logger.error(f"Error in process_query: {e}")
+        logger.error(traceback.format_exc())
         return None
-    finally:
-        # Ensure database connection is closed
-        if conn:
-            try:
-                conn.close()
-            except Exception as e:
-                logger.error(f"Error closing database connection: {e}")
 
-
-def process_info(resolved_data, conn):
-    """Process the resolved data to extract table information based on the specified JSON structure"""
+def process_query(object_id, segment_id, project_id, query, session_id=None):
+    """
+    Process a query with context awareness and automatic query type detection
+    
+    Parameters:
+    object_id (int): Object ID
+    segment_id (int): Segment ID
+    project_id (int): Project ID
+    query (str): The natural language query
+    session_id (str): Optional session ID for context tracking
+    
+    Returns:
+    dict: Processed information including context or None if key validation fails
+    """
     try:
         # Validate inputs
-        if resolved_data is None:
-            logger.error("None resolved_data passed to process_info")
+        if not query or not isinstance(query, str):
+            logger.error(f"Invalid query: {query}")
             return None
 
-        if conn is None:
-            logger.error("None database connection passed to process_info")
+        # Validate IDs
+        if not all(isinstance(x, int) for x in [object_id, segment_id, project_id]):
+            logger.error(
+                f"Invalid ID types: object_id={type(object_id)}, segment_id={type(segment_id)}, project_id={type(project_id)}"
+            )
             return None
 
-        # Validate required fields in resolved_data
-        required_fields = [
-            "source_table_name",
-            "source_field_names",
-            "target_table",
-            "filtering_fields",
-            "Resolved_query",
-            "insertion_fields",
-            "target_sap_fields",
-        ]
+        # Initialize context manager
+        context_manager = ContextualSessionManager()
 
-        for field in required_fields:
-            if field not in resolved_data:
-                logger.error(f"Missing required field in resolved_data: {field}")
-                return None
-
-        # Initialize result dictionary with only the requested fields
-        result = {
-            "source_table_name": resolved_data["source_table_name"],
-            "source_field_names": resolved_data["source_field_names"],
-            "target_table_name": resolved_data["target_table"],
-            "target_sap_fields": resolved_data["target_sap_fields"],
-            "filtering_fields": resolved_data["filtering_fields"],
-            "restructured_query": resolved_data["Resolved_query"],
-            "insertion_fields": resolved_data["insertion_fields"],
-        }
-
-        # Add data samples from each source table (first 5 rows)
-        source_data = {}
-        try:
-            for table in resolved_data["source_table_name"]:
-                # Validate table name to prevent SQL injection
-                safe_table = validate_sql_identifier(table)
-
-                # Validate field names
-                safe_fields = []
-                for field in resolved_data["source_field_names"]:
-                    safe_fields.append(validate_sql_identifier(field))
-
-                if not safe_fields:
-                    logger.warning(f"No valid fields for table {safe_table}")
-                    source_data[table] = pd.DataFrame()
-                    continue
-
-                # Build query with parameterized values
-                query = f"SELECT {','.join(safe_fields)} FROM {safe_table} LIMIT 5"
-
-                try:
-                    source_df = pd.read_sql_query(query, conn)
-                    source_data[table] = source_df
-                except sqlite3.Error as e:
-                    logger.error(f"SQLite error querying {safe_table}: {e}")
-                    source_data[table] = pd.DataFrame()
-        except Exception as e:
-            logger.error(f"Error getting source data samples: {e}")
-            # Continue with empty source data
-            source_data = {}
-
-        result["source_data_samples"] = source_data
-        return result
+        # Create a session if none provided
+        if not session_id:
+            session_id = context_manager.create_session()
+            logger.info(f"Created new session: {session_id}")
+        
+        # Classify the query type using spaCy
+        query_type, classification_details = classify_query_with_spacy(query)
+        logger.info(f"Query classified as {query_type} with details: {json.dumps(classification_details, default=str)}")
+        
+        # Process the query based on its type
+        return process_query_by_type(
+            object_id, 
+            segment_id, 
+            project_id, 
+            query, 
+            session_id, 
+            query_type, 
+            classification_details
+        )
     except Exception as e:
-        logger.error(f"Error in process_info: {e}")
+        logger.error(f"Error in process_query: {e}")
+        logger.error(traceback.format_exc())
         return None
-
 
 def get_session_context(session_id):
     """
@@ -1092,3 +1726,234 @@ def save_session_target_df(session_id, target_df):
     except Exception as e:
         logger.error(f"Error in save_session_target_df: {e}")
         return False
+
+def is_workspace_table(table_name, segment_references):
+    """
+    Check if a table name refers to a workspace table (from a previous segment)
+    
+    Parameters:
+    table_name (str): Table name to check
+    segment_references (list): List of segment references
+    
+    Returns:
+    bool: True if it's a workspace table, False otherwise
+    """
+    if not segment_references:
+        return False
+        
+    for ref in segment_references:
+        if ref.get("table_name") == table_name:
+            return True
+            
+    # Check for partial matches (table names may be slightly different)
+    table_lower = table_name.lower()
+    for ref in segment_references:
+        ref_table = ref.get("table_name", "").lower()
+        if ref_table and (ref_table in table_lower or table_lower in ref_table):
+            return True
+            
+    return False
+
+def process_info(resolved_data, conn):
+    """
+    Process the resolved data to extract table information based on the query type
+    
+    Parameters:
+    resolved_data (dict): The resolved data from the language model
+    conn (Connection): SQLite connection
+    
+    Returns:
+    dict: Processed information including table samples
+    """
+    try:
+        # Validate inputs
+        if resolved_data is None:
+            logger.error("None resolved_data passed to process_info")
+            return None
+
+        if conn is None:
+            logger.error("None database connection passed to process_info")
+            return None
+            
+        # Get query type - default to SIMPLE_TRANSFORMATION
+        query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")
+        
+        # Define required fields based on query type
+        required_fields = {
+            "SIMPLE_TRANSFORMATION": [
+                "source_table_name", "source_field_names", "target_table",
+                "filtering_fields", "Resolved_query", "insertion_fields", 
+                "target_sap_fields"
+            ],
+            "JOIN_OPERATION": [
+                "source_table_name", "source_field_names", "target_table",
+                "filtering_fields", "Resolved_query", "insertion_fields", 
+                "target_sap_fields", "join_conditions"
+            ],
+            "CROSS_SEGMENT": [
+                "source_table_name", "source_field_names", "target_table",
+                "filtering_fields", "Resolved_query", "insertion_fields", 
+                "target_sap_fields", "segment_references", "cross_segment_joins"
+            ],
+            "VALIDATION_OPERATION": [
+                "source_table_name", "source_field_names", "target_table",
+                "validation_rules", "target_sap_fields", "Resolved_query"
+            ],
+            "AGGREGATION_OPERATION": [
+                "source_table_name", "source_field_names", "target_table",
+                "aggregation_functions", "group_by_fields", "target_sap_fields", 
+                "Resolved_query"
+            ]
+        }
+        
+        # Check if all required fields for this query type are present
+        current_required_fields = required_fields.get(query_type, required_fields["SIMPLE_TRANSFORMATION"])
+        
+        for field in current_required_fields:
+            if field not in resolved_data:
+                logger.warning(f"Missing required field in resolved_data: {field}")
+                # Initialize missing fields with sensible defaults
+                if field in ["source_table_name", "source_field_names", "filtering_fields", 
+                            "insertion_fields", "group_by_fields"]:
+                    resolved_data[field] = []
+                elif field in ["target_table", "target_sap_fields"]:
+                    resolved_data[field] = []
+                elif field == "Resolved_query":
+                    resolved_data[field] = ""
+                elif field == "join_conditions":
+                    resolved_data[field] = []
+                elif field == "validation_rules":
+                    resolved_data[field] = []
+                elif field == "aggregation_functions":
+                    resolved_data[field] = []
+                elif field == "segment_references":
+                    resolved_data[field] = []
+                elif field == "cross_segment_joins":
+                    resolved_data[field] = []
+
+        # Initialize result dictionary with fields based on query type
+        result = {
+            "query_type": query_type,
+            "source_table_name": resolved_data["source_table_name"],
+            "source_field_names": resolved_data["source_field_names"],
+            "target_table_name": resolved_data["target_table"],
+            "target_sap_fields": resolved_data["target_sap_fields"],
+            "restructured_query": resolved_data["Resolved_query"],
+        }
+        
+        # Add type-specific fields
+        if query_type == "SIMPLE_TRANSFORMATION":
+            result["filtering_fields"] = resolved_data["filtering_fields"]
+            result["insertion_fields"] = resolved_data["insertion_fields"]
+        elif query_type == "JOIN_OPERATION":
+            result["filtering_fields"] = resolved_data["filtering_fields"]
+            result["insertion_fields"] = resolved_data["insertion_fields"]
+            result["join_conditions"] = resolved_data["join_conditions"]
+        elif query_type == "CROSS_SEGMENT":
+            result["filtering_fields"] = resolved_data["filtering_fields"]
+            result["insertion_fields"] = resolved_data["insertion_fields"]
+            result["segment_references"] = resolved_data["segment_references"]
+            result["cross_segment_joins"] = resolved_data["cross_segment_joins"]
+        elif query_type == "VALIDATION_OPERATION":
+            result["validation_rules"] = resolved_data["validation_rules"]
+        elif query_type == "AGGREGATION_OPERATION":
+            result["aggregation_functions"] = resolved_data["aggregation_functions"]
+            result["group_by_fields"] = resolved_data["group_by_fields"]
+            
+            # Add filtering fields if present
+            if "filtering_fields" in resolved_data:
+                result["filtering_fields"] = resolved_data["filtering_fields"]
+            else:
+                result["filtering_fields"] = []
+
+        # Add data samples from each source table (first 5 rows)
+        source_data = {}
+        try:
+            for table in resolved_data["source_table_name"]:
+                # Check if this is a workspace table (for cross-segment operations)
+                is_workspace_table = False
+                if query_type == "CROSS_SEGMENT":
+                    for ref in resolved_data.get("segment_references", []):
+                        if ref.get("table_name") == table:
+                            is_workspace_table = True
+                            break
+                
+                if is_workspace_table:
+                    logger.info(f"Skipping workspace table {table} in source samples")
+                    source_data[table] = pd.DataFrame()
+                    continue
+
+                # Validate table name to prevent SQL injection
+                cleaned_table = clean_table_name(table)
+                
+                # Validate table name to prevent SQL injection
+                try:
+                    safe_table = validate_sql_identifier(cleaned_table)
+                except SQLInjectionError:
+                    logger.warning(f"Invalid table name after cleaning: {cleaned_table} (original: {table})")
+                    source_data[table] = pd.DataFrame()
+                    continue
+                
+                # Validate field names
+                safe_fields = []
+                for field in resolved_data["source_field_names"]:
+                    try:
+                        safe_fields.append(validate_sql_identifier(field))
+                    except SQLInjectionError:
+                        logger.warning(f"Invalid field name skipped: {field}")
+                # Validate field names
+                safe_fields = []
+                for field in resolved_data["source_field_names"]:
+                    try:
+                        safe_fields.append(validate_sql_identifier(field))
+                    except SQLInjectionError:
+                        logger.warning(f"Invalid field name skipped: {field}")
+
+                if not safe_fields:
+                    logger.warning(f"No valid fields for table {safe_table}")
+                    source_data[table] = pd.DataFrame()
+                    continue
+
+                # Build query with parameterized values
+                query = f"SELECT {','.join(safe_fields)} FROM {safe_table} LIMIT 5"
+
+                try:
+                    source_df = pd.read_sql_query(query, conn)
+                    source_data[table] = source_df
+                except sqlite3.Error as e:
+                    logger.error(f"SQLite error querying {safe_table}: {e}")
+                    source_data[table] = pd.DataFrame()
+        except Exception as e:
+            logger.error(f"Error getting source data samples: {e}")
+            # Continue with empty source data
+            source_data = {}
+
+        result["source_data_samples"] = source_data
+        return result
+    except Exception as e:
+        logger.error(f"Error in process_info: {e}")
+        return None
+    
+def clean_table_name(table_name):
+    """
+    Clean table name by removing common suffixes like 'Table', 'table', etc.
+    
+    Parameters:
+    table_name (str): The table name to clean
+    
+    Returns:
+    str: Cleaned table name
+    """
+    if not table_name:
+        return table_name
+        
+    # Remove common suffixes
+    suffixes = [" Table", " table", " TABLE", "_Table", "_table", "_TABLE"]
+    cleaned_name = table_name
+    
+    for suffix in suffixes:
+        if cleaned_name.endswith(suffix):
+            cleaned_name = cleaned_name[:-len(suffix)]
+            break
+            
+    return cleaned_name
