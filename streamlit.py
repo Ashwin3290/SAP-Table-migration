@@ -500,7 +500,6 @@ with col2:
                 segment_id, 
                 project_id,
                 st.session_state['transformation_session_id'],
-                selected_columns
             )
 
             if code is None:
