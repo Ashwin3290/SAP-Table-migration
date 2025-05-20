@@ -14,6 +14,8 @@ from token_tracker import track_token_usage, get_token_usage_stats
 from pathlib import Path
 import spacy
 import traceback
+from workspace_db import WorkspaceDB
+
 
 # Set up logging
 logging.basicConfig(
@@ -23,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+workspace_db = WorkspaceDB()
+
 
 from spacy.matcher import Matcher
 from spacy.tokens import Span
@@ -509,7 +513,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         client = genai.Client(api_key=api_key)
         
         response = client.models.generate_content(
-            model="gemini-2.0-flash-thinking-exp-01-21", 
+            model="gemini-2.0-flash", 
             contents=formatted_prompt,
             config=types.GenerateContentConfig(
                 temperature=0.5, top_p=0.95, top_k=40
@@ -1727,32 +1731,87 @@ def save_session_target_df(session_id, target_df):
         logger.error(f"Error in save_session_target_df: {e}")
         return False
 
-def is_workspace_table(table_name, segment_references):
+def is_workspace_table(table_name, session_id, segment_references=None):
     """
     Check if a table name refers to a workspace table (from a previous segment)
     
     Parameters:
     table_name (str): Table name to check
-    segment_references (list): List of segment references
+    session_id (str): Current session ID
+    segment_references (list, optional): List of segment references
     
     Returns:
     bool: True if it's a workspace table, False otherwise
     """
-    if not segment_references:
-        return False
+    # First, check against segment references (faster)
+    if segment_references:
+        for ref in segment_references:
+            if ref.get("table_name") == table_name:
+                return True
+                
+        # Check for partial matches (table names may be slightly different)
+        table_lower = table_name.lower()
+        for ref in segment_references:
+            ref_table = ref.get("table_name", "").lower()
+            if ref_table and (ref_table in table_lower or table_lower in ref_table):
+                return True
+    
+    # If no match in segment_references but we have session_id, check the workspace DB
+    if session_id:
+        # Clean the table name first (remove 'Table' suffix if present)
+        cleaned_table = clean_table_name(table_name)
         
-    for ref in segment_references:
-        if ref.get("table_name") == table_name:
+        # Try to find this table in the workspace
+        workspace_table = workspace_db.get_segment_table_name(
+            session_id, segment_name=cleaned_table
+        )
+        if workspace_table:
             return True
             
-    # Check for partial matches (table names may be slightly different)
-    table_lower = table_name.lower()
-    for ref in segment_references:
-        ref_table = ref.get("table_name", "").lower()
-        if ref_table and (ref_table in table_lower or table_lower in ref_table):
-            return True
-            
+        # Also check with partial match
+        tables = workspace_db.list_session_tables(session_id)
+        for table_info in tables:
+            if cleaned_table.lower() in table_info['table_name'].lower():
+                return True
+    
     return False
+
+def load_workspace_table(table_name, session_id):
+    """
+    Load a table from the workspace database
+    
+    Parameters:
+    table_name (str): Table name to load
+    session_id (str): Current session ID
+    
+    Returns:
+    pd.DataFrame: Loaded dataframe or empty dataframe if not found
+    """
+    if not session_id:
+        return pd.DataFrame()
+        
+    # Clean the table name first
+    cleaned_table = clean_table_name(table_name)
+    
+    try:
+        # First try exact name match
+        workspace_table = workspace_db.get_segment_table_name(
+            session_id, segment_name=cleaned_table
+        )
+        
+        if workspace_table:
+            return pd.read_sql_query(f"SELECT * FROM '{workspace_table}'", workspace_db.conn)
+            
+        # Try partial match
+        tables = workspace_db.list_session_tables(session_id)
+        for table_info in tables:
+            if cleaned_table.lower() in table_info['table_name'].lower():
+                return pd.read_sql_query(f"SELECT * FROM '{table_info['table_name']}'", workspace_db.conn)
+    except Exception as e:
+        logger.error(f"Error loading workspace table {cleaned_table}: {e}")
+    
+    return pd.DataFrame()
+
 
 def process_info(resolved_data, conn):
     """
@@ -1870,23 +1929,28 @@ def process_info(resolved_data, conn):
         source_data = {}
         try:
             for table in resolved_data["source_table_name"]:
-                # Check if this is a workspace table (for cross-segment operations)
-                is_workspace_table = False
-                if query_type == "CROSS_SEGMENT":
-                    for ref in resolved_data.get("segment_references", []):
-                        if ref.get("table_name") == table:
-                            is_workspace_table = True
-                            break
-                
-                if is_workspace_table:
-                    logger.info(f"Skipping workspace table {table} in source samples")
-                    source_data[table] = pd.DataFrame()
-                    continue
-
-                # Validate table name to prevent SQL injection
+                # Clean the table name first to remove suffixes like "Table"
                 cleaned_table = clean_table_name(table)
                 
-                # Validate table name to prevent SQL injection
+                # Check if this is a workspace table (for cross-segment operations)
+                session_id = resolved_data.get("session_id")
+                is_workspace = is_workspace_table(
+                    cleaned_table, 
+                    session_id, 
+                    resolved_data.get("segment_references", [])
+                )
+                
+                if is_workspace and session_id:
+                    logger.info(f"Loading workspace table {cleaned_table} for session {session_id}")
+                    # Load from workspace DB
+                    source_df = load_workspace_table(cleaned_table, session_id)
+                    if not source_df.empty:
+                        source_data[table] = source_df
+                        continue
+                    else:
+                        logger.warning(f"Workspace table {cleaned_table} is empty or not found")
+                
+                # If not a workspace table or workspace lookup failed, try regular table
                 try:
                     safe_table = validate_sql_identifier(cleaned_table)
                 except SQLInjectionError:
@@ -1894,13 +1958,6 @@ def process_info(resolved_data, conn):
                     source_data[table] = pd.DataFrame()
                     continue
                 
-                # Validate field names
-                safe_fields = []
-                for field in resolved_data["source_field_names"]:
-                    try:
-                        safe_fields.append(validate_sql_identifier(field))
-                    except SQLInjectionError:
-                        logger.warning(f"Invalid field name skipped: {field}")
                 # Validate field names
                 safe_fields = []
                 for field in resolved_data["source_field_names"]:
@@ -1923,6 +1980,7 @@ def process_info(resolved_data, conn):
                 except sqlite3.Error as e:
                     logger.error(f"SQLite error querying {safe_table}: {e}")
                     source_data[table] = pd.DataFrame()
+
         except Exception as e:
             logger.error(f"Error getting source data samples: {e}")
             # Continue with empty source data

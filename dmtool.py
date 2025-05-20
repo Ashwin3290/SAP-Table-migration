@@ -3,11 +3,13 @@ import logging
 import json
 import pandas as pd
 import numpy as np
+import re
 import sqlite3
 import traceback
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from workspace_db import WorkspaceDB
 from token_tracker import track_token_usage, get_token_usage_stats
 
 from planner import process_query as planner_process_query
@@ -63,10 +65,23 @@ class DMTool:
             # Current session context
             self.current_context = None
 
+            # Initialize workspace database
+            self.workspace_db = WorkspaceDB()
+            logger.info("Workspace database initialized")
+
             logger.info("DMTool initialized successfully")
         except Exception as e:
             logger.error(f"Error initializing DMTool: {e}")
             raise
+    
+    def __del__(self):
+        """Cleanup resources"""
+        try:
+            if hasattr(self, 'workspace_db'):
+                self.workspace_db.close()
+                logger.info("Workspace database connection closed")
+        except Exception as e:
+            logger.error(f"Error closing workspace database: {e}")
 
     def _extract_planner_info(self, resolved_data):
         """
@@ -239,7 +254,7 @@ Return ONLY the classification name with no explanation.
 """
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt
+                    model="gemini-2.0-flash", contents=prompt
                 )
 
                 # Validate response
@@ -324,7 +339,6 @@ PLAN REQUIREMENTS:
 5. Include steps for handling edge cases like missing data and type mismatches
 6. Ensure the plan is complete with no steps missing
 7. Ensure all target fields will be populated in the result
-8. End with validation of the result before returning
 
 FORMAT:
 - Number each step sequentially
@@ -491,6 +505,7 @@ DO NOT transform data that isn't needed in the target
 DO NOT use incompatible data types in comparisons
 DO NOT drop or ignore key columns during any operation
 DO NOT make dummy dataframes - use the provided source_dfs and target_df
+DO NOT use hardcoded values - use the provided key mappings
 
 REQUIREMENTS:
 
@@ -509,6 +524,7 @@ Only define the analyze_data function; do NOT add other functions or classes.
 Do NOT add or remove columns from the target except as specified.
 Do NOT output explanations, comments, or extra text—only the code.
 Use transform_utils module for sap utils functions.
+The code should have proper indentation and syntax.
 
 Make the function like this:
 def analyze_data(source_dfs, target_df):
@@ -599,19 +615,17 @@ return target_df
         return target_df"""
 
     @track_token_usage()
-    def _fix_code(
-        self, code_content, error_info, planner_info, attempt=1, max_attempts=3
-    ):
+    def _fix_code(self, code_content, error_info, planner_info, attempt=1, max_attempts=3):
         """
-        Attempt to fix code based on error traceback
-
+        Improved code fixer that handles syntax errors better, especially indentation issues
+        
         Parameters:
         code_content (str): The original code that failed
         error_info (dict): Error information with traceback
         planner_info (dict): Context information from planner
         attempt (int): Current attempt number
         max_attempts (int): Maximum number of attempts to fix the code
-
+        
         Returns:
         str: Fixed code or None if max attempts reached
         """
@@ -624,19 +638,63 @@ return target_df
             error_type = error_info.get("error_type", "Unknown error")
             error_message = error_info.get("error_message", "No error message")
             traceback_text = error_info.get("traceback", "No traceback available")
+            
+            # Check if this is a syntax error, especially indentation
+            is_indentation_error = "IndentationError" in error_type
+            is_syntax_error = "SyntaxError" in error_type
+            
+            # For indentation errors, use a special approach
+            if is_indentation_error:
+                fixed_code = self._fix_indentation_error(code_content, error_message)
+                if fixed_code:
+                    logger.info("Fixed indentation error directly")
+                    return fixed_code
+            
+            # Create a prompt for the code fixer with specialized instructions based on error type
+            if is_indentation_error or is_syntax_error:
+                prompt = f"""
+    You are an expert Python code fixer. The following code has a {error_type} that needs to be fixed:
 
-            # Create a prompt for the code fixer
-            prompt = f"""
-    You are an expert code debugging and fixing agent. Your task is to fix code that failed during execution.
-
-    THE CODE THAT FAILED:
     ```python
     {code_content}
+    ```
+
     ERROR INFORMATION:
     Error Type: {error_type}
     Error Message: {error_message}
     FULL TRACEBACK:
     {traceback_text}
+
+    SPECIFIC INSTRUCTIONS:
+    1. This is a SYNTAX ERROR, not a logical error. Focus ONLY on fixing the syntax.
+    2. Pay special attention to indentation levels in all blocks.
+    3. Check for missing colons after if/for/while/def statements.
+    4. Check for missing indentation after if/else/for/try/except blocks.
+    5. Make sure all parentheses, brackets, and braces are properly closed.
+    6. Look for missing commas in lists, dictionaries, or function calls.
+    7. Check proper line continuation in multi-line statements.
+
+    DO NOT try to rewrite the code's logic, ONLY fix the syntax errors.
+    DO NOT add any example data, test code, or additional functionality.
+    KEEP all imports, comments, and existing functionality intact.
+
+    Return ONLY the fixed code with no explanations. Make sure every line is properly indented.
+    """
+            else:
+                # Standard prompt for other types of errors
+                prompt = f"""
+    You are an expert code debugging and fixing agent. This code has a {error_type} error:
+
+    ```python
+    {code_content}
+    ```
+
+    ERROR INFORMATION:
+    Error Type: {error_type}
+    Error Message: {error_message}
+    FULL TRACEBACK:
+    {traceback_text}
+
     CONTEXT INFORMATION:
     Source tables: {planner_info.get('source_table', [])}
     Target table: {planner_info.get('target_table', [])}
@@ -644,37 +702,21 @@ return target_df
     Target fields: {planner_info.get('target_fields', [])}
     Filtering fields: {planner_info.get('filtering_fields', [])}
     Insertion fields: {planner_info.get('insertion_fields', [])}
-    Extracted conditions: {json.dumps(planner_info.get('extracted_conditions', {}), indent=2)}
-    COMMON ERRORS TO CHECK FOR:
 
-    Field name typos or case sensitivity issues
-    Incorrect parameter names or order in utility function calls
-    Missing or incorrect imports
-    Incorrect handling of empty dataframes
-    Missing field in target dataframe
-    Incorrect data types in filter or map operations
-    Wrong condition_type parameter in filter_dataframe
-    Syntax errors in condition strings
+    INSTRUCTIONS:
+    1. Fix ONLY the exact error shown in the traceback
+    2. DO NOT change any working code
+    3. DO NOT add additional test code or debug prints
+    4. Return the complete fixed code with no explanations
 
-    TASK:
-
-    Analyze the error carefully
-    Identify the root cause of the issue
-    Fix the code to address the specific error
-    Make sure your solution maintains the original intent of the code
-    Return only the complete fixed code with no explanations
-
-    Remember to keep the overall structure and logic of the original code, fixing only what's necessary
-    to address the error.
     This is attempt {attempt} of {max_attempts}.
-    ONLY PROVIDE THE COMPLETE FIXED CODE, WITH NO EXPLANATIONS:
     """
 
             # Call the AI to fix the code
             try:
                 response = self.client.models.generate_content(
                     model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt,
-                    config=types.GenerateContentConfig(temperature=0.25)
+                    config=types.GenerateContentConfig(temperature=0.2)  # Lower temperature for more precise fixes
                 )
 
                 # Validate response
@@ -692,31 +734,181 @@ return target_df
                     r"```python\s*(.*?)\s*```", response.text, re.DOTALL
                 )
                 if code_match:
-                    return code_match.group(1)
+                    fixed_code = code_match.group(1)
+                else:
+                    # Next try to extract code without backticks
+                    code_match = re.search(r"```\s*(.*?)\s*```", response.text, re.DOTALL)
+                    if code_match:
+                        fixed_code = code_match.group(1)
+                    else:
+                        # Try to extract the function definition directly
+                        function_match = re.search(
+                            r"def analyze_data\s*\(.*?\).*?return\s+\w+",
+                            response.text,
+                            re.DOTALL,
+                        )
+                        if function_match:
+                            fixed_code = function_match.group(0)
+                        else:
+                            # Last resort, return the whole text if it looks like code
+                            if "def analyze_data" in response.text:
+                                fixed_code = response.text
+                            else:
+                                logger.error("Could not extract code from response")
+                                return None
 
-                # Next try to extract code without backticks
-                code_match = re.search(r"```\s*(.*?)\s*```", response.text, re.DOTALL)
-                if code_match:
-                    return code_match.group(1)
-
-                # Try to extract the function definition directly
-                function_match = re.search(
-                    r"def analyze_data\s*\(.*?\).*?return\s+target_df",
-                    response.text,
-                    re.DOTALL,
-                )
-                if function_match:
-                    return function_match.group(0)
-
-                # Last resort, return the whole text
-                return response.text
+                # Verify the code is actually different - don't return the same code
+                if fixed_code.strip() == code_content.strip():
+                    logger.warning("Fix attempt produced identical code, making manual adjustment")
+                    # For indentation errors, try a simple fix
+                    if is_indentation_error:
+                        return self._fix_indentation_error(code_content, error_message)
+                    # For other errors, try a simple fix if LLM couldn't help
+                    return self._apply_simple_fix(code_content, error_info)
+                    
+                # Basic validation - make sure it has the function definition
+                if "def analyze_data" not in fixed_code:
+                    logger.error("Fixed code does not contain analyze_data function")
+                    return None
+                    
+                return fixed_code
 
             except Exception as e:
                 logger.error(f"Error calling Gemini API in _fix_code: {e}")
-                return None
+                # Try a simple fix if API call fails
+                if is_indentation_error:
+                    return self._fix_indentation_error(code_content, error_message)
+                return self._apply_simple_fix(code_content, error_info)
         except Exception as e:
             logger.error(f"Error in _fix_code: {e}")
             return None
+
+    def _fix_indentation_error(self, code_content, error_message):
+        """
+        Directly fix indentation errors without using LLM
+        
+        Parameters:
+        code_content (str): The code with indentation errors
+        error_message (str): The error message with line information
+        
+        Returns:
+        str: Fixed code or None if couldn't fix
+        """
+        try:
+            # Parse the line number from the error message
+            import re
+            line_match = re.search(r"line (\d+)", error_message)
+            if not line_match:
+                return None
+                
+            line_number = int(line_match.group(1))
+            
+            # Split the code into lines for processing
+            lines = code_content.split('\n')
+            
+            # Check if we have enough lines
+            if line_number >= len(lines) or line_number < 1:
+                return None
+                
+            # Check for specific indentation issues
+            if "expected an indented block" in error_message:
+                # Find the last line that should have an indented block following it
+                trigger_keywords = ["if", "else:", "elif", "for", "while", "try:", "except", "def", "class"]
+                problematic_line = lines[line_number - 1]
+                
+                # Add indentation to the problematic line
+                if any(keyword in lines[line_number - 2] for keyword in trigger_keywords):
+                    lines[line_number - 1] = "    " + problematic_line
+                    
+            # Check for unexpected indent
+            elif "unexpected indent" in error_message:
+                problematic_line = lines[line_number - 1]
+                # Remove one level of indentation
+                if problematic_line.startswith("    "):
+                    lines[line_number - 1] = problematic_line[4:]
+                elif problematic_line.startswith("\t"):
+                    lines[line_number - 1] = problematic_line[1:]
+                    
+            # Check for missing except block
+            if "expected an indented block after 'except'" in error_message:
+                # Find the except line and add a simple pass statement
+                for i in range(line_number - 2, min(line_number + 2, len(lines))):
+                    if i >= 0 and "except" in lines[i] and ":" in lines[i]:
+                        # Add a pass statement after the except line
+                        if i+1 < len(lines):
+                            lines.insert(i+1, "        pass  # Added to fix indentation error")
+                        else:
+                            lines.append("        pass  # Added to fix indentation error")
+                        break
+            
+            # Reassemble the fixed code
+            fixed_code = '\n'.join(lines)
+            return fixed_code
+        except Exception as e:
+            logger.error(f"Error in _fix_indentation_error: {e}")
+            return None
+
+    def _apply_simple_fix(self, code_content, error_info):
+        """
+        Apply simple fixes for common errors
+        
+        Parameters:
+        code_content (str): The original code with errors
+        error_info (dict): Error information dictionary
+        
+        Returns:
+        str: Fixed code or original code if couldn't fix
+        """
+        try:
+            error_type = error_info.get("error_type", "")
+            error_message = error_info.get("error_message", "")
+            
+            # Split the code into lines
+            lines = code_content.split('\n')
+            
+            # Fix missing closing parentheses/brackets
+            if "SyntaxError" in error_type and ("unexpected EOF" in error_message or "unexpected end of file" in error_message):
+                # Check for unbalanced parentheses, brackets, and braces
+                parens = code_content.count('(') - code_content.count(')')
+                brackets = code_content.count('[') - code_content.count(']')
+                braces = code_content.count('{') - code_content.count('}')
+                
+                # Add the missing closing characters
+                fixed_code = code_content
+                fixed_code += ')' * parens if parens > 0 else ''
+                fixed_code += ']' * brackets if brackets > 0 else ''
+                fixed_code += '}' * braces if braces > 0 else ''
+                
+                return fixed_code
+                
+            # Fix missing colons
+            if "SyntaxError" in error_type and "expected ':'" in error_message:
+                # Try to find the line with the error
+                line_match = re.search(r"line (\d+)", error_message)
+                if line_match:
+                    line_number = int(line_match.group(1))
+                    if 0 < line_number <= len(lines):
+                        # Add a colon at the end of the line if it's missing
+                        if not lines[line_number - 1].strip().endswith(':'):
+                            lines[line_number - 1] = lines[line_number - 1].rstrip() + ':'
+                        return '\n'.join(lines)
+                        
+            # Fix invalid continuation
+            if "SyntaxError" in error_type and "invalid continuation" in error_message:
+                # Try to find the line with the error
+                line_match = re.search(r"line (\d+)", error_message)
+                if line_match:
+                    line_number = int(line_match.group(1))
+                    if 0 < line_number <= len(lines):
+                        # Replace tabs with spaces at the beginning of the line
+                        lines[line_number - 1] = lines[line_number - 1].replace('\t', '    ')
+                        return '\n'.join(lines)
+                        
+            # Return the original code if no fix was applied
+            return code_content
+        except Exception as e:
+            logger.error(f"Error in _apply_simple_fix: {e}")
+            return code_content
 
     def _initialize_templates(self):
         """Initialize code templates for common operations with support for multiple source tables"""
@@ -1006,8 +1198,8 @@ else:
                     code_file = create_code_file(code_content, query, is_double=True)
                     target_sap_fields = resolved_data.get("target_sap_fields")
                     key_mapping = resolved_data.get("key_mapping", [])
-                    result = execute_code(code_file, source_dfs, target_df, target_sap_fields, query_type=query_type, key_mapping=key_mapping)
-
+                    result = execute_code(code_file, source_dfs, target_df, target_sap_fields, query_type=query_type, key_mapping=key_mapping,session_id=session_id)
+                    print(f"Result: {isinstance(result,pd.DataFrame)}\n{result}")
                     # Handle execution errors and fix attempts
                     if isinstance(result, dict) and "error_type" in result:
                         logger.error(f"Code execution error: {result['error_message']}")
@@ -1041,7 +1233,7 @@ else:
                                 f"{query} (fixed attempt {attempt})",
                                 is_double=True,
                             )
-                            fixed_result = execute_code(fixed_code_file, source_dfs, target_df, target_sap_fields, query_type=query_type, key_mapping=key_mapping)
+                            fixed_result = execute_code(fixed_code_file, source_dfs, target_df, target_sap_fields, query_type=query_type, key_mapping=key_mapping, session_id=session_id)
 
                             # If the fixed code worked, use it
                             if not isinstance(fixed_result, dict) or "error_type" not in fixed_result:
@@ -1079,7 +1271,6 @@ else:
                         conn.close()
                     return code_content, f"Error executing code: {e}", session_id
 
-                # 8. Save the updated target dataframe if it's a DataFrame
                 if isinstance(result, pd.DataFrame):
                     try:
                         # Post-process the result dataframe
@@ -1089,59 +1280,57 @@ else:
                         save_success = save_session_target_df(session_id, result)
                         if not save_success:
                             logger.warning("Failed to save target dataframe to session")
-                            
+                        try:
+
                         # Special handling for different query types
-                        if query_type in ["CROSS_SEGMENT", "JOIN_OPERATION"]:
-                            # Save to workspace with current segment info for cross-segment use
-                            try:
-                                # Get current segment name
-                                segment_name = current_segment.get("name", f"segment_{segment_id}")
-                                
-                                # Save to workspace DB with current segment name
-                                # First make a copy to avoid modifying the original
-                                workspace_result = result.copy()
-                                key_fields = []
-                                if key_mapping:
-                                    # Extract source fields from key mappings
-                                    key_fields = [mapping.get('source_col') for mapping in key_mapping if isinstance(mapping, dict) and 'source_col' in mapping]
+                            if query_type in ["CROSS_SEGMENT", "JOIN_OPERATION"]:
+                                # Save to workspace with current segment info for cross-segment use
+                                    # Get current segment name
+                                    segment_name = current_segment.get("name", f"segment_{segment_id}")
+                                    
+                                    # Save to workspace DB with current segment name
+                                    result = result.copy()
+                                    
+                                    # Ensure key fields are present for joins
+                                    key_fields = []
+                                    if key_mapping:
+                                        # Extract source fields from key mappings
+                                        key_fields = [mapping.get('source_col') for mapping in key_mapping 
+                                                    if isinstance(mapping, dict) and 'source_col' in mapping]
 
-                                # Also check for common key fields
-                                common_key_fields = ['MATNR', 'MATERIAL', 'PRODUCT', 'WERKS', 'PLANT']
-                                for key_field in common_key_fields:
-                                    if key_field not in key_fields:
-                                        key_fields.append(key_field)
+                                    # Also check for common key fields
+                                    common_key_fields = ['MATNR', 'MATERIAL', 'PRODUCT', 'WERKS', 'PLANT']
+                                    for key_field in common_key_fields:
+                                        if key_field not in key_fields:
+                                            key_fields.append(key_field)
 
-                                # Add necessary key fields for cross-segment compatibility
-                                for key_field in key_fields:
-                                    if key_field not in workspace_result.columns:
-                                        # Try to add key field from source
-                                        for table_name, df in source_dfs.items():
-                                            if key_field in df.columns:
-                                                logger.info(f"Adding {key_field} from {table_name} for cross-segment compatibility")
-                                                if len(df) >= len(workspace_result):
-                                                    workspace_result[key_field] = df[key_field].values[:len(workspace_result)]
-                                                else:
-                                                    field_values = [None] * len(workspace_result)
-                                                    for i in range(min(len(df), len(workspace_result))):
-                                                        field_values[i] = df[key_field].iloc[i]
-                                                    workspace_result[key_field] = field_values
-                                                break
-                                
-                                # Save to workspace
-                                if hasattr(self, 'workspace_db'):
-                                    workspace_table = self.workspace_db.save_segment_table(
-                                        session_id, segment_id, segment_name, workspace_result
-                                    )
-                                    logger.info(f"Saved result to workspace as {workspace_table} with {len(workspace_result)} rows")
-                            except Exception as e:
-                                logger.error(f"Error saving to workspace: {e}")
+                                    # Add necessary key fields for cross-segment compatibility
+                                    for key_field in key_fields:
+                                        if key_field not in result.columns:
+                                            # Try to add key field from source
+                                            for table_name, df in source_dfs.items():
+                                                if key_field in df.columns:
+                                                    logger.info(f"Adding {key_field} from {table_name} for cross-segment compatibility")
+                                                    if len(df) >= len(result):
+                                                        result[key_field] = df[key_field].values[:len(result)]
+                                                    else:
+                                                        field_values = [None] * len(result)
+                                                        for i in range(min(len(df), len(result))):
+                                                            field_values[i] = df[key_field].iloc[i]
+                                                        result[key_field] = field_values
+                                                    break
+                                    
+                                    # Save to workspace
+                            workspace_table = self.workspace_db.save_segment_table(
+                                    session_id, segment_id, segment_name, result
+                                )
+                            logger.info(f"Saved result to workspace as {workspace_table} with {len(result)} rows")
+                            return code_content, f"Saved result to workspace as {workspace_table}", session_id
+                        except Exception as e:
+                            logger.error(f"Error saving to workspace: {e}")
+                        
                     except Exception as e:
                         logger.error(f"Error saving target dataframe: {e}")
-
-                # 9. Return the results
-                if conn:
-                    conn.close()
-                return code_content, result, session_id
 
             except Exception as e:
                 logger.error(f"Error in process_sequential_query: {e}")
@@ -1159,6 +1348,7 @@ else:
                 except:
                     pass
             return None, f"An error occurred: {e}", session_id
+
 
     def _load_source_tables(self, source_tables, visited_segments, conn, query_type, session_id=None):
         """
@@ -1181,24 +1371,33 @@ else:
             from planner import clean_table_name
             cleaned_table = clean_table_name(table)
             
-            # Instead of hardcoding segment detection, check if table is in visited segments
+            # Check if this is a workspace table (from a previous segment)
             is_workspace_table = False
             segment_id = None
+            segment_name = None
             
             # Check both by exact name and partial match for robust detection
             for seg_id, segment_info in visited_segments.items():
                 table_name = segment_info.get("table_name", "")
-                if cleaned_table == table_name or (table_name and table_name.lower() in cleaned_table.lower()):
+                seg_name = segment_info.get("name", "")
+                
+                # Check if table matches either the table_name or segment_name
+                if (cleaned_table == table_name or 
+                    (table_name and table_name.lower() in cleaned_table.lower()) or
+                    (seg_name and seg_name.lower() in cleaned_table.lower())):
                     is_workspace_table = True
                     segment_id = seg_id
+                    segment_name = seg_name
                     break
-                
+                    
             # Special handling for segment tables in CROSS_SEGMENT queries
-            if is_workspace_table and query_type in ["CROSS_SEGMENT", "JOIN_OPERATION"] and session_id and hasattr(self, 'workspace_db'):
+            if is_workspace_table and query_type in ["CROSS_SEGMENT", "JOIN_OPERATION"] and session_id:
                 try:
-                    # Get from workspace DB
+                    logger.info(f"Attempting to load workspace table: {cleaned_table} (segment ID: {segment_id}, segment name: {segment_name})")
+                    
+                    # Try to get the table name from the workspace DB
                     workspace_table = self.workspace_db.get_segment_table_name(
-                        session_id, segment_id=segment_id, segment_name=cleaned_table
+                        session_id, segment_id=segment_id, segment_name=segment_name
                     )
                     
                     if workspace_table:
@@ -1208,20 +1407,54 @@ else:
                             self.workspace_db.conn
                         )
                     else:
-                        # Try with just the segment name prefix
-                        segment_name_prefix = cleaned_table.split('_')[0] if '_' in cleaned_table else cleaned_table
+                        # Try with just the segment name 
                         workspace_table = self.workspace_db.get_segment_table_name(
-                            session_id, segment_name=segment_name_prefix
+                            session_id, segment_name=segment_name
                         )
+                        
                         if workspace_table:
-                            logger.info(f"Loading {cleaned_table} using prefix {segment_name_prefix} from workspace ({workspace_table})")
+                            logger.info(f"Loading {cleaned_table} using segment name {segment_name} from workspace ({workspace_table})")
                             source_dfs[table] = pd.read_sql_query(
                                 f"SELECT * FROM '{workspace_table}'", 
                                 self.workspace_db.conn
                             )
                         else:
-                            logger.warning(f"Could not find workspace table for {cleaned_table}")
-                            source_dfs[table] = pd.DataFrame()
+                            # Try with a partial match on segment name or table name
+                            segment_name_parts = segment_name.split() if segment_name else []
+                            for part in segment_name_parts:
+                                if len(part) > 3:  # Only try with meaningful parts
+                                    workspace_table = self.workspace_db.get_segment_table_name(
+                                        session_id, segment_name=part
+                                    )
+                                    if workspace_table:
+                                        logger.info(f"Loading {cleaned_table} using partial match '{part}' from workspace ({workspace_table})")
+                                        source_dfs[table] = pd.read_sql_query(
+                                            f"SELECT * FROM '{workspace_table}'", 
+                                            self.workspace_db.conn
+                                        )
+                                        break
+                            
+                            # If still not found, check table name in all session tables
+                            if table not in source_dfs:
+                                tables = self.workspace_db.list_session_tables(session_id)
+                                logger.info(f"Available workspace tables: {tables}")
+                                
+                                # See if any table name contains our cleaned table name
+                                for table_info in tables:
+                                    if cleaned_table.lower() in table_info['table_name'].lower():
+                                        workspace_table = table_info['table_name']
+                                        logger.info(f"Found matching workspace table: {workspace_table}")
+                                        source_dfs[table] = pd.read_sql_query(
+                                            f"SELECT * FROM '{workspace_table}'", 
+                                            self.workspace_db.conn
+                                        )
+                                        break
+                    
+                    # If still not found, create an empty DataFrame
+                    if table not in source_dfs:
+                        logger.warning(f"Could not find workspace table for {cleaned_table}")
+                        source_dfs[table] = pd.DataFrame()
+                        
                 except Exception as e:
                     logger.error(f"Error loading segment table {cleaned_table}: {e}")
                     source_dfs[table] = pd.DataFrame()
@@ -1239,7 +1472,7 @@ else:
                     logger.warning(f"Error reading source table {cleaned_table}: {e}")
                     # Create an empty dataframe as fallback
                     source_dfs[table] = pd.DataFrame()
-                    
+                        
         return source_dfs
     
     def _generate_join_code(self, simple_plan, planner_info):
