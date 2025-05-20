@@ -14,8 +14,6 @@ from token_tracker import track_token_usage, get_token_usage_stats
 from pathlib import Path
 import spacy
 import traceback
-from workspace_db import WorkspaceDB
-
 
 # Set up logging
 logging.basicConfig(
@@ -25,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
-workspace_db = WorkspaceDB()
 
 
 from spacy.matcher import Matcher
@@ -401,7 +398,7 @@ PROMPT_TEMPLATES = {
     """
 }
 
-def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, query_type=None, classification_details=None, target_sap_fields=None):
+def process_query_by_type(object_id, segment_id, project_id, query,workspace_db, session_id=None, query_type=None, classification_details=None, target_sap_fields=None):
     """
     Process a query based on its classified type
     
@@ -513,7 +510,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         client = genai.Client(api_key=api_key)
         
         response = client.models.generate_content(
-            model="gemini-2.0-flash", 
+            model="gemini-2.5-flash-preview-04-17", 
             contents=formatted_prompt,
             config=types.GenerateContentConfig(
                 temperature=0.5, top_p=0.95, top_k=40
@@ -545,7 +542,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             else:
                 parsed_data["target_sap_fields"] = [target_sap_fields]
         # Process the resolved data to get table information
-        results = process_info(parsed_data, conn)
+        results = process_info(parsed_data, conn,workspace_db)
         
         # Handle key mapping differently based on query type
         if query_type == "SIMPLE_TRANSFORMATION":
@@ -1427,7 +1424,7 @@ def parse_data_with_context(
         # Call Gemini API with token tracking and error handling
         try:
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash-preview-04-17",
                 contents=formatted_prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.5, top_p=0.95, top_k=40
@@ -1491,7 +1488,7 @@ def parse_data_with_context(
         return None
 
 
-def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
+def process_query(object_id, segment_id, project_id, query, workspace_db,session_id=None, target_sap_fields=None):
     """
     Process a query with context awareness and automatic query type detection
     
@@ -1537,6 +1534,7 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
             segment_id, 
             project_id, 
             query, 
+            workspace_db,
             session_id, 
             query_type, 
             classification_details,
@@ -1547,7 +1545,7 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
         logger.error(traceback.format_exc())
         return None
 
-def process_query(object_id, segment_id, project_id, query, session_id=None):
+def process_query(object_id, segment_id, project_id, query, workspace_db,session_id=None):
     """
     Process a query with context awareness and automatic query type detection
     
@@ -1592,6 +1590,7 @@ def process_query(object_id, segment_id, project_id, query, session_id=None):
             segment_id, 
             project_id, 
             query, 
+            workspace_db,
             session_id, 
             query_type, 
             classification_details
@@ -1731,7 +1730,7 @@ def save_session_target_df(session_id, target_df):
         logger.error(f"Error in save_session_target_df: {e}")
         return False
 
-def is_workspace_table(table_name, session_id, segment_references=None):
+def is_workspace_table(table_name, session_id, workspace_db,segment_references=None):
     """
     Check if a table name refers to a workspace table (from a previous segment)
     
@@ -1776,7 +1775,7 @@ def is_workspace_table(table_name, session_id, segment_references=None):
     
     return False
 
-def load_workspace_table(table_name, session_id):
+def load_workspace_table(table_name, session_id,workspace_db):
     """
     Load a table from the workspace database
     
@@ -1813,7 +1812,7 @@ def load_workspace_table(table_name, session_id):
     return pd.DataFrame()
 
 
-def process_info(resolved_data, conn):
+def process_info(resolved_data, conn,workspace_db):
     """
     Process the resolved data to extract table information based on the query type
     
@@ -1937,13 +1936,14 @@ def process_info(resolved_data, conn):
                 is_workspace = is_workspace_table(
                     cleaned_table, 
                     session_id, 
+                    workspace_db,
                     resolved_data.get("segment_references", [])
                 )
                 
                 if is_workspace and session_id:
                     logger.info(f"Loading workspace table {cleaned_table} for session {session_id}")
                     # Load from workspace DB
-                    source_df = load_workspace_table(cleaned_table, session_id)
+                    source_df = load_workspace_table(cleaned_table, session_id,workspace_db)
                     if not source_df.empty:
                         source_data[table] = source_df
                         continue

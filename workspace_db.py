@@ -8,35 +8,68 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+
+# Fix for the SQLite thread issue in workspace_db.py
+# Add this at the beginning of the WorkspaceDB class:
+
+import threading
+
+class WorkspaceDB:
+    """Manages temporary workspace tables for cross-segment operations"""
+    
+
+
 class WorkspaceDB:
     """Manages temporary workspace tables for cross-segment operations"""
     
     def __init__(self, db_path="workspace.db"):
         self.db_path = db_path
-        self.conn = None
+        self._local = threading.local()  # Thread-local storage for connections
         self.initialize_db()
         
     def initialize_db(self):
-        """Initialize workspace database"""
+        """Initialize workspace database with thread-safe connection"""
         try:
-            self.conn = sqlite3.connect(self.db_path)
-            # Create metadata table to track tables by session
-            self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS workspace_metadata (
-                session_id TEXT,
-                table_name TEXT,
-                segment_id INTEGER,
-                segment_name TEXT,
-                created_at TEXT,
-                PRIMARY KEY (session_id, table_name)
-            )
-            """)
-            self.conn.commit()
-            logger.info(f"Initialized workspace database at {self.db_path}")
+            # Create thread-local connection if it doesn't exist
+            if not hasattr(self._local, 'conn') or self._local.conn is None:
+                # Create a new connection for this thread
+                self._local.conn = sqlite3.connect(self.db_path)
+                
+                # Create metadata table to track tables by session
+                self._local.conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_metadata (
+                    session_id TEXT,
+                    table_name TEXT,
+                    segment_id INTEGER,
+                    segment_name TEXT,
+                    created_at TEXT,
+                    PRIMARY KEY (session_id, table_name)
+                )
+                """)
+                self._local.conn.commit()
+                logger.info(f"Initialized workspace database at {self.db_path} for thread {threading.current_thread().name}")
         except Exception as e:
             logger.error(f"Error initializing workspace database: {e}")
             raise
             
+    @property
+    def conn(self):
+        """Get the connection for the current thread"""
+        # Make sure this thread has its own connection
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            self.initialize_db()
+        return self._local.conn
+    
+    def close(self):
+        """Close the connection for the current thread only"""
+        try:
+            if hasattr(self._local, 'conn') and self._local.conn is not None:
+                self._local.conn.close()
+                self._local.conn = None
+                logger.info(f"Closed workspace connection for thread {threading.current_thread().name}")
+        except Exception as e:
+            logger.error(f"Error closing workspace connection: {e}")
+
     def save_segment_table(self, session_id, segment_id, segment_name, df):
         """Save a dataframe as a segment table in the workspace"""
         try:
@@ -193,8 +226,3 @@ class WorkspaceDB:
             logger.error(f"Error clearing session tables: {e}")
             return False
             
-    def close(self):
-        """Close the connection"""
-        if self.conn:
-            self.conn.close()
-            self.conn = None

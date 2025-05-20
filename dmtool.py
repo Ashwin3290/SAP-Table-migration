@@ -78,8 +78,12 @@ class DMTool:
         """Cleanup resources"""
         try:
             if hasattr(self, 'workspace_db'):
-                self.workspace_db.close()
-                logger.info("Workspace database connection closed")
+                try:
+                    # This will only close the connection for the current thread
+                    self.workspace_db.close()
+                    logger.info(f"Closed workspace database for thread")
+                except Exception as e:
+                    logger.error(f"Error closing workspace database: {e}")
         except Exception as e:
             logger.error(f"Error closing workspace database: {e}")
 
@@ -254,7 +258,7 @@ Return ONLY the classification name with no explanation.
 """
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash", contents=prompt
+                    model="gemini-2.5-flash-preview-04-17", contents=prompt
                 )
 
                 # Validate response
@@ -332,13 +336,10 @@ TASK CONTEXT:
 - Key columns: {planner_info.get('key_columns', [])}
 
 PLAN REQUIREMENTS:
-1. Begin with data validation steps for all source tables and fields
-2. Include clear steps for filtering if filtering fields are specified
-3. Address how both empty AND populated target dataframes will be handled
-4. Explicitly include key column mapping between source and target
-5. Include steps for handling edge cases like missing data and type mismatches
-6. Ensure the plan is complete with no steps missing
-7. Ensure all target fields will be populated in the result
+1. Include clear steps for filtering if filtering fields are specified
+2. Explicitly include key column mapping between source and target
+3. Ensure the plan is complete with no steps missing
+4. Ensure all target fields will be populated in the result
 
 FORMAT:
 - Number each step sequentially
@@ -350,12 +351,16 @@ Example of a good step: "Filter the source_table dataframe where field_name matc
 Example of a bad step: "Apply filtering as needed"
 
 Return ONLY the numbered plan with no explanations or additional text.
+
+Note:
+- Do NOT include any code or function definitions
+
 """
 
             try:
                 print(base_prompt)
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash-thinking-exp-01-21", contents=base_prompt,
+                    model="gemini-2.5-flash-preview-04-17", contents=base_prompt,
                     config=types.GenerateContentConfig(temperature=0.2)
                 )
 
@@ -554,7 +559,7 @@ return target_df
 """
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt,
+                    model="gemini-2.5-flash-preview-04-17", contents=prompt,
                     config=types.GenerateContentConfig(temperature=0.25, top_p=0.9)
                 )
 
@@ -715,7 +720,7 @@ return target_df
             # Call the AI to fix the code
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.0-flash-thinking-exp-01-21", contents=prompt,
+                    model="gemini-2.5-flash-preview-04-17", contents=prompt,
                     config=types.GenerateContentConfig(temperature=0.2)  # Lower temperature for more precise fixes
                 )
 
@@ -1077,7 +1082,7 @@ else:
             # 1. Process query with the planner - now with classification
             logger.info(f"Processing query: {query}")
             resolved_data = planner_process_query(
-                object_id, segment_id, project_id, query, session_id
+                object_id, segment_id, project_id, query,self.workspace_db,session_id
             )
             if not resolved_data:
                 logger.error("Failed to resolve query with planner")
@@ -1281,12 +1286,11 @@ else:
                         if not save_success:
                             logger.warning("Failed to save target dataframe to session")
                         try:
-
+                            segment_name = current_segment.get("name", f"segment_{segment_id}")
                         # Special handling for different query types
                             if query_type in ["CROSS_SEGMENT", "JOIN_OPERATION"]:
                                 # Save to workspace with current segment info for cross-segment use
                                     # Get current segment name
-                                    segment_name = current_segment.get("name", f"segment_{segment_id}")
                                     
                                     # Save to workspace DB with current segment name
                                     result = result.copy()
@@ -1325,7 +1329,7 @@ else:
                                     session_id, segment_id, segment_name, result
                                 )
                             logger.info(f"Saved result to workspace as {workspace_table} with {len(result)} rows")
-                            return code_content, f"Saved result to workspace as {workspace_table}", session_id
+                            return code_content, result, session_id
                         except Exception as e:
                             logger.error(f"Error saving to workspace: {e}")
                         
@@ -1537,7 +1541,7 @@ else:
     """
         try:
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash-thinking-exp-01-21", 
+                model="gemini-2.5-flash-preview-04-17", 
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.25, top_p=0.9)
             )
@@ -1657,7 +1661,7 @@ else:
     """
         try:
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash-thinking-exp-01-21", 
+                model="gemini-2.5-flash-preview-04-17", 
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.25, top_p=0.9)
             )
@@ -1765,7 +1769,7 @@ else:
     """
         try:
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash-thinking-exp-01-21", 
+                model="gemini-2.5-flash-preview-04-17", 
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.25, top_p=0.9)
             )
@@ -1879,7 +1883,7 @@ else:
     """
         try:
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash-thinking-exp-01-21", 
+                model="gemini-2.5-flash-preview-04-17", 
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.25, top_p=0.9)
             )
