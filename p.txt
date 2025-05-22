@@ -1,0 +1,54 @@
+1. Step description: Start the UPDATE statement.
+2. SQLite operation: UPDATE
+3. SQLite query template: `UPDATE t_24_Product_Basic_Data_mandatory_Ext`
+4. Notes: Initiate the update process for the target table.
+
+5. Step description: Start the SET clause for the target field using a CASE expression.
+6. SQLite operation: SET
+7. SQLite query template: `SET MEINS = CASE`
+8. Notes: Prepare to set the value of the target field based on conditional logic.
+
+9. Step description: Define the first WHEN condition to check for a match in `MARA_500`.
+10. SQLite operation: WHEN
+11. SQLite query template: `WHEN EXISTS (SELECT 1 FROM MARA_500 WHERE MARA_500.MATNR = t_24_Product_Basic_Data_mandatory_Ext.PRODUCT)`      
+12. Notes: Check if a matching material exists in the first priority source table (`MARA_500`).
+
+13. Step description: Define the first THEN result selecting `MEINS` from `MARA_500`.
+14. SQLite operation: THEN
+15. SQLite query template: `THEN (SELECT MEINS FROM MARA_500 WHERE MARA_500.MATNR = t_24_Product_Basic_Data_mandatory_Ext.PRODUCT)`
+16. Notes: Select the Unit of Measure from `MARA_500` if the first condition is met.
+
+17. Step description: Define the second WHEN condition checking `MARA_700` for 'ROH' materials from segment 2.
+18. SQLite operation: WHEN
+19. SQLite query template: `WHEN EXISTS (SELECT 1 FROM MARA_700 WHERE MARA_700.MATNR = t_24_Product_Basic_Data_mandatory_Ext.PRODUCT AND MARA_700.MTART = 'ROH') AND EXISTS (SELECT 1 FROM target_table_segment_2 WHERE target_table_segment_2.PRODUCT = t_24_Product_Basic_Data_mandatory_Ext.PRODUCT)`
+20. Notes: Check if a matching 'ROH' material exists in `MARA_700` AND the material is present in the target table of segment 2. `target_table_segment_2` is a placeholder for the actual target table name of segment 2.
+
+21. Step description: Define the second THEN result selecting `MEINS` from `MARA_700`.
+22. SQLite operation: THEN
+23. SQLite query template: `THEN (SELECT MEINS FROM MARA_700 WHERE MARA_700.MATNR = t_24_Product_Basic_Data_mandatory_Ext.PRODUCT AND MARA_700.MTART = 'ROH')`
+24. Notes: Select the Unit of Measure from `MARA_700` if the second condition is met.
+
+25. Step description: Define the third WHEN condition checking `MARA`.
+26. SQLite operation: WHEN
+27. SQLite query template: `WHEN EXISTS (SELECT 1 FROM MARA WHERE MARA.MATNR = t_24_Product_Basic_Data_mandatory_Ext.PRODUCT)`
+28. Notes: Check if a matching material exists in the third priority source table (`MARA`).
+
+29. Step description: Define the third THEN result selecting `MEINS` from `MARA`.
+30. SQLite operation: THEN
+31. SQLite query template: `THEN (SELECT MEINS FROM MARA WHERE MARA.MATNR = t_24_Product_Basic_Data_mandatory_Ext.PRODUCT)`
+32. Notes: Select the Unit of Measure from `MARA` if the third condition is met.
+
+33. Step description: Define the ELSE result.
+34. SQLite operation: ELSE
+35. SQLite query template: `ELSE NULL`
+36. Notes: Set the target field value to NULL if none of the preceding conditions are met.
+
+37. Step description: End the CASE expression.
+38. SQLite operation: END
+39. SQLite query template: `END`
+40. Notes: Close the CASE expression.
+
+41. Step description: Add an optional WHERE clause to filter the rows being updated in the target table.
+42. SQLite operation: WHERE
+43. SQLite query template: `WHERE t_24_Product_Basic_Data_mandatory_Ext.PRODUCT IS NOT NULL`
+44. Notes: Restrict the update operation to rows in the target table that have a valid key (`PRODUCT`).

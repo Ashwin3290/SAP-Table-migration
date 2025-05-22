@@ -1,4 +1,3 @@
-from dotenv import load_dotenv
 import json
 import uuid
 import os
@@ -14,6 +13,7 @@ from token_tracker import track_token_usage, get_token_usage_stats
 from pathlib import Path
 import spacy
 import traceback
+from dotenv import load_dotenv
 
 # Set up logging
 logging.basicConfig(
@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+# Import SQL related modules
+from sql_executor import SQLExecutor
+
+# Initialize SQL executor
+sql_executor = SQLExecutor()
 
 from spacy.matcher import Matcher
 from spacy.tokens import Span
@@ -75,7 +80,7 @@ def classify_query_with_spacy(query):
     
     # Define patterns for VALIDATION operations
     validation_patterns = [
-        [{"LOWER": {"IN": ["check", "validate", "verify", "ensure"]}}],
+        [{"LOWER": {"IN": ["validate", "verify", "ensure"]}}],
         [{"LOWER": "if"}, {"OP": "*"}, {"LOWER": {"IN": ["exists", "valid", "present", "available"]}}],
         [{"LOWER": {"IN": ["missing", "invalid", "correct", "consistent"]}}],
         [{"LOWER": {"IN": ["every", "all", "each"]}}, {"OP": "*"}, {"LOWER": {"IN": ["must", "should", "has to"]}}]
@@ -152,21 +157,30 @@ def classify_query_with_spacy(query):
     
     return primary_class, details
 
-
 PROMPT_TEMPLATES = {
+    # (Same templates as original planner.py)
+    # Templates are not modified for SQL-based approach since planner's job
+    # remains the same - extract intent, entities, etc. The actual SQL generation
+    # happens in the SQLGenerator class
+    
     "JOIN_OPERATION": """
     You are a data transformation assistant specializing in SAP data mappings and JOIN operations. 
     Your task is to analyze a natural language query about joining tables and map it to the appropriate source tables, fields, and join conditions.
     
     CONTEXT DATA SCHEMA: {table_desc}
-    
-    PREVIOUSLY VISITED SEGMENTS:
-    {visited_segments}
+
     
     CURRENT TARGET TABLE STATE:
     {target_df_sample}
     
     USER QUERY: {question}
+
+    Note:
+    - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
+    
+
+    Notes:
+    - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
     
     INSTRUCTIONS:
     1. Identify key entities in the join query:
@@ -188,7 +202,7 @@ PROMPT_TEMPLATES = {
         "source_table_name": [List of all source tables, including previously visited segment tables],
         "source_field_names": [List of all fields to select],
         "filtering_fields": [List of filtering fields],
-        "insertion_fields": [List of fields to be inserted],
+        "insertion_fields": [insertion_field],
         "target_sap_fields": [Target field(s)],
         "join_conditions": [
             {{
@@ -210,13 +224,13 @@ PROMPT_TEMPLATES = {
     
     CONTEXT DATA SCHEMA: {table_desc}
     
-    PREVIOUSLY VISITED SEGMENTS:
-    {visited_segments}
-    
     CURRENT TARGET TABLE STATE:
     {target_df_sample}
     
     USER QUERY: {question}
+
+    Notes:
+    - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
     
     INSTRUCTIONS:
     1. Identify which previous segments are referenced in the query
@@ -260,13 +274,14 @@ PROMPT_TEMPLATES = {
     
     CONTEXT DATA SCHEMA: {table_desc}
     
-    PREVIOUSLY VISITED SEGMENTS:
-    {visited_segments}
-    
     CURRENT TARGET TABLE STATE:
     {target_df_sample}
     
     USER QUERY: {question}
+
+    Notes:
+    - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
+    
     
     INSTRUCTIONS:
     1. Identify the validation requirements in the query
@@ -305,13 +320,15 @@ PROMPT_TEMPLATES = {
     
     CONTEXT DATA SCHEMA: {table_desc}
     
-    PREVIOUSLY VISITED SEGMENTS:
-    {visited_segments}
     
     CURRENT TARGET TABLE STATE:
     {target_df_sample}
     
     USER QUERY: {question}
+
+    Notes:
+    - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
+    
     
     INSTRUCTIONS:
     1. Identify the aggregation functions required (sum, count, average, etc.)
@@ -350,13 +367,14 @@ PROMPT_TEMPLATES = {
     
     CONTEXT DATA SCHEMA: {table_desc}
     
-    PREVIOUSLY VISITED SEGMENTS:
-    {visited_segments}
-    
     CURRENT TARGET TABLE STATE:
     {target_df_sample}
     
     USER QUERY: {question}
+
+    Note:
+    - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
+    
     
     INSTRUCTIONS:
     1. Identify key entities in the query:
@@ -390,7 +408,7 @@ PROMPT_TEMPLATES = {
         "source_table_name": [List of all source_tables],
         "source_field_names": [List of all source_fields],
         "filtering_fields": [List of filtering fields],
-        "insertion_fields": [List of fields to be inserted],
+        "insertion_fields": [field to be inserted],
         "target_sap_fields": [Target field(s)],
         "Resolved_query": [Rephrased query with resolved data]
     }}
@@ -398,7 +416,7 @@ PROMPT_TEMPLATES = {
     """
 }
 
-def process_query_by_type(object_id, segment_id, project_id, query,workspace_db, session_id=None, query_type=None, classification_details=None, target_sap_fields=None):
+def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, query_type=None, classification_details=None, target_sap_fields=None):
     """
     Process a query based on its classified type
     
@@ -444,21 +462,30 @@ def process_query_by_type(object_id, segment_id, project_id, query,workspace_db,
         # Handle missing values
         joined_df = missing_values_handling(joined_df)
         
-        # Get target data sample
+        # Get target data sample - Use SQL directly instead of DataFrame
         target_df_sample = None
         try:
             # Get the target table name from joined_df
             target_table = joined_df["table_name"].unique().tolist()
             if target_table and len(target_table) > 0:
-                # Get a connection to fetch current target data
-                target_df = get_or_create_session_target_df(
-                    session_id, target_table[0], conn
-                )
-                target_df_sample = (
-                    target_df.head(5).to_dict("records")
-                    if not target_df.empty
-                    else []
-                )
+                # Get current target data using SQL
+                target_df_sample = sql_executor.get_table_sample(target_table[0])
+                
+                # If SQL-based retrieval fails, try the original approach as fallback
+                if isinstance(target_df_sample, dict) and "error_type" in target_df_sample:
+                    logger.warning(f"SQL-based target data sample retrieval failed, using fallback")
+                    # Get a connection to fetch current target data
+                    target_df = get_or_create_session_target_df(
+                        session_id, target_table[0], conn
+                    )
+                    target_df_sample = (
+                        target_df.head(5).to_dict("records")
+                        if not target_df.empty
+                        else []
+                    )
+                else:
+                    # Convert DataFrame to dict for consistency
+                    target_df_sample = target_df_sample.head(5).to_dict("records") if not target_df_sample.empty else []
         except Exception as e:
             logger.warning(f"Error getting target data sample: {e}")
             target_df_sample = []
@@ -494,11 +521,13 @@ def process_query_by_type(object_id, segment_id, project_id, query,workspace_db,
                 
         # Format the prompt with all inputs
         table_desc = joined_df[joined_df.columns.tolist()[:-1]]
+        
+        # FIX: Change 'semgent_mapping' to 'segment_mapping'
         formatted_prompt = prompt_template.format(
             question=query,
             table_desc=list(table_desc.itertuples(index=False)),
             target_df_sample=target_df_sample_str,
-            visited_segments=visited_segments_str
+            segment_mapping=context_manager.get_segments(session_id) if session_id else [],  # FIXED: was 'semgent_mapping'
         )
         
         # Call Gemini API with customized prompt
@@ -529,7 +558,7 @@ def process_query_by_type(object_id, segment_id, project_id, query,workspace_db,
         parsed_data["query_type"] = query_type
         
         # Add other standard information
-        parsed_data["target_table"] = joined_df["table_name"].unique().tolist()
+        parsed_data["target_table_name"] = joined_df["table_name"].unique().tolist()
         parsed_data["key_mapping"] = context_manager.get_key_mapping(session_id) if session_id else []
         parsed_data["visited_segments"] = visited_segments
         parsed_data["session_id"] = session_id
@@ -541,8 +570,32 @@ def process_query_by_type(object_id, segment_id, project_id, query,workspace_db,
                 parsed_data["target_sap_fields"] = target_sap_fields
             else:
                 parsed_data["target_sap_fields"] = [target_sap_fields]
+                
+        # Fetch table schema information for SQL generation
+        schema_info = {}
+        for table_name in parsed_data.get("source_table_name", []):
+            try:
+                table_schema = sql_executor.get_table_schema(table_name)
+                if isinstance(table_schema, list):
+                    schema_info[table_name] = table_schema
+            except Exception as e:
+                logger.warning(f"Error fetching schema for {table_name}: {e}")
+                
+        parsed_data["table_schemas"] = schema_info
+        
+        # Check target table schema too
+        target_table_names = parsed_data.get("target_table_name", [])
+        if target_table_names:
+            target_table = target_table_names[0] if isinstance(target_table_names, list) else target_table_names
+            try:
+                target_schema = sql_executor.get_table_schema(target_table)
+                if isinstance(target_schema, list):
+                    parsed_data["target_table_schema"] = target_schema
+            except Exception as e:
+                logger.warning(f"Error fetching schema for target table {target_table}: {e}")
+                
         # Process the resolved data to get table information
-        results = process_info(parsed_data, conn,workspace_db)
+        results = process_info(parsed_data, conn)
         
         # Handle key mapping differently based on query type
         if query_type == "SIMPLE_TRANSFORMATION":
@@ -561,6 +614,10 @@ def process_query_by_type(object_id, segment_id, project_id, query,workspace_db,
             "id": segment_id,
             "name": segment_name if 'segment_name' in locals() else f"segment_{segment_id}"
         }
+        
+        # Add table schemas to results
+        results["table_schemas"] = parsed_data.get("table_schemas", {})
+        results["target_table_schema"] = parsed_data.get("target_table_schema", [])
         
         return results
     finally:
@@ -615,49 +672,69 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
                         if source_table and source_field:
                             error = None
                             try:
-                                # Get the source data
-                                source_df = None
+                                # Get the source data using SQL instead of DataFrame
+                                has_nulls = False
+                                has_duplicates = False
+                                
                                 try:
                                     # Validate table and field names to prevent SQL injection
                                     safe_table = validate_sql_identifier(source_table)
                                     safe_field = validate_sql_identifier(source_field)
-                                    query = f"SELECT {safe_field} FROM {safe_table}"
-                                    source_df = pd.read_sql_query(query, conn)
+                                    
+                                    # Check for nulls
+                                    null_query = f"SELECT COUNT(*) AS null_count FROM {safe_table} WHERE {safe_field} IS NULL"
+                                    null_result = sql_executor.execute_query(null_query)
+                                    
+                                    if isinstance(null_result, list) and null_result:
+                                        has_nulls = null_result[0].get("null_count", 0) > 0
+                                    
+                                    # Check for duplicates
+                                    dup_query = f"""
+                                    SELECT COUNT(*) AS dup_count
+                                    FROM (
+                                        SELECT {safe_field}, COUNT(*) as cnt
+                                        FROM {safe_table}
+                                        WHERE {safe_field} IS NOT NULL
+                                        GROUP BY {safe_field}
+                                        HAVING COUNT(*) > 1
+                                    )
+                                    """
+                                    dup_result = sql_executor.execute_query(dup_query)
+                                    
+                                    if isinstance(dup_result, list) and dup_result:
+                                        has_duplicates = dup_result[0].get("dup_count", 0) > 0
+                                        
                                 except Exception as e:
-                                    logger.error(f"Failed to query source data: {e}")
-                                    source_df = None
+                                    logger.error(f"Failed to query source data for key validation: {e}")
+                                    has_nulls = True  # Assume worst case
+                                    has_duplicates = True  # Assume worst case
+                                    
+                                # Only proceed if the data satisfies primary key requirements
+                                # or if the query explicitly indicates working with distinct values
+                                if has_nulls or has_duplicates:
+                                    # Check if the query is requesting distinct values
+                                    restructured_query = results.get("restructured_query", "")
+                                    is_distinct_query = (
+                                        check_distinct_requirement(restructured_query) if restructured_query 
+                                        else False
+                                    )
 
-                                if source_df is not None:
-                                    # Check for uniqueness and non-null values
-                                    has_nulls = source_df[source_field].isna().any()
-                                    has_duplicates = source_df[source_field].duplicated().any()
-
-                                    # Only proceed if the data satisfies primary key requirements
-                                    # or if the query explicitly indicates working with distinct values
-                                    if has_nulls or has_duplicates:
-                                        # Check if the query is requesting distinct values
-                                        restructured_query = results.get("restructured_query", "")
-                                        is_distinct_query = (
-                                            check_distinct_requirement(restructured_query) if restructured_query 
-                                            else False
-                                        )
-
-                                        if not is_distinct_query:
-                                            # The data doesn't meet primary key requirements and query doesn't indicate distinct values
-                                            error_msg = f"Cannot use '{source_field}' as a primary key: "
-                                            if has_nulls and has_duplicates:
-                                                error_msg += "contains null values and duplicate entries"
-                                            elif has_nulls:
-                                                error_msg += "contains null values"
-                                            else:
-                                                error_msg += "contains duplicate entries"
-
-                                            logger.error(error_msg)
-                                            error = error_msg
+                                    if not is_distinct_query:
+                                        # The data doesn't meet primary key requirements and query doesn't indicate distinct values
+                                        error_msg = f"Cannot use '{source_field}' as a primary key: "
+                                        if has_nulls and has_duplicates:
+                                            error_msg += "contains null values and duplicate entries"
+                                        elif has_nulls:
+                                            error_msg += "contains null values"
                                         else:
-                                            logger.info(
-                                                f"Source data has integrity issues but query suggests distinct values will be used"
-                                            )
+                                            error_msg += "contains duplicate entries"
+
+                                        logger.error(error_msg)
+                                        error = error_msg
+                                    else:
+                                        logger.info(
+                                            f"Source data has integrity issues but query suggests distinct values will be used"
+                                        )
                             except Exception as e:
                                 logger.error(f"Error during primary key validation: {e}")
                                 error = f"Error during key validation: {e}"
@@ -800,6 +877,61 @@ class ContextualSessionManager:
         except OSError as e:
             logger.error(f"Failed to create session storage directory: {e}")
             raise SessionError(f"Failed to create session storage: {e}")
+
+    def add_segment(self, session_id, segment_name,target_table_name):
+        """Add a new segment to the session context"""
+        try:
+            if not session_id:
+                logger.warning("No session ID provided for add_segment")
+                return False
+            session_path = f"{self.storage_path}/{session_id}"
+            if not os.path.exists(session_path):
+                logger.warning(f"Session directory not found: {session_path}")
+                os.makedirs(session_path, exist_ok=True)
+            context_path = f"{session_path}/segments.json"
+            if not os.path.exists(context_path):
+                segments = []
+            else:
+                try:
+                    with open(context_path, "r") as f:
+                        segments = json.load(f)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        f"Invalid JSON in segments file, creating new segments"
+                    )
+                    segments = []
+            
+            # Add the new segment
+            segments.append(
+                {
+                    "segment_name": segment_name,
+                    "target_table_name": target_table_name,
+                })
+            
+            # Save the updated segments
+            with open(context_path, "w") as f:
+                json.dump(segments, f, indent=2)
+            return True
+        except:
+            pass
+
+    def get_segments(self, session_id):
+        """Get the segments for a session"""
+        try:
+            if not session_id:
+                logger.warning("No session ID provided for get_segments")
+                return []
+
+            context_path = f"{self.storage_path}/{session_id}/segments.json"
+            if not os.path.exists(context_path):
+                logger.warning(f"Segments file not found for session {session_id}")
+                return []
+
+            with open(context_path, "r") as f:
+                return json.load(f)
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in segments file for session {session_id}: {e}")
+            return []
 
     def create_session(self):
         """Create a new session and return its ID"""
@@ -1073,6 +1205,9 @@ class ContextualSessionManager:
         Parameters:
         session_id (str): Session ID
         query (str): The query to analyze
+        Parameters:
+        session_id (str): Session ID
+        query (str): The query to analyze
         
         Returns:
         bool: True if likely a cross-segment query
@@ -1116,8 +1251,6 @@ class ContextualSessionManager:
         except Exception as e:
             logger.error(f"Error in is_cross_segment_query: {e}")
             return False
-
-
 
 def fetch_data_by_ids(object_id, segment_id, project_id, conn):
     """Fetch data mappings from the database"""
@@ -1280,23 +1413,33 @@ def parse_data_with_context(
                 # Initialize context manager to get key mappings
                 context_manager = ContextualSessionManager()
                 key_mapping = context_manager.get_key_mapping(session_id)
+                session_names = context_manager.get_segments(session_id)
 
                 # Get the current state of target data if available
                 try:
                     # Get the target table name from joined_df
                     target_table = joined_df["table_name"].unique().tolist()
                     if target_table and len(target_table) > 0:
-                        # Get a connection to fetch current target data
-                        conn = sqlite3.connect("db.sqlite3")
-                        target_df = get_or_create_session_target_df(
-                            session_id, target_table[0], conn
-                        )
-                        target_df_sample = (
-                            target_df.head(5).to_dict("records")
-                            if not target_df.empty
-                            else []
-                        )
-                        conn.close()
+                        # Use SQL executor to get table sample instead of loading full DataFrame
+                        target_df_sample = sql_executor.get_table_sample(target_table[0])
+                        
+                        if isinstance(target_df_sample, dict) and "error_type" in target_df_sample:
+                            # If SQL approach fails, fall back to original method
+                            logger.warning(f"SQL sample retrieval failed, using fallback: {target_df_sample.get('error_message')}")
+                            # Get a connection to fetch current target data
+                            conn = sqlite3.connect("db.sqlite3")
+                            target_df = get_or_create_session_target_df(
+                                session_id, target_table[0], conn
+                            )
+                            target_df_sample = (
+                                target_df.head(5).to_dict("records")
+                                if not target_df.empty
+                                else []
+                            )
+                            conn.close()
+                        else:
+                            # Convert to dict records format for compatibility
+                            target_df_sample = target_df_sample.head(5).to_dict("records") if not target_df_sample.empty else []
                 except Exception as e:
                     logger.warning(f"Error getting target data sample: {e}")
                     target_df_sample = []
@@ -1316,6 +1459,7 @@ def parse_data_with_context(
     {target_df_sample}
      
     USER QUERY: {question}
+
 
     INSTRUCTIONS:
     1. Identify key entities in the query:
@@ -1468,7 +1612,7 @@ def parse_data_with_context(
                         )
 
                 # Add target table information
-                parsed_data["target_table"] = joined_df["table_name"].unique().tolist()
+                parsed_data["target_table_name"] = joined_df["table_name"].unique().tolist()
 
                 # Add key mapping information to the result
                 parsed_data["key_mapping"] = key_mapping
@@ -1488,7 +1632,7 @@ def parse_data_with_context(
         return None
 
 
-def process_query(object_id, segment_id, project_id, query, workspace_db,session_id=None, target_sap_fields=None):
+def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
     """
     Process a query with context awareness and automatic query type detection
     
@@ -1534,66 +1678,10 @@ def process_query(object_id, segment_id, project_id, query, workspace_db,session
             segment_id, 
             project_id, 
             query, 
-            workspace_db,
             session_id, 
             query_type, 
             classification_details,
             target_sap_fields  # Pass target_sap_fields to process_query_by_type
-        )
-    except Exception as e:
-        logger.error(f"Error in process_query: {e}")
-        logger.error(traceback.format_exc())
-        return None
-
-def process_query(object_id, segment_id, project_id, query, workspace_db,session_id=None):
-    """
-    Process a query with context awareness and automatic query type detection
-    
-    Parameters:
-    object_id (int): Object ID
-    segment_id (int): Segment ID
-    project_id (int): Project ID
-    query (str): The natural language query
-    session_id (str): Optional session ID for context tracking
-    
-    Returns:
-    dict: Processed information including context or None if key validation fails
-    """
-    try:
-        # Validate inputs
-        if not query or not isinstance(query, str):
-            logger.error(f"Invalid query: {query}")
-            return None
-
-        # Validate IDs
-        if not all(isinstance(x, int) for x in [object_id, segment_id, project_id]):
-            logger.error(
-                f"Invalid ID types: object_id={type(object_id)}, segment_id={type(segment_id)}, project_id={type(project_id)}"
-            )
-            return None
-
-        # Initialize context manager
-        context_manager = ContextualSessionManager()
-
-        # Create a session if none provided
-        if not session_id:
-            session_id = context_manager.create_session()
-            logger.info(f"Created new session: {session_id}")
-        
-        # Classify the query type using spaCy
-        query_type, classification_details = classify_query_with_spacy(query)
-        logger.info(f"Query classified as {query_type} with details: {json.dumps(classification_details, default=str)}")
-        
-        # Process the query based on its type
-        return process_query_by_type(
-            object_id, 
-            segment_id, 
-            project_id, 
-            query, 
-            workspace_db,
-            session_id, 
-            query_type, 
-            classification_details
         )
     except Exception as e:
         logger.error(f"Error in process_query: {e}")
@@ -1663,14 +1751,22 @@ def get_or_create_session_target_df(session_id, target_table, conn):
                 logger.error(f"Error reading existing target CSV: {e}")
                 # If there's an error reading the file, get fresh data from the database
 
-        # Get fresh target data from the database
+        # Get fresh target data from the database - use SQL executor
         try:
             # Validate target table name
             safe_table = validate_sql_identifier(target_table)
-
-            # Use a parameterized query for safety
-            query = f"SELECT * FROM {safe_table}"
-            target_df = pd.read_sql_query(query, conn)
+            
+            # Use SQL executor to get full table
+            target_df = sql_executor.execute_and_fetch_df(f"SELECT * FROM {safe_table}")
+            
+            if isinstance(target_df, dict) and "error_type" in target_df:
+                # If SQL executor failed, fall back to original approach
+                logger.warning(f"SQL approach failed in get_or_create_session_target_df, using fallback: {target_df.get('error_message')}")
+                
+                # Use a parameterized query for safety
+                query = f"SELECT * FROM {safe_table}"
+                target_df = pd.read_sql_query(query, conn)
+                
             return target_df
         except sqlite3.Error as e:
             logger.error(f"SQLite error in get_or_create_session_target_df: {e}")
@@ -1730,89 +1826,32 @@ def save_session_target_df(session_id, target_df):
         logger.error(f"Error in save_session_target_df: {e}")
         return False
 
-def is_workspace_table(table_name, session_id, workspace_db,segment_references=None):
+def clean_table_name(table_name):
     """
-    Check if a table name refers to a workspace table (from a previous segment)
+    Clean table name by removing common suffixes like 'Table', 'table', etc.
     
     Parameters:
-    table_name (str): Table name to check
-    session_id (str): Current session ID
-    segment_references (list, optional): List of segment references
+    table_name (str): The table name to clean
     
     Returns:
-    bool: True if it's a workspace table, False otherwise
+    str: Cleaned table name
     """
-    # First, check against segment references (faster)
-    if segment_references:
-        for ref in segment_references:
-            if ref.get("table_name") == table_name:
-                return True
-                
-        # Check for partial matches (table names may be slightly different)
-        table_lower = table_name.lower()
-        for ref in segment_references:
-            ref_table = ref.get("table_name", "").lower()
-            if ref_table and (ref_table in table_lower or table_lower in ref_table):
-                return True
-    
-    # If no match in segment_references but we have session_id, check the workspace DB
-    if session_id:
-        # Clean the table name first (remove 'Table' suffix if present)
-        cleaned_table = clean_table_name(table_name)
+    if not table_name:
+        return table_name
         
-        # Try to find this table in the workspace
-        workspace_table = workspace_db.get_segment_table_name(
-            session_id, segment_name=cleaned_table
-        )
-        if workspace_table:
-            return True
+    # Remove common suffixes
+    suffixes = [" Table", " table", " TABLE", "_Table", "_table", "_TABLE"]
+    cleaned_name = table_name
+    
+    for suffix in suffixes:
+        if cleaned_name.endswith(suffix):
+            cleaned_name = cleaned_name[:-len(suffix)]
+            break
             
-        # Also check with partial match
-        tables = workspace_db.list_session_tables(session_id)
-        for table_info in tables:
-            if cleaned_table.lower() in table_info['table_name'].lower():
-                return True
-    
-    return False
-
-def load_workspace_table(table_name, session_id,workspace_db):
-    """
-    Load a table from the workspace database
-    
-    Parameters:
-    table_name (str): Table name to load
-    session_id (str): Current session ID
-    
-    Returns:
-    pd.DataFrame: Loaded dataframe or empty dataframe if not found
-    """
-    if not session_id:
-        return pd.DataFrame()
-        
-    # Clean the table name first
-    cleaned_table = clean_table_name(table_name)
-    
-    try:
-        # First try exact name match
-        workspace_table = workspace_db.get_segment_table_name(
-            session_id, segment_name=cleaned_table
-        )
-        
-        if workspace_table:
-            return pd.read_sql_query(f"SELECT * FROM '{workspace_table}'", workspace_db.conn)
-            
-        # Try partial match
-        tables = workspace_db.list_session_tables(session_id)
-        for table_info in tables:
-            if cleaned_table.lower() in table_info['table_name'].lower():
-                return pd.read_sql_query(f"SELECT * FROM '{table_info['table_name']}'", workspace_db.conn)
-    except Exception as e:
-        logger.error(f"Error loading workspace table {cleaned_table}: {e}")
-    
-    return pd.DataFrame()
+    return cleaned_name
 
 
-def process_info(resolved_data, conn,workspace_db):
+def process_info(resolved_data, conn):
     """
     Process the resolved data to extract table information based on the query type
     
@@ -1836,29 +1875,29 @@ def process_info(resolved_data, conn,workspace_db):
         # Get query type - default to SIMPLE_TRANSFORMATION
         query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")
         
-        # Define required fields based on query type
+        # Define required fields based on query type (same as original)
         required_fields = {
             "SIMPLE_TRANSFORMATION": [
-                "source_table_name", "source_field_names", "target_table",
+                "source_table_name", "source_field_names", "target_table_name",
                 "filtering_fields", "Resolved_query", "insertion_fields", 
                 "target_sap_fields"
             ],
             "JOIN_OPERATION": [
-                "source_table_name", "source_field_names", "target_table",
+                "source_table_name", "source_field_names", "target_table_name",
                 "filtering_fields", "Resolved_query", "insertion_fields", 
                 "target_sap_fields", "join_conditions"
             ],
             "CROSS_SEGMENT": [
-                "source_table_name", "source_field_names", "target_table",
+                "source_table_name", "source_field_names", "target_table_name",
                 "filtering_fields", "Resolved_query", "insertion_fields", 
                 "target_sap_fields", "segment_references", "cross_segment_joins"
             ],
             "VALIDATION_OPERATION": [
-                "source_table_name", "source_field_names", "target_table",
+                "source_table_name", "source_field_names", "target_table_name",
                 "validation_rules", "target_sap_fields", "Resolved_query"
             ],
             "AGGREGATION_OPERATION": [
-                "source_table_name", "source_field_names", "target_table",
+                "source_table_name", "source_field_names", "target_table_name",
                 "aggregation_functions", "group_by_fields", "target_sap_fields", 
                 "Resolved_query"
             ]
@@ -1874,7 +1913,7 @@ def process_info(resolved_data, conn,workspace_db):
                 if field in ["source_table_name", "source_field_names", "filtering_fields", 
                             "insertion_fields", "group_by_fields"]:
                     resolved_data[field] = []
-                elif field in ["target_table", "target_sap_fields"]:
+                elif field in ["target_table_name", "target_sap_fields"]:
                     resolved_data[field] = []
                 elif field == "Resolved_query":
                     resolved_data[field] = ""
@@ -1894,7 +1933,7 @@ def process_info(resolved_data, conn,workspace_db):
             "query_type": query_type,
             "source_table_name": resolved_data["source_table_name"],
             "source_field_names": resolved_data["source_field_names"],
-            "target_table_name": resolved_data["target_table"],
+            "target_table_name": resolved_data["target_table_name"],
             "target_sap_fields": resolved_data["target_sap_fields"],
             "restructured_query": resolved_data["Resolved_query"],
         }
@@ -1924,94 +1963,44 @@ def process_info(resolved_data, conn,workspace_db):
             else:
                 result["filtering_fields"] = []
 
-        # Add data samples from each source table (first 5 rows)
+        # Add data samples using SQL approach for better memory efficiency
         source_data = {}
         try:
             for table in resolved_data["source_table_name"]:
-                # Clean the table name first to remove suffixes like "Table"
+                # Clean the table name to remove suffixes
                 cleaned_table = clean_table_name(table)
                 
-                # Check if this is a workspace table (for cross-segment operations)
-                session_id = resolved_data.get("session_id")
-                is_workspace = is_workspace_table(
-                    cleaned_table, 
-                    session_id, 
-                    workspace_db,
-                    resolved_data.get("segment_references", [])
-                )
-                
-                if is_workspace and session_id:
-                    logger.info(f"Loading workspace table {cleaned_table} for session {session_id}")
-                    # Load from workspace DB
-                    source_df = load_workspace_table(cleaned_table, session_id,workspace_db)
-                    if not source_df.empty:
-                        source_data[table] = source_df
-                        continue
-                    else:
-                        logger.warning(f"Workspace table {cleaned_table} is empty or not found")
-                
-                # If not a workspace table or workspace lookup failed, try regular table
                 try:
+                    # Validate the table name
                     safe_table = validate_sql_identifier(cleaned_table)
-                except SQLInjectionError:
-                    logger.warning(f"Invalid table name after cleaning: {cleaned_table} (original: {table})")
-                    source_data[table] = pd.DataFrame()
-                    continue
-                
-                # Validate field names
-                safe_fields = []
-                for field in resolved_data["source_field_names"]:
-                    try:
-                        safe_fields.append(validate_sql_identifier(field))
-                    except SQLInjectionError:
-                        logger.warning(f"Invalid field name skipped: {field}")
-
-                if not safe_fields:
-                    logger.warning(f"No valid fields for table {safe_table}")
-                    source_data[table] = pd.DataFrame()
-                    continue
-
-                # Build query with parameterized values
-                query = f"SELECT {','.join(safe_fields)} FROM {safe_table} LIMIT 5"
-
-                try:
-                    source_df = pd.read_sql_query(query, conn)
+                    
+                    # Use SQL executor to get a sample of data
+                    source_df = sql_executor.get_table_sample(safe_table, limit=5)
+                    
+                    if isinstance(source_df, dict) and "error_type" in source_df:
+                        # If SQL executor failed, fall back to original approach
+                        logger.warning(f"SQL source sample failed for {safe_table}, using fallback: {source_df.get('error_message')}")
+                        
+                        # Use pandas read_sql as fallback
+                        query = f"SELECT * FROM {safe_table} LIMIT 5"
+                        source_df = pd.read_sql_query(query, conn)
+                        
+                    # Store the sample data
                     source_data[table] = source_df
-                except sqlite3.Error as e:
-                    logger.error(f"SQLite error querying {safe_table}: {e}")
+                except Exception as e:
+                    logger.error(f"Error fetching source data for table {cleaned_table}: {e}")
                     source_data[table] = pd.DataFrame()
-
         except Exception as e:
             logger.error(f"Error getting source data samples: {e}")
-            # Continue with empty source data
             source_data = {}
-
+            
         result["source_data_samples"] = source_data
+        
+        # Add schema information
+        result["table_schemas"] = resolved_data.get("table_schemas", {})
+        result["target_table_schema"] = resolved_data.get("target_table_schema", [])
+        
         return result
     except Exception as e:
         logger.error(f"Error in process_info: {e}")
         return None
-    
-def clean_table_name(table_name):
-    """
-    Clean table name by removing common suffixes like 'Table', 'table', etc.
-    
-    Parameters:
-    table_name (str): The table name to clean
-    
-    Returns:
-    str: Cleaned table name
-    """
-    if not table_name:
-        return table_name
-        
-    # Remove common suffixes
-    suffixes = [" Table", " table", " TABLE", "_Table", "_table", "_TABLE"]
-    cleaned_name = table_name
-    
-    for suffix in suffixes:
-        if cleaned_name.endswith(suffix):
-            cleaned_name = cleaned_name[:-len(suffix)]
-            break
-            
-    return cleaned_name
