@@ -9,17 +9,16 @@ import traceback
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from token_tracker import track_token_usage, get_token_usage_stats
 from typing import Dict, Any
 
-from planner_sql import process_query as planner_process_query
-from planner_sql import (
+from planner import process_query as planner_process_query
+from planner import (
     validate_sql_identifier,
     APIError)
-from planner_sql import ContextualSessionManager
+from planner import ContextualSessionManager
 # Import the new SQLite modules
-from sql_generator import SQLGenerator
-from sql_executor import SQLExecutor
+from generator import SQLGenerator
+from executor import SQLExecutor
 
 # Set up logging
 logging.basicConfig(

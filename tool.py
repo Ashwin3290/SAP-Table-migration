@@ -1,4 +1,4 @@
-from dmtool_sql import DMToolSQL
+from dmtool import DMToolSQL
 
 # Initialize the system
 sql_tool = DMToolSQL()

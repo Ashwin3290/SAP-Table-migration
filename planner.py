@@ -9,7 +9,6 @@ from datetime import datetime
 import logging
 from google import genai
 from google.genai import types
-from token_tracker import track_token_usage, get_token_usage_stats
 from pathlib import Path
 import spacy
 import traceback
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Import SQL related modules
-from sql_executor import SQLExecutor
+from executor import SQLExecutor
 
 # Initialize SQL executor
 sql_executor = SQLExecutor()
@@ -1369,8 +1368,6 @@ def missing_values_handling(df):
         # Return the original dataframe if there's an error
         return df
 
-
-@track_token_usage(log_to_file=True, log_path="gemini_planner_usage.log")
 def parse_data_with_context(
     joined_df, query, session_id=None, previous_context=None, target_table_desc=None
 ):

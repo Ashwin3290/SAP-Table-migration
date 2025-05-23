@@ -18,7 +18,7 @@ from typing import Dict, List, Tuple, Any, Optional
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from dmtool_sql import DMToolSQL
+    from dmtool import DMToolSQL
 except ImportError:
     print("Error: Could not import DMToolSQL. Please ensure the module is available.")
     sys.exit(1)
