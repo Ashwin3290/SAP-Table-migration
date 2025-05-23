@@ -282,7 +282,7 @@ class SQLExecutor:
         """
         query = """
         SELECT name FROM sqlite_master 
-        WHERE type='table' AND name=?
+        WHERE type='table' AND name=? Limit 1
         """
         
         result = self.execute_query(query, {"table_name": table_name})

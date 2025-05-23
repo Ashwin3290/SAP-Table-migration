@@ -33,18 +33,15 @@ class SQLiteQueryAnalyzer:
             if self._is_valid_sqlite_query(sql_query):
                 return sql_query, sql_params, True
                 
-            logger.info(f"Analyzing and fixing SQLite query - initial query:\n{sql_query}")
             
             # First, analyze the query for issues
             analysis = self._analyze_sqlite_query(sql_query, planner_info)
-            logger.info(f"Query analysis result:\n{analysis}")
             
             best_query = sql_query
             best_params = sql_params
             
             # Make up to max_attempts to fix the query
             for attempt in range(max_attempts):
-                logger.info(f"Fix attempt {attempt + 1}/{max_attempts}")
                 
                 # Generate fixed query based on analysis and previous attempts
                 fixed_query, fixed_params = self._fix_sqlite_query(
@@ -57,14 +54,12 @@ class SQLiteQueryAnalyzer:
                 
                 # If the fixed query is valid, return it
                 if self._is_valid_sqlite_query(fixed_query):
-                    logger.info(f"Successfully fixed query on attempt {attempt + 1}")
                     return fixed_query, fixed_params, True
                     
                 # Check if this fixed query is better than the previous best
                 if self._compare_query_quality(fixed_query, best_query, planner_info):
                     best_query = fixed_query
                     best_params = fixed_params
-                    logger.info(f"Found better query on attempt {attempt + 1}")
                     
                 # Update analysis for next attempt
                 if attempt < max_attempts - 1:

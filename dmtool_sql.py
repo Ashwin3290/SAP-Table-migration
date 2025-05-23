@@ -12,20 +12,6 @@ from google.genai import types
 from token_tracker import track_token_usage, get_token_usage_stats
 from typing import Dict, Any
 
-# from planner import process_query as planner_process_query
-# from planner import (
-#     get_session_context,
-#     get_or_create_session_target_df,
-#     save_session_target_df,
-# )
-# from planner import (
-#     validate_sql_identifier,
-#     SQLInjectionError,
-#     SessionError,
-#     APIError,
-#     DataProcessingError,
-# )
-
 from planner_sql import process_query as planner_process_query
 from planner_sql import (
     validate_sql_identifier,
@@ -76,17 +62,11 @@ class QueryTemplateRepository:
         """
         self.template_file = template_file
         self.templates = self._load_templates()
-        try:
-            self.nlp = spacy.load("en_core_web_md")  # For similarity matching
-        except:
-            # Fallback to smaller model if medium not available
-            try:
-                self.nlp = spacy.load("en_core_web_sm")
-            except:
-                # In case no model is installed
-                from spacy.cli import download
-                download("en_core_web_sm")
-                self.nlp = spacy.load("en_core_web_sm")
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            logger.error("GEMINI_API_KEY not found in environment variables")
+            raise APIError("Gemini API key not configured")
+        self.client = genai.Client(api_key=api_key)
         
     def _load_templates(self):
         """
@@ -99,7 +79,6 @@ class QueryTemplateRepository:
             if os.path.exists(self.template_file):
                 with open(self.template_file, 'r') as f:
                     templates = json.load(f)
-                logger.info(f"Loaded {len(templates)} templates from {self.template_file}")
                 return templates
             else:
                 logger.warning(f"Template file {self.template_file} not found.")
@@ -108,9 +87,9 @@ class QueryTemplateRepository:
             logger.error(f"Error loading templates: {e}")
             return []
     
-    def find_matching_template(self, query, planner_info):
+    def find_matching_template(self, query):
         """
-        Find the best matching template for a given query
+        Find the best matching template for a given query using LLM
         
         Parameters:
         query (str): The natural language query
@@ -119,35 +98,86 @@ class QueryTemplateRepository:
         dict: The best matching template or None if no good match
         """
         try:
-            # Preprocess the query
-            query_doc = self.nlp(query.lower())
+            # Check if we have templates and LLM client
+            if not self.templates:
+                logger.warning("No templates available")
+                return None
             
-            best_match = None
-            highest_similarity = 0.5  # Threshold for considering a match
+            # Extract template prompts for LLM matching
+            template_options = []
+            for i, template in enumerate(self.templates):
+                template_options.append(f"{i+1}. ID: {template['id']}\n   Pattern: {template['prompt']}")
             
-            # Test against each template
-            for template in self.templates:
-                # Check pattern similarity
-                template= self.customize_template(template, query, planner_info)
-                pattern_doc = self.nlp(template["prompt"].lower())
+            # Create LLM prompt for template matching
+            llm_prompt = f"""You are an expert at matching user queries to data transformation templates.
+
+    USER QUERY: "{query}"
+
+    AVAILABLE TEMPLATES:
+    {chr(10).join(template_options)}
+
+    INSTRUCTIONS:
+    Analyze the user query and determine which template pattern best matches the intent and structure.
+
+    Consider:
+    - Query operations (bring, add, delete, update, check, join, etc.)
+    - Data sources (tables, fields, segments)
+    - Conditional logic (IF/ELSE, CASE statements)
+    - Filtering conditions (WHERE clauses)
+    - Transformations (date formatting, string operations, etc.)
+
+    Respond with ONLY the template ID (nothing else).
+
+    Examples:
+    - "Bring Material Number from MARA where Material Type = ROH" → simple_filter_transformation
+    - "If Plant is 1000 then 'Domestic' else 'International'" → conditional_value_assignment  
+    - "Add new column for current date" → get_current_date
+    - "Join data from Basic segment with Sales segment" → join_segment_data
+
+    Template ID:"""
+
+            try:
+                # Call LLM (assuming Gemini client is available as self.client)
+                from google.genai import types
                 
-                # Calculate similarity
-                similarity = query_doc.similarity(pattern_doc)
+                response = self.client.models.generate_content(
+                    model="gemini-2.5-flash-preview-04-17",
+                    contents=llm_prompt,
+                    config=types.GenerateContentConfig(temperature=0.1)
+                )
                 
-                if similarity > highest_similarity:
-                    highest_similarity = similarity
-                    best_match = template
-            
-            if best_match:
-                logger.info(f"Found matching template '{best_match['id']}' with similarity {highest_similarity:.2f}")
-            else:
-                logger.info(f"No matching template found with similarity above {highest_similarity:.2f}")
+                if response and hasattr(response, "text"):
+                    # Extract template ID from response
+                    template_id = response.text.strip().strip('"').strip("'").lower()
+                    
+                    # Find the matching template
+                    best_match = None
+                    for template in self.templates:
+                        if template['id'].lower() == template_id:
+                            best_match = template
+                            break
+                    
+                    if best_match:
+                        return best_match
+                    else:
+                        logger.warning(f"Template ID '{template_id}' not found in available templates")
+                        # Try partial matching as fallback
+                        for template in self.templates:
+                            if template_id in template['id'].lower() or template['id'].lower() in template_id:
+                                return template
+                        
+                        return {}
+                else:
+                    logger.warning("Invalid response from LLM")
+                    return {}
+                    
+            except Exception as llm_error:
+                logger.error(f"Error calling LLM for template matching: {llm_error}")
+                return {}
                 
-            return best_match
         except Exception as e:
             logger.error(f"Error finding matching template: {e}")
-            return None
-        
+            return None    
     def customize_template(self, template, query, planner_info):
         """
         Customize a template with specific query details
@@ -498,7 +528,7 @@ class DMToolSQL:
         
     def _get_segment_name(self, segment_id,conn):
         cursor = conn.cursor()
-        cursor.execute("SELECT name FROM connection_segments WHERE id = ?", (segment_id,))
+        cursor.execute("SELECT segement_name FROM connection_segments WHERE segment_id = ?", (segment_id,))
         result = cursor.fetchone()
         if result:
             return result[0]
@@ -534,10 +564,11 @@ class DMToolSQL:
                     f"Invalid ID types: object_id={type(object_id)}, segment_id={type(segment_id)}, project_id={type(project_id)}"
                 )
                 return None, "Invalid ID types - must be integers", session_id
+            
+            context_manager = ContextualSessionManager()
 
             # Create or get session ID
             if not session_id:
-                context_manager = ContextualSessionManager()
                 session_id = context_manager.create_session()
                 logger.info(f"Created new session: {session_id}")
                 
@@ -556,7 +587,7 @@ class DMToolSQL:
                 return None, "Failed to resolve query", session_id
             
             # Find matching template
-            template = self.query_template_repo.find_matching_template(query, resolved_data)
+            template = self.query_template_repo.find_matching_template(query)
             if not template:
                 logger.error("No matching template found for query")
                 # Create a basic fallback template
@@ -568,7 +599,6 @@ class DMToolSQL:
                 }
             # Get query type from resolved data
             query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")
-            logger.info(f"Query type determined as: {query_type}")
             # Get session ID from the results
             session_id = resolved_data.get("session_id")
 
@@ -603,7 +633,6 @@ class DMToolSQL:
                             if table not in source_tables:
                                 source_tables.append(table)
                         resolved_data["source_table_name"] = source_tables
-                        logger.info(f"Updated source tables with segment references: {source_tables}")
 
                 # Extract and organize planner information
                 planner_info = self._extract_planner_info(resolved_data)
@@ -613,8 +642,6 @@ class DMToolSQL:
                 
                 # 3. Generate SQLite query instead of Python code
                 sql_query, sql_params = self.sql_generator.generate_sql(sql_plan, planner_info, template)
-                logger.info(f"Generated SQLite query:\n{sql_query}")
-                logger.info(f"SQLite parameters: {sql_params}")
                 
                 # 4. Execute the SQLite query
                 result = self._execute_sql_query(sql_query, sql_params, planner_info)
@@ -622,12 +649,50 @@ class DMToolSQL:
                 # 5. Process the results
                 if isinstance(result, dict) and "error_type" in result:
                     logger.error(f"SQLite execution error: {result}")
-                    return sql_query, f"SQLite execution failed: {result.get('error_message', 'Unknown error')}", session_id
+                    return  f"SQLite execution failed: {result.get('error_message', 'Unknown error')}", session_id
                 
-                # Continue with the rest of the method...
-                # (The rest remains the same)
-                
-                return sql_query, "Operation completed successfully", session_id
+                # 6. Register the target table for this segment
+                if "target_table_name" in resolved_data:
+                    target_table = resolved_data["target_table_name"]
+                    if isinstance(target_table, list) and len(target_table) > 0:
+                        target_table = target_table[0]
+                                        # add session info
+                segment_name = self._get_segment_name(segment_id, conn)
+                if segment_name:
+                    context_manager.add_segment(
+                        session_id,
+                        segment_name,
+                        planner_info["target_table_name"],
+                    )
+                if target_table and query_type in ["SIMPLE_TRANSFORMATION", "JOIN_OPERATION", "CROSS_SEGMENT", "AGGREGATION_OPERATION"]:
+                    try:
+                        # Get the full target table data to show actual results
+                        select_query = f"SELECT * FROM {validate_sql_identifier(target_table)}"
+                        target_data = self.sql_executor.execute_and_fetch_df(select_query)
+                        
+                        if isinstance(target_data, pd.DataFrame) and not target_data.empty:
+                            # Return the actual target table data
+                            rows_affected = len(target_data)
+                            non_null_columns = target_data.dropna(axis=1, how='all').columns.tolist()
+                            
+                            # Add metadata to the DataFrame
+                            target_data.attrs['transformation_summary'] = {
+                                'rows': rows_affected,
+                                'populated_fields': non_null_columns,
+                                'target_table': target_table,
+                                'query_type': query_type
+                            }
+                            
+                            return  target_data, session_id
+                        else:
+                            # Target table exists but is empty
+                            empty_df = pd.DataFrame()
+                            empty_df.attrs['message'] = f"Target table '{target_table}' is empty after transformation"
+                            return  empty_df, session_id
+                            
+                    except Exception as e:
+                        # Fallback to execution result if can't fetch target data
+                        return  result, session_id
                         
             except Exception as e:
                 logger.error(f"Error in process_sequential_query: {e}")
@@ -635,6 +700,7 @@ class DMToolSQL:
                 if conn:
                     conn.close()
                 return None, f"An error occurred during processing: {e}", session_id
+                        
 
         except Exception as e:
             logger.error(f"Outer error in process_sequential_query: {e}")

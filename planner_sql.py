@@ -493,7 +493,6 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         # If query_type not provided, determine it now
         if not query_type:
             query_type, classification_details = classify_query_with_spacy(query)
-            logger.info(f"Classified query as {query_type}")
         
         # Get the appropriate prompt template
         prompt_template = PROMPT_TEMPLATES.get(query_type, PROMPT_TEMPLATES["SIMPLE_TRANSFORMATION"])
@@ -1335,9 +1334,6 @@ def missing_values_handling(df):
                     df_processed["source_table"] = df_processed["source_table"].fillna(
                         fill_value
                     )
-                    logger.info(
-                        f"Filled {df_processed['source_table'].isna().sum()} nulls in source_table with '{fill_value}'"
-                    )
 
         # Handle source_field_name based on target_sap_field
         if (
@@ -1365,9 +1361,6 @@ def missing_values_handling(df):
                 if fill_indices.any():
                     df_processed.loc[fill_indices, "source_field_name"] = (
                         df_processed.loc[fill_indices, "target_sap_field"]
-                    )
-                    logger.info(
-                        f"Filled {fill_indices.sum()} nulls in source_field_name from target_sap_field"
                     )
 
         return df_processed
@@ -1581,7 +1574,6 @@ def parse_data_with_context(
                 raise APIError("Failed to get valid response from Gemini API")
 
             # Log token usage statistics
-            logger.info(f"Current token usage: {get_token_usage_stats()}")
 
             # Parse the JSON response with error handling
             try:
@@ -1670,7 +1662,6 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
         
         # Classify the query type using spaCy
         query_type, classification_details = classify_query_with_spacy(query)
-        logger.info(f"Query classified as {query_type} with details: {json.dumps(classification_details, default=str)}")
         
         # Process the query based on its type
         return process_query_by_type(
