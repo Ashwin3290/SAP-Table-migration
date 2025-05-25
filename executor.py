@@ -3,7 +3,11 @@ import sqlite3
 import re
 import pandas as pd
 import uuid
+import os
+from dotenv import load_dotenv
 from typing import Dict, List, Any, Optional, Union, Tuple
+
+load_dotenv()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -12,7 +16,7 @@ logger = logging.getLogger(__name__)
 class SQLExecutor:
     """Executes SQL queries against the database"""
     
-    def __init__(self, db_path="db.sqlite3"):
+    def __init__(self, db_path=os.environ.get('DB_PATH')):
         """Initialize the SQL executor
         
         Parameters:

@@ -442,7 +442,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         visited_segments = previous_context.get("segments_visited", {}) if previous_context else {}
         
         # Connect to database
-        conn = sqlite3.connect("db.sqlite3")
+        conn = sqlite3.connect(os.environ.get('DB_PATH'))
         
         # Track current segment
         try:
@@ -900,11 +900,12 @@ class ContextualSessionManager:
                     segments = []
             
             # Add the new segment
-            segments.append(
-                {
+            segment_info ={
                     "segment_name": segment_name,
                     "target_table_name": target_table_name,
-                })
+                }
+            if segment_info not in segments:
+                segments.append()
             
             # Save the updated segments
             with open(context_path, "w") as f:
@@ -1417,7 +1418,7 @@ def parse_data_with_context(
                             # If SQL approach fails, fall back to original method
                             logger.warning(f"SQL sample retrieval failed, using fallback: {target_df_sample.get('error_message')}")
                             # Get a connection to fetch current target data
-                            conn = sqlite3.connect("db.sqlite3")
+                            conn = sqlite3.connect(os.environ.get('DB_PATH'))
                             target_df = get_or_create_session_target_df(
                                 session_id, target_table[0], conn
                             )

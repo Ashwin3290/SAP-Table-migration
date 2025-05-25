@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-
 class CodeGenerationError(Exception):
     """Exception raised for code generation errors."""
     pass
@@ -289,10 +288,10 @@ class QueryTemplateRepository:
                 "plan": ["1. Generate basic query based on requirements"],
                 "query": "SELECT * FROM source_table"
             }
-class DMToolSQL:
+class DMTool:
     """SQLite-based DMTool for optimized data transformations using direct SQLite queries"""
 
-    def __init__(self, db_path="db.sqlite3"):
+    def __init__(self, DB_PATH=os.environ.get('DB_PATH')):
         """Initialize the DMToolSQL instance"""
         try:
             # Configure Gemini
@@ -305,7 +304,7 @@ class DMToolSQL:
  
             # Initialize SQLite components
             self.sql_generator = SQLGenerator()
-            self.sql_executor = SQLExecutor(db_path=db_path)
+            self.sql_executor = SQLExecutor()
             self.query_template_repo = QueryTemplateRepository()
 
             # Current session context
@@ -603,7 +602,7 @@ class DMToolSQL:
 
             # Connect to database for sample data gathering
             try:
-                conn = sqlite3.connect("db.sqlite3")
+                conn = sqlite3.connect(os.environ.get('DB_PATH'))
             except sqlite3.Error as e:
                 logger.error(f"Failed to connect to database: {e}")
                 return None, f"Database connection error: {e}", session_id
@@ -932,7 +931,7 @@ class DMToolSQL:
             table_name = validate_sql_identifier(table_name)
             
             # Connect directly to the database
-            conn = sqlite3.connect("db.sqlite3")
+            conn = sqlite3.connect(os.environ.get('DB_PATH'))
             
             # Write the DataFrame to the table
             df.to_sql(table_name, conn, if_exists="replace", index=False)

@@ -1,17 +1,19 @@
-from dmtool import DMToolSQL
+from dmtool import DMTool
 
 # Initialize the system
-sql_tool = DMToolSQL()
+dm_tool = DMTool()
 
 # Process a natural language query
 query = """
-For every material in the target table, fetch the LAEDA field from the MARA table (using  MATNR as the key), and update the LIQDT field in your target table with this value.
+
+bring customer FROM BUT000 table for BU_GROUPING = BP03 and check if same number is available from Group (KTOKD = CUST ) in KNA1. matching entries should come under customer
+
 """
-result, session_id = sql_tool.process_sequential_query(
+result, session_id = dm_tool.process_sequential_query(
     query,
-    object_id=41,
-    segment_id=577,
-    project_id=24,
+    object_id=37,
+    segment_id=463,
+    project_id=25,
     session_id = '6239dcf9-1dd0-423f-8f0e-a065335d58d1'
 
 )
