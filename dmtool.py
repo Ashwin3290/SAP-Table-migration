@@ -176,118 +176,120 @@ class QueryTemplateRepository:
         except Exception as e:
             logger.error(f"Error finding matching template: {e}")
             return None    
+        
     def customize_template(self, template, query, planner_info):
-        """
-        Customize a template with specific query details
-        
-        Parameters:
-        template (dict): The template to customize
-        query (str): The original query
-        planner_info (dict): The planner information
-        
-        Returns:
-        dict: Customized template with query-specific values
-        """
-        try:
-            # FIX: Add null checking for planner_info
-            if planner_info is None:
-                logger.warning("planner_info is None in customize_template, using empty dict")
-                planner_info = {}
+            """
+            Customize a template with specific query details
             
-            # Extract relevant fields from planner_info with safe access
-            source_tables = planner_info.get("source_table_name", [])
-            source_fields = planner_info.get("source_field_names", [])
-            target_table = planner_info.get("target_table_name", [])
-            target_fields = planner_info.get("target_sap_fields", [])
-            filtering_fields = planner_info.get("filtering_fields", [])
-            conditions = planner_info.get("extracted_conditions", {})
+            Parameters:
+            template (dict): The template to customize
+            query (str): The original query
+            planner_info (dict): The planner information
             
-            # Handle target_table as list or single value
-            if isinstance(target_table, list) and len(target_table) > 0:
-                target_table = target_table[0]
-            elif not target_table:
-                target_table = None
-            
-            # Initialize template customization with basic fields
-            template_values = {
-                "target_table": target_table,
-                "target_field": target_fields[0] if target_fields else None,
-                "target_fields": ", ".join(target_fields) if target_fields else "",
-                "key_field": "MATNR"  # Default key field for SAP
-            }
-            
-            # Add source table and field values
-            if source_tables and len(source_tables) > 0:
-                template_values["table"] = source_tables[0]
+            Returns:
+            dict: Customized template with query-specific values
+            """
+            try:
+                # FIX: Add null checking for planner_info
+                if planner_info is None:
+                    logger.warning("planner_info is None in customize_template, using empty dict")
+                    planner_info = {}
                 
-                # Add additional tables if available
-                if len(source_tables) > 1:
-                    template_values["table1"] = source_tables[0]
-                    template_values["table2"] = source_tables[1]
-                if len(source_tables) > 2:
-                    template_values["table3"] = source_tables[2]
-            
-            # Add source fields
-            if source_fields and len(source_fields) > 0:
-                template_values["field"] = source_fields[0]
+                # Extract relevant fields from planner_info with safe access
+                source_tables = planner_info.get("source_table_name", [])
+                insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields instead of source_field_names
+                target_table = planner_info.get("target_table_name", [])
+                target_fields = planner_info.get("target_sap_fields", [])
+                filtering_fields = planner_info.get("filtering_fields", [])
+                conditions = planner_info.get("extracted_conditions", {})
                 
-                # Add additional fields if available
-                if len(source_fields) > 1:
-                    template_values["field1"] = source_fields[0]
-                    template_values["field2"] = source_fields[1]
-                if len(source_fields) > 2:
-                    template_values["field3"] = source_fields[2]
-            
-            # Add filter conditions
-            if filtering_fields and len(filtering_fields) > 0:
-                template_values["filter_field"] = filtering_fields[0]
-                if filtering_fields[0] in conditions:
-                    template_values["filter_value"] = conditions[filtering_fields[0]]
-            
-            # FIX: Ensure template is not None
-            if template is None:
-                logger.error("Template is None in customize_template")
-                return {
-                    "values": template_values,
-                    "customized_plan": [],
-                    "customized_query": ""
+                # Handle target_table as list or single value
+                if isinstance(target_table, list) and len(target_table) > 0:
+                    target_table = target_table[0]
+                elif not target_table:
+                    target_table = None
+                
+                # Initialize template customization with basic fields
+                template_values = {
+                    "target_table": target_table,
+                    "target_field": target_fields[0] if target_fields else None,
+                    "target_fields": ", ".join(target_fields) if target_fields else "",
+                    "key_field": "MATNR"  # Default key field for SAP
                 }
-            
-            # Create the customized template
-            customized = template.copy()
-            customized["values"] = template_values
-            
-            # Customize the plan by replacing placeholders
-            customized["customized_plan"] = []
-            plan = template.get("plan", [])
-            if isinstance(plan, list):
-                for step in plan:
-                    customized_step = str(step)  # Ensure it's a string
-                    for key, value in template_values.items():
-                        if value is not None:
-                            placeholder = "{" + key + "}"
-                            customized_step = customized_step.replace(placeholder, str(value))
-                    customized["customized_plan"].append(customized_step)
-            
-            # Customize query template
-            query_template = template.get("query", "")
-            customized["customized_query"] = str(query_template)  # Ensure it's a string
-            for key, value in template_values.items():
-                if value is not None:
-                    placeholder = "{" + key + "}"
-                    customized["customized_query"] = customized["customized_query"].replace(placeholder, str(value))
-            
-            return customized
-        except Exception as e:
-            logger.error(f"Error customizing template: {e}")
-            # Return a safe fallback
-            return {
-                "values": {},
-                "customized_plan": ["1. Generate basic query based on requirements"],
-                "customized_query": "SELECT * FROM source_table",
-                "plan": ["1. Generate basic query based on requirements"],
-                "query": "SELECT * FROM source_table"
-            }
+                
+                # Add source table and field values
+                if source_tables and len(source_tables) > 0:
+                    template_values["table"] = source_tables[0]
+                    
+                    # Add additional tables if available
+                    if len(source_tables) > 1:
+                        template_values["table1"] = source_tables[0]
+                        template_values["table2"] = source_tables[1]
+                    if len(source_tables) > 2:
+                        template_values["table3"] = source_tables[2]
+                
+                # FIXED: Add insertion fields (for actual data operations)
+                if insertion_fields and len(insertion_fields) > 0:
+                    template_values["field"] = insertion_fields[0]  # FIXED: Use insertion_fields
+                    
+                    # Add additional fields if available
+                    if len(insertion_fields) > 1:
+                        template_values["field1"] = insertion_fields[0]
+                        template_values["field2"] = insertion_fields[1]
+                    if len(insertion_fields) > 2:
+                        template_values["field3"] = insertion_fields[2]
+                
+                # Add filter conditions (separate from insertion fields)
+                if filtering_fields and len(filtering_fields) > 0:
+                    template_values["filter_field"] = filtering_fields[0]
+                    if filtering_fields[0] in conditions:
+                        template_values["filter_value"] = conditions[filtering_fields[0]]
+                
+                # FIXED: Ensure template is not None
+                if template is None:
+                    logger.error("Template is None in customize_template")
+                    return {
+                        "values": template_values,
+                        "customized_plan": [],
+                        "customized_query": ""
+                    }
+                
+                # Create the customized template
+                customized = template.copy()
+                customized["values"] = template_values
+                
+                # Customize the plan by replacing placeholders
+                customized["customized_plan"] = []
+                plan = template.get("plan", [])
+                if isinstance(plan, list):
+                    for step in plan:
+                        customized_step = str(step)  # Ensure it's a string
+                        for key, value in template_values.items():
+                            if value is not None:
+                                placeholder = "{" + key + "}"
+                                customized_step = customized_step.replace(placeholder, str(value))
+                        customized["customized_plan"].append(customized_step)
+                
+                # Customize query template
+                query_template = template.get("query", "")
+                customized["customized_query"] = str(query_template)  # Ensure it's a string
+                for key, value in template_values.items():
+                    if value is not None:
+                        placeholder = "{" + key + "}"
+                        customized["customized_query"] = customized["customized_query"].replace(placeholder, str(value))
+                
+                return customized
+            except Exception as e:
+                logger.error(f"Error customizing template: {e}")
+                # Return a safe fallback
+                return {
+                    "values": {},
+                    "customized_plan": ["1. Generate basic query based on requirements"],
+                    "customized_query": "SELECT * FROM source_table",
+                    "plan": ["1. Generate basic query based on requirements"],
+                    "query": "SELECT * FROM source_table"
+                }
+
 class DMTool:
     """SQLite-based DMTool for optimized data transformations using direct SQLite queries"""
 

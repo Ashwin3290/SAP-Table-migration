@@ -89,7 +89,7 @@ class SQLGenerator:
             # Log the information we're working with
             logger.info(f"Generating SQLite query for query: {planner_info.get('original_query', '')}")
             logger.info(f"Source tables: {planner_info.get('source_table_name', [])}")
-            logger.info(f"Source fields: {planner_info.get('source_field_names', [])}")
+            logger.info(f"Insertion fields: {planner_info.get('insertion_fields', [])}")  # FIXED: Log insertion fields instead
             logger.info(f"Target table: {planner_info.get('target_table_name', [])}")
             logger.info(f"Target fields: {planner_info.get('target_sap_fields', [])}")
             logger.info(f"Filtering fields: {planner_info.get('filtering_fields', [])}")
@@ -164,7 +164,7 @@ class SQLGenerator:
             # Extract key information for the prompt
             query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
             source_tables = planner_info.get("source_table_name", [])
-            source_fields = planner_info.get("source_field_names", [])
+            insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields
             target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
             target_fields = planner_info.get("target_sap_fields", [])
             filtering_fields = planner_info.get("filtering_fields", [])
@@ -181,19 +181,24 @@ class SQLGenerator:
     CONTEXT INFORMATION:
     - Query Type: {query_type}
     - Source Tables: {source_tables}
-    - Source Fields: {source_fields}
+    - Insertion Fields: {insertion_fields}  
     - Target Table: {target_table}
     - Target Fields: {target_fields}
     - Filtering Fields: {filtering_fields}
     - Filtering Conditions: {json.dumps(conditions, indent=2)}
+
+    IMPORTANT: 
+    - Insertion Fields are the ONLY fields that should be inserted/updated into the target table
+    - Filtering Fields should ONLY be used in WHERE clauses, NEVER in INSERT or UPDATE field lists
+    - Do not mix insertion fields with filtering fields
 
     Based on the query intent, create a detailed plan for generating an efficient SQLite query, 
     structured as numbered steps. Carefully consider:
 
     1. The query type and appropriate SQLite operation (SELECT, INSERT, UPDATE, etc.)
     2. Proper table references and aliases
-    3. Precise column selections
-    4. Correct filter conditions
+    3. Precise column selections (ONLY insertion fields for data operations)
+    4. Correct filter conditions (using filtering fields in WHERE clauses)
     5. Join conditions (if applicable)
     6. Proper ordering of operations
 
@@ -242,7 +247,7 @@ class SQLGenerator:
             # Extract key information for the prompt
             query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
             source_tables = planner_info.get("source_table_name", [])
-            source_fields = planner_info.get("source_field_names", [])
+            insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields
             target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
             target_fields = planner_info.get("target_sap_fields", [])
             filtering_fields = planner_info.get("filtering_fields", [])
@@ -269,17 +274,28 @@ class SQLGenerator:
     Use the given template to generate the SQLite Query:
     {template}
 
-
     CONTEXT INFORMATION:
     - Query Type: {query_type}
     - Source Tables: {source_tables}
-    - Source Fields: {source_fields}
+    - Insertion Fields: {insertion_fields}  
     - Target Table: {target_table}
     - Target Fields: {target_fields}
     - Filtering Fields: {filtering_fields}
     - Filtering Conditions: {json.dumps(conditions, indent=2)}
     - Key Mapping: {json.dumps(key_mapping, indent=2)}
     - Target Table Has Data: {target_has_data}
+
+    CRITICAL FIELD USAGE RULES:
+    1. Insertion Fields ({insertion_fields}) are the ONLY fields that should appear in:
+       - INSERT INTO field lists
+       - UPDATE SET clauses
+       - SELECT clauses for data retrieval operations
+    2. Filtering Fields ({filtering_fields}) should ONLY appear in:
+       - WHERE clauses
+       - JOIN conditions for filtering
+       - HAVING clauses
+    3. NEVER mix insertion fields with filtering fields in INSERT/UPDATE operations
+    4. If a field appears in both lists, use it according to the operation context
 
     IMPORTANT REQUIREMENTS:
     1. Generate ONLY standard SQLite SQL syntax (not MS SQL, MySQL, PostgreSQL, etc.)
@@ -288,7 +304,7 @@ class SQLGenerator:
     4. If Target Table Has Data = False, use INSERT operations
     5. For validation queries only, use SELECT operations
     6. Always include WHERE clauses for all filter conditions using exact literal values
-    7. If source fields are requested (like MATNR), make sure they are included in the query
+    7. If insertion fields are requested, make sure ONLY they are included in the INSERT/UPDATE
     8. Properly handle key fields for matching records in UPDATE operations
     9. Return ONLY the final SQL query with no explanations or markdown formatting
 
@@ -304,12 +320,14 @@ class SQLGenerator:
     INSERT INTO target_table (MATNR)
     SELECT MATNR FROM MARA
     WHERE MTART = 'ROH'
+    Note: MTART is filtering field (WHERE clause), MATNR is insertion field (SELECT/INSERT)
 
     - For "Bring Material Number with Material Type = ROH from MARA Table" with existing target data:
     UPDATE target_table
     SET MATNR = source.MATNR
     FROM (SELECT MATNR FROM MARA WHERE MTART = 'ROH') AS source
     WHERE target_table.MATNR = source.MATNR
+    Note: MTART is filtering field (WHERE clause), MATNR is insertion field (SET clause)
 
     - For "Validate material numbers in MARA":
     SELECT MATNR,
@@ -346,22 +364,29 @@ class SQLGenerator:
             else:
                 logger.warning("Invalid response from LLM in generate_sql_with_llm")
                 
-                # Generate fallback query
+                # Generate fallback query using insertion fields
                 if target_has_data and query_type != "VALIDATION_OPERATION":
                     # UPDATE operation - SQLite specific syntax
-                    fallback = f"UPDATE {target_table} SET {target_fields[0]} = source.{source_fields[0]} FROM (SELECT {', '.join(source_fields)} FROM {source_tables[0]}) AS source WHERE {target_table}.{target_fields[0]} = source.{source_fields[0]}"
+                    if insertion_fields and target_fields:
+                        fallback = f"UPDATE {target_table} SET {target_fields[0]} = source.{insertion_fields[0]} FROM (SELECT {', '.join(insertion_fields)} FROM {source_tables[0]}) AS source WHERE {target_table}.{target_fields[0]} = source.{insertion_fields[0]}"
+                    else:
+                        fallback = f"UPDATE {target_table} SET field = 'value'"
                 elif query_type == "VALIDATION_OPERATION":
                     # SELECT for validation
                     fallback = f"SELECT * FROM {source_tables[0]}"
                 else:
                     # INSERT operation
-                    fallback = f"INSERT INTO {target_table} ({', '.join(target_fields)}) SELECT {', '.join(source_fields)} FROM {source_tables[0]}"
+                    if insertion_fields and target_fields:
+                        fallback = f"INSERT INTO {target_table} ({', '.join(target_fields)}) SELECT {', '.join(insertion_fields)} FROM {source_tables[0]}"
+                    else:
+                        fallback = f"SELECT * FROM {source_tables[0]}"
                     
                 return fallback, {}
             
         except Exception as e:
             logger.error(f"Error in generate_sql_with_llm: {e}")
             return "SELECT * FROM " + str(source_tables[0] if source_tables else "unknown_table"), {}
+
     def _generate_simple_transformation(self, planner_info: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
         """Generate SQL for simple transformations
         
@@ -373,15 +398,16 @@ class SQLGenerator:
         """
         # Extract necessary information
         source_tables = planner_info.get("source_table_name", [])
-        source_fields = planner_info.get("source_field_names", [])
+        insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields
         target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
         target_fields = planner_info.get("target_sap_fields", [])
         filtering_fields = planner_info.get("filtering_fields", [])
         conditions = planner_info.get("extracted_conditions", {})
         
         # Handle missing or empty values
-        if not source_tables or not source_fields or not target_table or not target_fields:
+        if not source_tables or not insertion_fields or not target_table or not target_fields:
             logger.error("Missing essential information for SQL generation")
+            logger.error(f"source_tables: {source_tables}, insertion_fields: {insertion_fields}, target_table: {target_table}, target_fields: {target_fields}")
             return "", {}
         
         # Use the first source table if multiple are provided
@@ -394,12 +420,12 @@ class SQLGenerator:
         operation_type = self._determine_operation_type(planner_info)
         
         if operation_type == "INSERT":
-            # Generate INSERT query
-            return self._build_insert_query(source_table, target_table, source_fields, target_fields, 
+            # Generate INSERT query using insertion_fields
+            return self._build_insert_query(source_table, target_table, insertion_fields, target_fields, 
                                           filtering_fields, conditions)
         else:
-            # Generate UPDATE query
-            return self._build_update_query(source_table, target_table, source_fields, target_fields,
+            # Generate UPDATE query using insertion_fields
+            return self._build_update_query(source_table, target_table, insertion_fields, target_fields,
                                           filtering_fields, conditions)
     
     def _generate_join_operation(self, planner_info: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
@@ -413,7 +439,7 @@ class SQLGenerator:
         """
         # Extract necessary information
         source_tables = planner_info.get("source_table_name", [])
-        source_fields = planner_info.get("source_field_names", [])
+        insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields
         target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
         target_fields = planner_info.get("target_sap_fields", [])
         join_conditions = planner_info.get("join_conditions", [])
@@ -467,11 +493,11 @@ class SQLGenerator:
                     # Fallback to CROSS JOIN if no common fields
                     join_clauses.append(f"CROSS JOIN {table} {alias}")
         
-        # Build field selection with appropriate table aliases
+        # Build field selection with appropriate table aliases - ONLY use insertion_fields
         select_fields = []
         field_mapping = {}
         
-        for field in source_fields:
+        for field in insertion_fields:  # FIXED: Only iterate over insertion_fields
             # Determine which table this field belongs to
             for i, table in enumerate(source_tables):
                 alias = f"t{i+1}"
@@ -479,7 +505,7 @@ class SQLGenerator:
                 select_fields.append(f"{alias}.{field} AS {field}")
                 break
         
-        # Build WHERE clause
+        # Build WHERE clause using filtering_fields only
         where_clause, params = self._build_where_clause(filtering_fields, conditions, field_mapping)
         
         # Determine operation type
@@ -506,13 +532,13 @@ class SQLGenerator:
             """
             
             # Determine key field for matching
-            key_field = self._get_key_field(planner_info, target_fields, source_fields)
+            key_field = self._get_key_field(planner_info, target_fields, insertion_fields)  # FIXED: Use insertion_fields
             
             if key_field:
                 # Build UPDATE query with CTE
                 set_clauses = []
                 for field in target_fields:
-                    if field != key_field and field in source_fields:
+                    if field != key_field and field in insertion_fields:  # FIXED: Check against insertion_fields
                         set_clauses.append(f"{field} = joined_data.{field}")
                 
                 if set_clauses:
@@ -553,7 +579,7 @@ class SQLGenerator:
         """
         # Extract necessary information
         source_tables = planner_info.get("source_table_name", [])
-        source_fields = planner_info.get("source_field_names", [])
+        insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields
         target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
         target_fields = planner_info.get("target_sap_fields", [])
         segment_references = planner_info.get("segment_references", [])
@@ -615,16 +641,16 @@ class SQLGenerator:
                 # Fallback to CROSS JOIN if no common fields
                 join_clauses.append(f"CROSS JOIN {table} {alias}")
         
-        # Build field selection
+        # Build field selection - ONLY use insertion_fields
         select_fields = []
         field_mapping = {}
         
-        for field in source_fields:
+        for field in insertion_fields:  # FIXED: Only use insertion_fields
             # Add all needed fields with table aliases
             select_fields.append(f"{main_alias}.{field} AS {field}")
             field_mapping[field] = f"{main_alias}.{field}"
         
-        # Build WHERE clause
+        # Build WHERE clause using filtering_fields only
         where_clause, params = self._build_where_clause(filtering_fields, conditions, field_mapping)
         
         # Determine operation type
@@ -659,13 +685,13 @@ class SQLGenerator:
                 """
                 
                 # Determine key field for matching
-                key_field = self._get_key_field(planner_info, target_fields, source_fields)
+                key_field = self._get_key_field(planner_info, target_fields, insertion_fields)  # FIXED: Use insertion_fields
                 
                 if key_field:
                     # Build UPDATE query with CTE
                     set_clauses = []
                     for field in target_fields:
-                        if field != key_field and field in source_fields:
+                        if field != key_field and field in insertion_fields:  # FIXED: Check against insertion_fields
                             set_clauses.append(f"{field} = joined_data.{field}")
                     
                     if set_clauses:
@@ -727,7 +753,7 @@ class SQLGenerator:
         """
         # Extract necessary information
         source_tables = planner_info.get("source_table_name", [])
-        source_fields = planner_info.get("source_field_names", [])
+        insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields (though for validation this might include all relevant fields)
         target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
         target_fields = planner_info.get("target_sap_fields", [])
         validation_rules = planner_info.get("validation_rules", [])
@@ -763,8 +789,13 @@ class SQLGenerator:
         for i, case_expr in enumerate(case_expressions):
             select_fields.append(f"{case_expr} AS validation_result_{i+1}")
         
-        # Add original fields
-        select_fields.extend([f"{field}" for field in source_fields])
+        # Add original fields (use insertion_fields if available, otherwise fall back to available fields)
+        if insertion_fields:
+            select_fields.extend([f"{field}" for field in insertion_fields])
+        else:
+            # For validation, we might need to show the fields being validated
+            validation_fields = [rule.get("field") for rule in validation_rules if rule.get("field")]
+            select_fields.extend([f"{field}" for field in validation_fields if field])
         
         # Build the SQL query
         query = f"""
@@ -785,7 +816,7 @@ class SQLGenerator:
         """
         # Extract necessary information
         source_tables = planner_info.get("source_table_name", [])
-        source_fields = planner_info.get("source_field_names", [])
+        insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields
         target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
         target_fields = planner_info.get("target_sap_fields", [])
         group_by_fields = planner_info.get("group_by_fields", [])
@@ -835,7 +866,7 @@ class SQLGenerator:
             
             agg_expressions.append(agg_expr)
         
-        # Build WHERE clause
+        # Build WHERE clause using filtering_fields only
         where_clause, params = self._build_where_clause(filtering_fields, conditions)
         
         # Generate the SQL query
@@ -930,7 +961,7 @@ class SQLGenerator:
     def _build_insert_query(self, 
                            source_table: str, 
                            target_table: str,
-                           source_fields: List[str], 
+                           insertion_fields: List[str],  # FIXED: Parameter name changed
                            target_fields: List[str],
                            filtering_fields: List[str],
                            conditions: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
@@ -940,7 +971,7 @@ class SQLGenerator:
         Parameters:
         source_table (str): Source table name
         target_table (str): Target table name
-        source_fields (List[str]): Fields to select from source
+        insertion_fields (List[str]): Fields to insert (NOT all source fields)
         target_fields (List[str]): Fields to insert into target
         filtering_fields (List[str]): Fields used for filtering
         conditions (Dict[str, Any]): Conditions to apply
@@ -948,21 +979,21 @@ class SQLGenerator:
         Returns:
         Tuple[str, Dict[str, Any]]: INSERT query and parameters
         """
-        # Build field mappings
+        # Build field mappings using ONLY insertion_fields
         field_mapping = {}
         select_fields = []
         
         for target_field in target_fields:
-            # Find corresponding source field
+            # Find corresponding insertion field
             source_field = target_field  # Default to same name
             
-            # Try to find in source fields
-            if target_field in source_fields:
+            # Try to find in insertion fields
+            if target_field in insertion_fields:
                 field_mapping[target_field] = target_field
                 select_fields.append(target_field)
             else:
-                # Check if any source field might match
-                potential_matches = [f for f in source_fields if 
+                # Check if any insertion field might match
+                potential_matches = [f for f in insertion_fields if 
                                      f.lower() == target_field.lower() or
                                      target_field.lower() in f.lower() or
                                      f.lower() in target_field.lower()]
@@ -975,7 +1006,7 @@ class SQLGenerator:
                     # Use NULL as placeholder
                     select_fields.append(f"NULL AS {target_field}")
         
-        # Build WHERE clause
+        # Build WHERE clause using filtering_fields ONLY
         where_clause, params = self._build_where_clause(filtering_fields, conditions)
         
         # Build INSERT query
@@ -992,7 +1023,7 @@ class SQLGenerator:
     def _build_update_query(self, 
                            source_table: str, 
                            target_table: str,
-                           source_fields: List[str], 
+                           insertion_fields: List[str],  # FIXED: Parameter name changed
                            target_fields: List[str],
                            filtering_fields: List[str],
                            conditions: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
@@ -1002,7 +1033,7 @@ class SQLGenerator:
         Parameters:
         source_table (str): Source table name
         target_table (str): Target table name
-        source_fields (List[str]): Fields to select from source
+        insertion_fields (List[str]): Fields to update (NOT all source fields)
         target_fields (List[str]): Fields to update in target
         filtering_fields (List[str]): Fields used for filtering
         conditions (Dict[str, Any]): Conditions to apply
@@ -1013,8 +1044,8 @@ class SQLGenerator:
         # Need to identify key field for joining source and target
         key_field = None
         
-        # Try to find key field from source_fields that might be in target_fields
-        for field in source_fields:
+        # Try to find key field from insertion_fields that might be in target_fields
+        for field in insertion_fields:
             if field in target_fields:
                 key_field = field
                 break
@@ -1027,25 +1058,25 @@ class SQLGenerator:
             logger.error("Cannot build UPDATE query without key field")
             return "", {}
         
-        # Build the UPDATE with subquery approach
+        # Build the UPDATE with subquery approach using ONLY insertion_fields
         set_clauses = []
         for field in target_fields:
-            if field != key_field and field in source_fields:
+            if field != key_field and field in insertion_fields:
                 set_clauses.append(f"{field} = subquery.{field}")
         
         if not set_clauses:
             logger.warning("No fields to update in UPDATE query")
             return "", {}
         
-        # Build WHERE clause for source table
+        # Build WHERE clause for source table using filtering_fields ONLY
         where_clause, params = self._build_where_clause(filtering_fields, conditions)
         
-        # Build the UPDATE query
+        # Build the UPDATE query using ONLY insertion_fields
         query = f"""
         UPDATE {target_table}
         SET {', '.join(set_clauses)}
         FROM (
-            SELECT {', '.join(source_fields)}
+            SELECT {', '.join(insertion_fields)}
             FROM {source_table}
             {where_clause}
         ) AS subquery
@@ -1173,14 +1204,14 @@ class SQLGenerator:
         # Default to common SAP key fields
         return common_key_fields
     
-    def _get_key_field(self, planner_info: Dict[str, Any], target_fields: List[str], source_fields: List[str]) -> Optional[str]:
+    def _get_key_field(self, planner_info: Dict[str, Any], target_fields: List[str], insertion_fields: List[str]) -> Optional[str]:  # FIXED: Parameter name
         """
         Get the key field for the operation
         
         Parameters:
         planner_info (Dict): Information extracted by the planner
         target_fields (List[str]): Target fields
-        source_fields (List[str]): Source fields
+        insertion_fields (List[str]): Insertion fields (NOT all source fields)
         
         Returns:
         Optional[str]: Key field or None if not found
@@ -1194,8 +1225,8 @@ class SQLGenerator:
                 elif isinstance(mapping, str):
                     return mapping
         
-        # Try to find a field that's in both target and source
-        common_fields = [f for f in target_fields if f in source_fields]
+        # Try to find a field that's in both target and insertion fields
+        common_fields = [f for f in target_fields if f in insertion_fields]
         if common_fields:
             # Priority to fields that are likely keys based on naming
             key_indicators = ["MATNR", "ID", "KEY", "NR", "CODE", "NUM"]
@@ -1289,9 +1320,10 @@ class SQLGenerator:
     CONTEXT INFORMATION:
     - Query Type: {planner_info.get("query_type", "SIMPLE_TRANSFORMATION")}
     - Source Tables: {planner_info.get("source_table_name", [])}
-    - Source Fields: {planner_info.get("source_field_names", [])}
+    - Insertion Fields: {planner_info.get("insertion_fields", [])}
     - Target Table: {planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None}
     - Target Fields: {planner_info.get("target_sap_fields", [])}
+    - Filtering Fields: {planner_info.get("filtering_fields", [])}
 
     INSTRUCTIONS:
     1. Analyze for SQLite compatibility issues
@@ -1302,6 +1334,8 @@ class SQLGenerator:
     6. Verify join conditions if present
     7. Verify subqueries if present
     8. Check for proper handling of NULL values
+    9. Verify that filtering fields are only used in WHERE clauses, not in INSERT/UPDATE field lists
+    10. Verify that only insertion fields are used for data manipulation operations
 
     Your analysis should be in a structured format with clear categories of issues.
     """
@@ -1354,11 +1388,22 @@ class SQLGenerator:
     CONTEXT INFORMATION:
     - Query Type: {planner_info.get("query_type", "SIMPLE_TRANSFORMATION")}
     - Source Tables: {planner_info.get("source_table_name", [])}
-    - Source Fields: {planner_info.get("source_field_names", [])}
+    - Insertion Fields: {planner_info.get("insertion_fields", [])}
     - Target Table: {planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None}
     - Target Fields: {planner_info.get("target_sap_fields", [])}
     - Filtering Fields: {planner_info.get("filtering_fields", [])}
     - Filtering Conditions: {json.dumps(planner_info.get("extracted_conditions", {}), indent=2)}
+
+    CRITICAL FIELD USAGE RULES:
+    1. Insertion Fields ({planner_info.get("insertion_fields", [])}) should ONLY appear in:
+       - INSERT INTO field lists
+       - UPDATE SET clauses
+       - SELECT clauses for data retrieval
+    2. Filtering Fields ({planner_info.get("filtering_fields", [])}) should ONLY appear in:
+       - WHERE clauses
+       - JOIN conditions for filtering
+       - HAVING clauses
+    3. NEVER include filtering fields in INSERT/UPDATE target field lists
 
     INSTRUCTIONS:
     1. IMPORTANT: Only generate standard SQLite SQL syntax
@@ -1369,6 +1414,7 @@ class SQLGenerator:
     6. Ensure proper handling of parameters
     7. Pay special attention to SQLite-specific syntax (different from other SQL dialects)
     8. Target Table Has Data: {isinstance(planner_info.get("target_data_samples", {}), pd.DataFrame) and not planner_info.get("target_data_samples", {}).empty}
+    9. Ensure filtering fields are not included in INSERT/UPDATE operations
 
     REQUIREMENTS:
     1. Return ONLY the fixed SQL query, with no explanations or markdown
@@ -1376,11 +1422,11 @@ class SQLGenerator:
     3. If a parameter should be used, keep the same parameter format
     4. Ensure the generated SQL meets the requirements of the query type
     5. Be especially careful with SQLite-specific features:
-    - SQLite uses IFNULL not ISNULL
-    - SQLite does not support RIGHT JOIN or FULL JOIN
-    - SQLite has limited support for common table expressions
-    - SQLite UPDATE with JOIN requires a specific syntax
-    - SQLite has no BOOLEAN type (use INTEGER 0/1)
+       - SQLite uses IFNULL not ISNULL
+       - SQLite does not support RIGHT JOIN or FULL JOIN
+       - SQLite has limited support for common table expressions
+       - SQLite UPDATE with JOIN requires a specific syntax
+       - SQLite has no BOOLEAN type (use INTEGER 0/1)
     """
 
             # Call the LLM for fixing
@@ -1477,17 +1523,42 @@ class SQLGenerator:
                 return True
                 
             # Check for improvement in including required fields
-            source_fields = planner_info.get("source_field_names", [])
+            insertion_fields = planner_info.get("insertion_fields", [])
             target_fields = planner_info.get("target_sap_fields", [])
+            filtering_fields = planner_info.get("filtering_fields", [])
             
-            new_field_count = sum(1 for field in source_fields if field in new_query)
-            old_field_count = sum(1 for field in source_fields if field in old_query)
+            new_insertion_count = sum(1 for field in insertion_fields if field in new_query)
+            old_insertion_count = sum(1 for field in insertion_fields if field in old_query)
             
             new_target_count = sum(1 for field in target_fields if field in new_query)
             old_target_count = sum(1 for field in target_fields if field in old_query)
             
-            # If new query includes more source fields
-            if new_field_count > old_field_count:
+            # Check if filtering fields are incorrectly included in INSERT/UPDATE lists
+            # This is bad and should be penalized
+            new_has_filter_in_insert = any(
+                f"INSERT INTO" in new_query.upper() and field in new_query 
+                for field in filtering_fields
+            )
+            old_has_filter_in_insert = any(
+                f"INSERT INTO" in old_query.upper() and field in old_query 
+                for field in filtering_fields
+            )
+            
+            new_has_filter_in_update = any(
+                f"UPDATE" in new_query.upper() and f"SET" in new_query.upper() and field in new_query.split("WHERE")[0] if "WHERE" in new_query else new_query
+                for field in filtering_fields
+            )
+            old_has_filter_in_update = any(
+                f"UPDATE" in old_query.upper() and f"SET" in old_query.upper() and field in old_query.split("WHERE")[0] if "WHERE" in old_query else old_query
+                for field in filtering_fields
+            )
+            
+            # If new query doesn't have filtering fields in INSERT/UPDATE but old one does
+            if not (new_has_filter_in_insert or new_has_filter_in_update) and (old_has_filter_in_insert or old_has_filter_in_update):
+                return True
+                
+            # If new query includes more insertion fields
+            if new_insertion_count > old_insertion_count:
                 return True
                 
             # If new query includes more target fields
