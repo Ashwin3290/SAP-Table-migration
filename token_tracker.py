@@ -7,7 +7,6 @@ from typing import Callable, Any, Dict, Optional
 import tiktoken
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Global variables to track token usage

@@ -362,7 +362,8 @@ def main():
         "executor.py", 
         "generator.py",
         "dmtool.py",
-        "query_analyzer.py"
+        "query_analyzer.py",
+        "tool.py"
     ]
     
     print("🚀 Starting Function Usage Analysis")

@@ -19,11 +19,10 @@ from planner import ContextualSessionManager
 # Import the new SQLite modules
 from generator import SQLGenerator
 from executor import SQLExecutor
+from logging_config import setup_logging
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+setup_logging(log_to_file=True, log_to_console=False)
+
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -44,9 +43,6 @@ import spacy
 import re
 from typing import Dict, List, Any, Optional
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
 
 class QueryTemplateRepository:
     """Repository of query templates for common transformation patterns"""
@@ -176,119 +172,6 @@ class QueryTemplateRepository:
         except Exception as e:
             logger.error(f"Error finding matching template: {e}")
             return None    
-        
-    def customize_template(self, template, query, planner_info):
-            """
-            Customize a template with specific query details
-            
-            Parameters:
-            template (dict): The template to customize
-            query (str): The original query
-            planner_info (dict): The planner information
-            
-            Returns:
-            dict: Customized template with query-specific values
-            """
-            try:
-                # FIX: Add null checking for planner_info
-                if planner_info is None:
-                    logger.warning("planner_info is None in customize_template, using empty dict")
-                    planner_info = {}
-                
-                # Extract relevant fields from planner_info with safe access
-                source_tables = planner_info.get("source_table_name", [])
-                insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields instead of source_field_names
-                target_table = planner_info.get("target_table_name", [])
-                target_fields = planner_info.get("target_sap_fields", [])
-                filtering_fields = planner_info.get("filtering_fields", [])
-                conditions = planner_info.get("extracted_conditions", {})
-                
-                # Handle target_table as list or single value
-                if isinstance(target_table, list) and len(target_table) > 0:
-                    target_table = target_table[0]
-                elif not target_table:
-                    target_table = None
-                
-                # Initialize template customization with basic fields
-                template_values = {
-                    "target_table": target_table,
-                    "target_field": target_fields[0] if target_fields else None,
-                    "target_fields": ", ".join(target_fields) if target_fields else "",
-                    "key_field": "MATNR"  # Default key field for SAP
-                }
-                
-                # Add source table and field values
-                if source_tables and len(source_tables) > 0:
-                    template_values["table"] = source_tables[0]
-                    
-                    # Add additional tables if available
-                    if len(source_tables) > 1:
-                        template_values["table1"] = source_tables[0]
-                        template_values["table2"] = source_tables[1]
-                    if len(source_tables) > 2:
-                        template_values["table3"] = source_tables[2]
-                
-                # FIXED: Add insertion fields (for actual data operations)
-                if insertion_fields and len(insertion_fields) > 0:
-                    template_values["field"] = insertion_fields[0]  # FIXED: Use insertion_fields
-                    
-                    # Add additional fields if available
-                    if len(insertion_fields) > 1:
-                        template_values["field1"] = insertion_fields[0]
-                        template_values["field2"] = insertion_fields[1]
-                    if len(insertion_fields) > 2:
-                        template_values["field3"] = insertion_fields[2]
-                
-                # Add filter conditions (separate from insertion fields)
-                if filtering_fields and len(filtering_fields) > 0:
-                    template_values["filter_field"] = filtering_fields[0]
-                    if filtering_fields[0] in conditions:
-                        template_values["filter_value"] = conditions[filtering_fields[0]]
-                
-                # FIXED: Ensure template is not None
-                if template is None:
-                    logger.error("Template is None in customize_template")
-                    return {
-                        "values": template_values,
-                        "customized_plan": [],
-                        "customized_query": ""
-                    }
-                
-                # Create the customized template
-                customized = template.copy()
-                customized["values"] = template_values
-                
-                # Customize the plan by replacing placeholders
-                customized["customized_plan"] = []
-                plan = template.get("plan", [])
-                if isinstance(plan, list):
-                    for step in plan:
-                        customized_step = str(step)  # Ensure it's a string
-                        for key, value in template_values.items():
-                            if value is not None:
-                                placeholder = "{" + key + "}"
-                                customized_step = customized_step.replace(placeholder, str(value))
-                        customized["customized_plan"].append(customized_step)
-                
-                # Customize query template
-                query_template = template.get("query", "")
-                customized["customized_query"] = str(query_template)  # Ensure it's a string
-                for key, value in template_values.items():
-                    if value is not None:
-                        placeholder = "{" + key + "}"
-                        customized["customized_query"] = customized["customized_query"].replace(placeholder, str(value))
-                
-                return customized
-            except Exception as e:
-                logger.error(f"Error customizing template: {e}")
-                # Return a safe fallback
-                return {
-                    "values": {},
-                    "customized_plan": ["1. Generate basic query based on requirements"],
-                    "customized_query": "SELECT * FROM source_table",
-                    "plan": ["1. Generate basic query based on requirements"],
-                    "query": "SELECT * FROM source_table"
-                }
 
 class DMTool:
     """SQLite-based DMTool for optimized data transformations using direct SQLite queries"""
@@ -766,157 +649,6 @@ class DMTool:
             # Default to executing query and fetching results
             return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
             
-    def _update_target_table(self, target_table, result_df, planner_info):
-        """
-        Update the target table with the results DataFrame
-        
-        Parameters:
-        target_table (str): The target table name
-        result_df (pd.DataFrame): The result DataFrame
-        planner_info (dict): Planner information for context
-        
-        Returns:
-        bool: Success status
-        """
-        try:
-            # Validate target table
-            target_table = validate_sql_identifier(target_table)
-            
-            # Check if target table exists
-            if not self.sql_executor.table_exists(target_table):
-                # Create the table if it doesn't exist
-                # Build create table statement based on DataFrame
-                create_table_query = f"CREATE TABLE {target_table} ("
-                column_defs = []
-                
-                for column in result_df.columns:
-                    col_name = validate_sql_identifier(column)
-                    dtype = result_df[column].dtype
-                    
-                    if pd.api.types.is_integer_dtype(dtype):
-                        sql_type = "INTEGER"
-                    elif pd.api.types.is_float_dtype(dtype):
-                        sql_type = "REAL"
-                    elif pd.api.types.is_datetime64_dtype(dtype):
-                        sql_type = "TIMESTAMP"
-                    else:
-                        sql_type = "TEXT"
-                    
-                    column_defs.append(f"{col_name} {sql_type}")
-                
-                create_table_query += ", ".join(column_defs) + ")"
-                
-                # Execute create table
-                self.sql_executor.execute_query(create_table_query, fetch_results=False)
-                
-                # Insert all data
-                self._insert_dataframe_to_table(result_df, target_table)
-                return True
-            
-            # Table exists, so we need to update it
-            # First, identify key field(s)
-            key_mapping = planner_info.get("key_mapping", [])
-            
-            key_field = None
-            if key_mapping:
-                if isinstance(key_mapping, list):
-                    for mapping in key_mapping:
-                        if isinstance(mapping, dict) and "target_col" in mapping:
-                            key_field = mapping["target_col"]
-                            break
-                        elif isinstance(mapping, str):
-                            key_field = mapping
-                            break
-            
-            if not key_field:
-                # Try to find a key field based on common naming
-                key_candidates = ["MATNR", "ID", "KEY", "CODE", "NUM"]
-                for candidate in key_candidates:
-                    for column in result_df.columns:
-                        if candidate in column.upper():
-                            key_field = column
-                            break
-                    if key_field:
-                        break
-            
-            if key_field and key_field in result_df.columns:
-                # Update table with matching records by key field
-                # Get existing schema to ensure we only update existing columns
-                schema = self.sql_executor.get_table_schema(target_table)
-                
-                if isinstance(schema, list):
-                    existing_columns = [col.get("name") for col in schema]
-                    
-                    # Filter result_df to only include existing columns
-                    update_columns = [col for col in result_df.columns if col in existing_columns]
-                    
-                    if key_field in update_columns:
-                        # Build field mapping
-                        field_mapping = {col: col for col in update_columns}
-                        
-                        # Use SQLExecutor's update method
-                        # Create a temporary table or view with the result_df
-                        temp_table = f"temp_{target_table}_{int(pd.Timestamp.now().timestamp())}"
-                        
-                        # Save result_df to temp table
-                        self._insert_dataframe_to_table(result_df[update_columns], temp_table)
-                        
-                        # Create update query
-                        set_clauses = []
-                        for col in update_columns:
-                            if col != key_field:
-                                set_clauses.append(f"{col} = temp.{col}")
-                        
-                        if set_clauses:
-                            update_query = f"""
-                            UPDATE {target_table}
-                            SET {', '.join(set_clauses)}
-                            FROM {temp_table} AS temp
-                            WHERE {target_table}.{key_field} = temp.{key_field}
-                            """
-                            
-                            # Execute update
-                            self.sql_executor.execute_query(update_query, fetch_results=False)
-                        
-                        # Insert rows that don't exist yet
-                        insert_query = f"""
-                        INSERT INTO {target_table} ({', '.join(update_columns)})
-                        SELECT {', '.join([f'temp.{col}' for col in update_columns])}
-                        FROM {temp_table} AS temp
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM {target_table}
-                            WHERE {target_table}.{key_field} = temp.{key_field}
-                        )
-                        """
-                        
-                        # Execute insert
-                        self.sql_executor.execute_query(insert_query, fetch_results=False)
-                        
-                        # Drop temp table
-                        self.sql_executor.execute_query(f"DROP TABLE {temp_table}", fetch_results=False)
-                        
-                        return True
-            
-            # If we got here, either no key field was found or update wasn't possible
-            # Fallback to replacing the entire table
-            # First create a backup
-            success, backup_name = self.sql_executor.backup_table(target_table)
-            
-            if success:
-                # Drop the original table
-                self.sql_executor.execute_query(f"DROP TABLE {target_table}", fetch_results=False)
-                
-                # Create a new table and insert all data
-                self._insert_dataframe_to_table(result_df, target_table)
-                return True
-            else:
-                logger.error(f"Failed to create backup of {target_table}, cannot update")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error in _update_target_table: {e}")
-            return False
-    
     def _insert_dataframe_to_table(self, df, table_name):
         """
         Insert a DataFrame into a table

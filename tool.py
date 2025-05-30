@@ -5,12 +5,13 @@ dm_tool = DMTool()
 
 # Process a natural language query
 query = """
-Join Material from Basic Sgement with Material from MARC table and Bring Material and Plant field from MARC Table for the plants ( 1710, 9999 )
+
+Add a new column named LIQDT_Date to the target table. For each record, extract only the day part from the LIQDT field (for example, from "20231208" extract "08") and store it in the LIQDT_Date column.
 """
 result, session_id = dm_tool.process_sequential_query(
     query,
     object_id=41,
-    segment_id=592,
+    segment_id=577,
     project_id=24,
     session_id = '6239dcf9-1dd0-423f-8f0e-a065335d58d1'
 ) 

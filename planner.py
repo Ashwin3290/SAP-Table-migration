@@ -15,11 +15,6 @@ import traceback
 from dotenv import load_dotenv
 from typing import Dict, List, Any, Optional, Tuple
 
-
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -631,8 +626,6 @@ Respond with a JSON object:
             else:
                 # Try to parse the whole response as JSON
                 result = json.loads(response.text.strip())
-            with open("classification_response.json", "w") as f:
-                json.dump(result, f, indent=4)
             # Extract classification and details
             primary_class = result.get("primary_classification", "SIMPLE_TRANSFORMATION")
             
@@ -931,7 +924,6 @@ PROMPT_TEMPLATES = {
     Note:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
     
-    
     INSTRUCTIONS:
     1. Identify key entities in the query:
        - Source table(s)
@@ -1090,8 +1082,6 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             segment_mapping=context_manager.get_segments(session_id) if session_id else [],
             additional_context=classification_details
         )
-        with open("prompt.txt", "w") as f:
-            f.write(formatted_prompt)
         # Call Gemini API with customized prompt
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
@@ -1545,52 +1535,6 @@ class ContextualSessionManager:
             logger.error(f"Failed to get context for session {session_id}: {e}")
             return None
 
-    def update_context(self, session_id, resolved_data):
-        """Update the context with new resolved data"""
-        try:
-            if not session_id:
-                logger.warning("No session ID provided for update_context")
-                raise SessionError("No session ID provided")
-
-            session_path = f"{self.storage_path}/{session_id}"
-            if not os.path.exists(session_path):
-                logger.warning(f"Session directory not found: {session_path}")
-                os.makedirs(session_path, exist_ok=True)
-
-            context_path = f"{session_path}/context.json"
-
-            # Save the entire resolved data object (which includes the updated context)
-            with open(context_path, "w") as f:
-                json.dump(resolved_data, f, indent=2)
-
-            # Also save as a versioned snapshot for history
-            snapshot_path = (
-                f"{session_path}/context_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
-            )
-            with open(snapshot_path, "w") as f:
-                json.dump(resolved_data, f, indent=2)
-
-            return resolved_data
-        except Exception as e:
-            logger.error(f"Failed to update context for session {session_id}: {e}")
-            raise SessionError(
-                f"Failed to update context for session {session_id}: {e}"
-            )
-
-    def get_transformation_history(self, session_id):
-        """Get the transformation history for a session"""
-        try:
-            context = self.get_context(session_id)
-            if not context or "context" not in context:
-                return []
-
-            return context["context"]["transformation_history"]
-        except Exception as e:
-            logger.error(
-                f"Failed to get transformation history for session {session_id}: {e}"
-            )
-            return []
-    
     def track_segment(self, session_id, segment_id, segment_name, conn=None):
         """Track a visited segment in the session context"""
         try:
@@ -1724,96 +1668,6 @@ class ContextualSessionManager:
             logger.error(f"Failed to get key mapping for session {session_id}: {e}")
             return []
 
-    def get_segment_info(self, session_id, segment_id=None, segment_name=None):
-        """
-        Get information about a specific segment
-        
-        Parameters:
-        session_id (str): Session ID
-        segment_id (str, optional): Segment ID to look for
-        segment_name (str, optional): Segment name to look for (partial match)
-        
-        Returns:
-        dict: Segment information or None if not found
-        """
-        try:
-            context = self.get_context(session_id)
-            if not context:
-                return None
-                
-            segments = context.get("segments_visited", {})
-            
-            # Direct lookup by segment_id
-            if segment_id and segment_id in segments:
-                return segments[segment_id]
-                
-            # Search by name (partial match)
-            if segment_name:
-                segment_name_lower = segment_name.lower()
-                for seg_id, info in segments.items():
-                    seg_name = info.get("name", "").lower()
-                    if segment_name_lower in seg_name or seg_name in segment_name_lower:
-                        return info
-                        
-            return None
-        except Exception as e:
-            logger.error(f"Error in get_segment_info: {e}")
-            return None
-            
-    def is_cross_segment_query(self, session_id, query):
-        """
-        Determine if a query is likely a cross-segment operation
-        
-        Parameters:
-        session_id (str): Session ID
-        query (str): The query to analyze
-        Parameters:
-        session_id (str): Session ID
-        query (str): The query to analyze
-        
-        Returns:
-        bool: True if likely a cross-segment query
-        """
-        try:
-            # No segments visited means it can't be cross-segment
-            context = self.get_context(session_id)
-            if not context:
-                return False
-                
-            segments = context.get("segments_visited", {})
-            if not segments:
-                return False
-                
-            # Check if query mentions any visited segments
-            query_lower = query.lower()
-            for _, info in segments.items():
-                segment_name = info.get("name", "").lower()
-                table_name = info.get("table_name", "").lower()
-                
-                # Check for segment name mentions
-                if segment_name and segment_name in query_lower:
-                    return True
-                    
-                # Check for table name mentions
-                if table_name and table_name in query_lower:
-                    return True
-                    
-            # Check for general cross-segment terminology
-            cross_segment_terms = [
-                "previous segment", "last segment", "prior segment",
-                "segment data", "from segment", "basic segment",
-                "marc segment", "makt segment"
-            ]
-            
-            for term in cross_segment_terms:
-                if term in query_lower:
-                    return True
-                    
-            return False
-        except Exception as e:
-            logger.error(f"Error in is_cross_segment_query: {e}")
-            return False
-
 def fetch_data_by_ids(object_id, segment_id, project_id, conn):
     """Fetch data mappings from the database"""
     try:
@@ -1861,7 +1715,6 @@ def fetch_data_by_ids(object_id, segment_id, project_id, conn):
             logger.warning(
                 f"No data found for object_id={object_id}, segment_id={segment_id}, project_id={project_id}"
             )
-        joined_df.to_csv("joined_data.csv", index=False)
         return joined_df
     except sqlite3.Error as e:
         logger.error(f"SQLite error in fetch_data_by_ids: {e}")
@@ -1928,269 +1781,6 @@ def missing_values_handling(df):
         logger.error(f"Error in missing_values_handling: {e}")
         return df
 
-def parse_data_with_context(
-    joined_df, query, session_id=None, previous_context=None, target_table_desc=None
-):
-    """
-    Parse data using Gemini API with token usage tracking and context awareness
-
-    Parameters:
-    joined_df (DataFrame): The joined dataframe with field mappings
-    query (str): The natural language query
-    session_id (str): The current session ID for retrieving key mappings
-    previous_context (dict): Context from previous transformations
-
-    Returns:
-    dict: The parsed data with mapping information and updated context
-    """
-    try:
-        # Validate inputs
-        if joined_df is None or joined_df.empty:
-            logger.error("Empty dataframe passed to parse_data_with_context")
-            raise ValueError("Empty dataframe provided")
-
-        if not query or not isinstance(query, str):
-            logger.error(
-                f"Invalid query passed to parse_data_with_context: {type(query)}"
-            )
-            raise ValueError("Query must be a non-empty string")
-
-        # Get key mapping if session_id is provided
-        key_mapping = []
-        target_df_sample = None
-        if session_id:
-            try:
-                # Initialize context manager to get key mappings
-                context_manager = ContextualSessionManager()
-                key_mapping = context_manager.get_key_mapping(session_id)
-                session_names = context_manager.get_segments(session_id)
-
-                # Get the current state of target data if available
-                try:
-                    # Get the target table name from joined_df
-                    target_table = joined_df["table_name"].unique().tolist()
-                    if target_table and len(target_table) > 0:
-                        # Use SQL executor to get table sample instead of loading full DataFrame
-                        target_df_sample = sql_executor.get_table_sample(target_table[0])
-                        
-                        if isinstance(target_df_sample, dict) and "error_type" in target_df_sample:
-                            # If SQL approach fails, fall back to original method
-                            logger.warning(f"SQL sample retrieval failed, using fallback: {target_df_sample.get('error_message')}")
-                            # Get a connection to fetch current target data
-                            conn = sqlite3.connect(os.environ.get('DB_PATH'))
-                            target_df = get_or_create_session_target_df(
-                                session_id, target_table[0], conn
-                            )
-                            target_df_sample = (
-                                target_df.head(5).to_dict("records")
-                                if not target_df.empty
-                                else []
-                            )
-                            conn.close()
-                        else:
-                            # Convert to dict records format for compatibility
-                            target_df_sample = target_df_sample.head(5).to_dict("records") if not target_df_sample.empty else []
-                except Exception as e:
-                    logger.warning(f"Error getting target data sample: {e}")
-                    target_df_sample = []
-            except Exception as e:
-                logger.warning(
-                    f"Error retrieving key mapping for session {session_id}: {e}"
-                )
-                # Continue with empty key mapping if there's an error
-
-        prompt = """
-        You are a data transformation assistant specializing in SAP data mappings. 
-    Your task is to analyze a natural language query about data transformations and match it to the appropriate source and target tables and fields.
-     
-    CONTEXT DATA SCHEMA: {table_desc}
-    
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
-     
-    USER QUERY: {question}
-
-
-    INSTRUCTIONS:
-    1. Identify key entities in the query:
-       - Source table(s)
-       - Source field(s)
-       - Target field
-       - Filtering or transformation conditions
-       - Logical flow (IF/THEN/ELSE statements)
-       - insertion fields
-     
-    2. Match these entities to the corresponding entries in the joined_data.csv schema
-       - For each entity, find the closest match in the schema
-       - Resolve ambiguities using the description field
-       - Validate that the identified fields exist in the mentioned tables.
-       - Carefully extract the target_sap_field from the datascheme given.
-     
-    3. Generate a structured representation of the transformation logic:
-       - JSON format showing the transformation flow
-       - Include all source tables, fields, conditions, and targets
-       - Map conditional logic to proper syntax
-       - Handle fallback scenarios (ELSE conditions)
-       - Use the provided key mappings to connect source and target fields correctly
-       - Consider the current state of the target data shown above.
-     
-    4. Create a resolved query that takes the actual field and table names, and does not change what is said in the 
-
-    5. For the insertion fields, identify the fields that need to be inserted into the target table based on the User query. Take note to not add the filtering fields to the insertion fields if not specifically requested.
-
-    6. Restructure the user query with resolved data types and field names.
-
-    Note:
-    - In the Restrucutured query, only replace the textual descriptions with the field names.
-    - Do not change the query itself, just replace the field names with the actual field names.
-    - if target_sap_field is not found in the schema, return make source_field_name the target_sap_field.
-
-    Respond with:
-    ```json
-    {{
-    "source_table_name": [List of all source_tables],
-    "source_field_names": [List of all source_fields],
-    "filtering_fields": [List of filtering fields],
-    "insertion_fields": [insertion_field],
-    "target_sap_fields": target_sap_fields
-    "Resolved_query": [Rephrased query with resolved data]
-    }}
-    ```
-        """
-
-        # Format the previous context for the prompt
-        context_str = (
-            "None"
-            if previous_context is None
-            else json.dumps(previous_context, indent=2)
-        )
-
-        # Format key mapping for the prompt
-        key_mapping_str = "No key mappings available"
-        if key_mapping:
-            try:
-                formatted_mappings = []
-                for mapping in key_mapping:
-                    if (
-                        isinstance(mapping, dict)
-                        and "target_col" in mapping
-                        and "source_col" in mapping
-                    ):
-                        formatted_mappings.append(
-                            f"{mapping['target_col']}:{mapping['source_col']}"
-                        )
-                key_mapping_str = (
-                    ", ".join(formatted_mappings)
-                    if formatted_mappings
-                    else "No key mappings available"
-                )
-            except Exception as e:
-                logger.warning(f"Error formatting key mappings: {e}")
-                key_mapping_str = "Error processing key mappings"
-
-        # Format target data sample for the prompt
-        target_df_sample_str = "No current target data available"
-        if target_df_sample:
-            try:
-                target_df_sample_str = json.dumps(target_df_sample, indent=2)
-            except Exception as e:
-                logger.warning(f"Error formatting target data sample: {e}")
-                target_df_sample_str = "Error processing target data sample"
-
-        # Format the prompt with all inputs
-        table_desc = joined_df[joined_df.columns.tolist()[:-1]] 
-        formatted_prompt = prompt.format(
-            question=query,
-            table_desc=list(table_desc.itertuples(index=False)),
-            key_mapping=key_mapping_str,
-            target_df_sample=target_df_sample_str,
-        )
-
-        # Get Gemini API key from environment
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            logger.error("GEMINI_API_KEY not found in environment variables")
-            raise APIError("Gemini API key not configured")
-
-        # Initialize Gemini client
-        client = genai.Client(api_key=api_key)
-
-        # Call Gemini API with token tracking and error handling
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash-preview-04-17",
-                contents=formatted_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.5, top_p=0.95, top_k=40
-                ),
-            )
-
-            # Check if response is valid
-            if not response or not hasattr(response, "text"):
-                logger.error("Invalid response from Gemini API")
-                raise APIError("Failed to get valid response from Gemini API")
-
-            # Log token usage statistics
-
-            # Parse the JSON response with error handling
-            try:
-                json_str = re.search(r"```json(.*?)```", response.text, re.DOTALL)
-                if json_str:
-                    parsed_data = json.loads(json_str.group(1).strip())
-                else:
-                    # Try to parse the whole response as JSON
-                    parsed_data = json.loads(response.text.strip())
-
-                # Validate the parsed data structure
-                required_keys = [
-                    "source_table_name",
-                    "source_field_names",
-                    "filtering_fields",
-                    "insertion_fields",
-                    "Resolved_query",
-                    "target_sap_fields",
-                ]
-
-                for key in required_keys:
-                    if key not in parsed_data:
-                        logger.warning(f"Missing key in Gemini response: {key}")
-                        parsed_data[key] = (
-                            []
-                            if key != "transformation_logic" and key != "Resolved_query"
-                            else ""
-                        )
-
-                # Add target table information
-                parsed_data["target_table_name"] = joined_df["table_name"].unique().tolist()
-
-                # Add key mapping information to the result
-                parsed_data["key_mapping"] = key_mapping
-
-                return parsed_data
-            except json.JSONDecodeError as e:
-                logger.error(f"Error parsing JSON response: {e}")
-                logger.error(f"Raw response: {response.text}")
-                raise DataProcessingError(
-                    f"Failed to parse Gemini response as JSON: {e}"
-                )
-        except Exception as e:
-            logger.error(f"Error calling Gemini API: {e}")
-            raise APIError(f"Failed to call Gemini API: {e}")
-    except Exception as e:
-        logger.error(f"Error in parse_data_with_context: {e}")
-        return None
-
-def additonal_info_extraction(classification_details: dict):
-    """
-    Extract additional information from the classification details
-    Parameters:
-    classification_details (dict): The classification details from the query classification
-    Returns:
-    dict: Extracted additional information
-    """
-
-
-
 def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
     """
     Process a query with context awareness and automatic query type detection
@@ -2252,28 +1842,6 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
         logger.error(f"Error in process_query: {e}")
         logger.error(traceback.format_exc())
         return None
-
-def get_session_context(session_id):
-    """
-    Get the current context for a session
-
-    Parameters:
-    session_id (str): The session ID
-
-    Returns:
-    dict: The session context
-    """
-    try:
-        if not session_id:
-            logger.warning("No session ID provided for get_session_context")
-            return None
-
-        context_manager = ContextualSessionManager()
-        return context_manager.get_context(session_id)
-    except Exception as e:
-        logger.error(f"Error in get_session_context: {e}")
-        return None
-
 
 def get_or_create_session_target_df(session_id, target_table, conn):
     """
@@ -2342,54 +1910,6 @@ def get_or_create_session_target_df(session_id, target_table, conn):
     except Exception as e:
         logger.error(f"Error in get_or_create_session_target_df: {e}")
         return pd.DataFrame()
-
-
-def save_session_target_df(session_id, target_df):
-    """
-    Save the updated target dataframe for a session
-
-    Parameters:
-    session_id (str): Session ID
-    target_df (DataFrame): The target dataframe to save
-
-    Returns:
-    bool: True if successful
-    """
-    try:
-        if not session_id:
-            logger.warning("No session ID provided for save_session_target_df")
-            return False
-
-        if target_df is None:
-            logger.warning("None target_df provided for save_session_target_df")
-            return False
-
-        if not isinstance(target_df, pd.DataFrame):
-            logger.warning(
-                f"Invalid target_df type ({type(target_df)}) for save_session_target_df"
-            )
-            return False
-
-        session_path = f"sessions/{session_id}"
-        os.makedirs(session_path, exist_ok=True)
-        target_path = f"{session_path}/target_latest.csv"
-
-        # Also save a timestamped version for history
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        history_path = f"{session_path}/target_{timestamp}.csv"
-
-        # Save the target dataframe
-        try:
-            target_df.to_csv(target_path, index=False)
-            target_df.to_csv(history_path, index=False)
-            logger.info(f"Saved target dataframe for session {session_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error saving target dataframe: {e}")
-            return False
-    except Exception as e:
-        logger.error(f"Error in save_session_target_df: {e}")
-        return False
 
 def clean_table_name(table_name):
     """

@@ -9,8 +9,6 @@ import traceback
 import os
 from typing import Dict, List, Any, Optional, Union, Tuple
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 class SQLGenerator:
@@ -149,88 +147,6 @@ class SQLGenerator:
                 return self._generate_aggregation_operation(planner_info)
             else:
                 return self._generate_simple_transformation(planner_info)
-
-    def create_sql_plan(self, planner_info: Dict[str, Any]) -> str:
-        """
-        Use LLM to create a detailed plan for SQLite query generation
-        
-        Parameters:
-        planner_info (Dict): Information extracted by the planner
-        
-        Returns:
-        str: Step-by-step SQLite generation plan
-        """
-        try:
-            # Extract key information for the prompt
-            query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
-            source_tables = planner_info.get("source_table_name", [])
-            insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields
-            target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
-            target_fields = planner_info.get("target_sap_fields", [])
-            filtering_fields = planner_info.get("filtering_fields", [])
-            conditions = planner_info.get("extracted_conditions", {})
-            original_query = planner_info.get("original_query", "")
-            
-            # Create a comprehensive prompt for the LLM
-            prompt = f"""
-    You are an expert SQLite database engineer. I need you to create a step-by-step plan to generate 
-    SQLite for the following natural language query:
-
-    ORIGINAL QUERY: "{original_query}"
-
-    CONTEXT INFORMATION:
-    - Query Type: {query_type}
-    - Source Tables: {source_tables}
-    - Insertion Fields: {insertion_fields}  
-    - Target Table: {target_table}
-    - Target Fields: {target_fields}
-    - Filtering Fields: {filtering_fields}
-    - Filtering Conditions: {json.dumps(conditions, indent=2)}
-
-    IMPORTANT: 
-    - Insertion Fields are the ONLY fields that should be inserted/updated into the target table
-    - Filtering Fields should ONLY be used in WHERE clauses, NEVER in INSERT or UPDATE field lists
-    - Do not mix insertion fields with filtering fields
-
-    Based on the query intent, create a detailed plan for generating an efficient SQLite query, 
-    structured as numbered steps. Carefully consider:
-
-    1. The query type and appropriate SQLite operation (SELECT, INSERT, UPDATE, etc.)
-    2. Proper table references and aliases
-    3. Precise column selections (ONLY insertion fields for data operations)
-    4. Correct filter conditions (using filtering fields in WHERE clauses)
-    5. Join conditions (if applicable)
-    6. Proper ordering of operations
-
-    IMPORTANT SQLite-SPECIFIC CONSIDERATIONS:
-    - SQLite does not support RIGHT JOIN or FULL JOIN (use LEFT JOIN with table order swapped instead)
-    - SQLite uses IFNULL instead of ISNULL
-    - SQLite UPDATE with JOIN requires a specific syntax (use FROM clause after SET)
-    - SQLite has limited support for common table expressions
-    - SQLite has no BOOLEAN type (use INTEGER 0/1)
-
-    Format your response as a numbered list only, with no explanations or additional text.
-    Each step should be clear, concise, and directly actionable for SQLite generation.
-    """
-            
-            # Call the LLM for planning
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash-preview-04-17", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.2)
-            )
-            
-            # Extract and return the plan
-            if response and hasattr(response, "text"):
-                return response.text.strip()
-            else:
-                logger.warning("Invalid response from LLM in create_sql_plan")
-                return "1. Generate basic SQLite query based on query type\n2. Return query"
-                
-        except Exception as e:
-            logger.error(f"Error in create_sql_plan: {e}")
-            return "1. Generate basic SQLite query based on query type\n2. Return query"
 
     def generate_sql_with_llm(self, plan: str, planner_info: Dict[str, Any],template: str=None) -> Tuple[str, Dict[str, Any]]:
         """

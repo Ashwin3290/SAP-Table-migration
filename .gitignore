@@ -176,7 +176,6 @@ cython_debug/
 uploaded_files/
 generated_code/
 sessions/
-*.json
 *.db
 *.sqlite3
-
+analyser.py
