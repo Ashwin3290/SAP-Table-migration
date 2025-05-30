@@ -4,7 +4,7 @@ conn=sqlite3.connect('db.sqlite3')
 c = conn.cursor()
 # # c.execute("select * from t_24_Product_Plant_Data_Ext")
 # # print(c.fetchall())
-c.execute("Delete from t_24_Product_Basic_Data_mandatory_Ext")
+c.execute("Delete from t_24_Product_Plant_Data_Ext")
 conn.commit()
 
 

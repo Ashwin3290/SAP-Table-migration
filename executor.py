@@ -46,6 +46,7 @@ class SQLExecutor:
         try:
             # Connect to the database
             conn = sqlite3.connect(self.db_path)
+            print(query)
             
             # Configure connection to return rows as dictionaries
             conn.row_factory = sqlite3.Row
@@ -99,86 +100,7 @@ class SQLExecutor:
             if conn:
                 conn.close()
     
-    def execute_transaction(self, queries: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Execute multiple queries in a transaction
-        
-        Parameters:
-        queries (List[Dict[str, Any]]): List of query dictionaries, each containing:
-            - 'query' (str): SQL query string
-            - 'params' (Optional[Dict[str, Any]]): Parameters to bind
-            - 'fetch' (Optional[bool]): Whether to fetch results
-        
-        Returns:
-        Dict[str, Any]: Transaction results or error information
-        """
-        conn = None
-        try:
-            # Connect to the database
-            conn = sqlite3.connect(self.db_path)
-            
-            # Configure connection to return rows as dictionaries
-            conn.row_factory = sqlite3.Row
-            
-            # Start a transaction
-            conn.execute("BEGIN TRANSACTION")
-            
-            results = []
-            
-            # Execute each query in the transaction
-            for query_info in queries:
-                query = query_info.get("query", "")
-                params = query_info.get("params", {})
-                fetch = query_info.get("fetch", False)
-                
-                cursor = conn.cursor()
-                
-                if params:
-                    cursor.execute(query, params)
-                else:
-                    cursor.execute(query)
-                
-                if fetch:
-                    # Convert rows to dictionaries
-                    rows = cursor.fetchall()
-                    query_result = [dict(row) for row in rows]
-                else:
-                    query_result = {"rowcount": cursor.rowcount}
-                
-                results.append(query_result)
-            
-            # Commit the transaction
-            conn.commit()
-            
-            return {"success": True, "results": results}
-            
-        except sqlite3.Error as e:
-            # Handle SQLite errors
-            if conn:
-                conn.rollback()
-                
-            logger.error(f"SQLite transaction error: {e}")
-            return {
-                "success": False,
-                "error_type": "SQLiteError", 
-                "error_message": str(e)
-            }
-        except Exception as e:
-            # Handle other exceptions
-            if conn:
-                conn.rollback()
-                
-            logger.error(f"Error in transaction: {e}")
-            return {
-                "success": False,
-                "error_type": "ExecutionError", 
-                "error_message": str(e)
-            }
-        finally:
-            # Close the connection
-            if conn:
-                conn.close()
-    
+
     def execute_and_fetch_df(self, query: str, params: Optional[Dict[str, Any]] = None) -> Union[pd.DataFrame, Dict[str, Any]]:
         """
         Execute a query and return results as a pandas DataFrame

@@ -13,6 +13,8 @@ from pathlib import Path
 import spacy
 import traceback
 from dotenv import load_dotenv
+from typing import Dict, List, Any, Optional, Tuple
+
 
 # Set up logging
 logging.basicConfig(
@@ -46,9 +48,485 @@ except OSError:
         download("en_core_web_sm")
         nlp = spacy.load("en_core_web_sm")
         
-def classify_query_with_spacy(query):
+
+
+from difflib import SequenceMatcher
+
+
+def find_closest_match(query, word_list, threshold=0.6):
     """
-    Use spaCy to classify the query type based on linguistic patterns
+    Find the closest matching word from a list using fuzzy string matching.
+    
+    Args:
+        query (str): The search term (possibly with typos)
+        word_list (list): List of valid words to match against
+        threshold (float): Minimum similarity score (0.0 to 1.0)
+        
+    Returns:
+        dict: Contains 'match' (best matching word), 'score' (similarity score), 
+              and 'all_matches' (list of all matches above threshold)
+    """
+    if not query or not word_list:
+        return {"match": None, "score": 0.0, "all_matches": []}
+    
+    # Clean the query (remove extra spaces, convert to lowercase)
+    clean_query = re.sub(r'\s+', ' ', query.strip().lower())
+    
+    matches = []
+    for word in word_list:
+        clean_word = word.lower()
+        
+        # Calculate similarity using different methods
+        # Method 1: Overall sequence similarity
+        overall_sim = SequenceMatcher(None, clean_query, clean_word).ratio()
+        
+        # Method 2: Substring matching bonus
+        substring_bonus = 0
+        if clean_query in clean_word or clean_word in clean_query:
+            substring_bonus = 0.2
+        
+        # Method 3: Word-level matching for multi-word strings
+        query_words = clean_query.split()
+        word_words = clean_word.split()
+        word_level_sim = 0
+        
+        if len(query_words) > 1 or len(word_words) > 1:
+            # For multi-word matching, check individual words
+            word_matches = 0
+            total_words = max(len(query_words), len(word_words))
+            
+            for q_word in query_words:
+                best_word_match = 0
+                for w_word in word_words:
+                    word_sim = SequenceMatcher(None, q_word, w_word).ratio()
+                    best_word_match = max(best_word_match, word_sim)
+                word_matches += best_word_match
+            
+            word_level_sim = word_matches / total_words if total_words > 0 else 0
+        
+        # Combine scores with weights
+        final_score = (overall_sim * 0.6) + (substring_bonus) + (word_level_sim * 0.4)
+        final_score = min(final_score, 1.0)  # Cap at 1.0
+        
+        if final_score >= threshold:
+            matches.append({
+                'word': word,
+                'score': final_score,
+                'original_word': word
+            })
+    
+    # Sort by score (highest first)
+    matches.sort(key=lambda x: x['score'], reverse=True)
+    
+    # Return results
+    result = {
+        'match': matches[0]['word'] if matches else None,
+        'score': matches[0]['score'] if matches else 0.0,
+        'all_matches': [(m['word'], round(m['score'], 3)) for m in matches]
+    }
+    
+    return result
+
+class ClassificationEnhancer:
+    """
+    Enhances LLM classification details with fuzzy matching for tables, columns, and segments
+    """
+    
+    def __init__(self, db_path=None, segments_csv_path="segments.csv"):
+        """
+        Initialize the ClassificationEnhancer
+        
+        Args:
+            db_path (str): Path to the SQLite database
+            segments_csv_path (str): Path to the segments CSV file
+        """
+        self.db_path = db_path or os.environ.get('DB_PATH')
+        self.segments_csv_path = segments_csv_path
+        self._available_tables = None
+        self._table_columns = {}
+        self._segments_df = None
+        
+    def _get_available_tables(self) -> List[str]:
+        """
+        Get list of available tables from the database
+        
+        Returns:
+            List[str]: List of table names
+        """
+        if self._available_tables is not None:
+            return self._available_tables
+            
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get all table names
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            
+            conn.close()
+            self._available_tables = tables
+            return tables
+            
+        except Exception as e:
+            logger.error(f"Error getting available tables: {e}")
+            return []
+    
+    def _get_table_columns(self, table_name: str) -> List[str]:
+        """
+        Get columns for a specific table
+        
+        Args:
+            table_name (str): Name of the table
+            
+        Returns:
+            List[str]: List of column names
+        """
+        if table_name in self._table_columns:
+            return self._table_columns[table_name]
+            
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get column information
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            columns = [row[1] for row in cursor.fetchall()]  # row[1] is column name
+            
+            conn.close()
+            self._table_columns[table_name] = columns
+            return columns
+            
+        except Exception as e:
+            logger.error(f"Error getting columns for table {table_name}: {e}")
+            return []
+    
+    def _get_all_table_columns(self, table_names: List[str]) -> Dict[str, List[str]]:
+        """
+        Get columns for multiple tables
+        
+        Args:
+            table_names (List[str]): List of table names
+            
+        Returns:
+            Dict[str, List[str]]: Dictionary mapping table names to their columns
+        """
+        result = {}
+        for table_name in table_names:
+            result[table_name] = self._get_table_columns(table_name)
+        return result
+    
+    def _load_segments_data(self) -> pd.DataFrame:
+        """
+        Load segments data from CSV
+        
+        Returns:
+            pd.DataFrame: Segments dataframe
+        """
+        if self._segments_df is not None:
+            return self._segments_df
+            
+        try:
+            self._segments_df = pd.read_csv(self.segments_csv_path)
+            return self._segments_df
+        except Exception as e:
+            logger.error(f"Error loading segments CSV: {e}")
+            return pd.DataFrame()
+    
+    def _get_current_target_table_pattern(self, segment_id: int) -> Optional[str]:
+        """
+        Get the target table pattern (t_[number]) for the current segment
+        
+        Args:
+            segment_id (int): Current segment ID
+            
+        Returns:
+            Optional[str]: The t_[number] pattern or None
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get the target table for current segment
+            cursor.execute("""
+                SELECT table_name 
+                FROM connection_segments 
+                WHERE segment_id = ?
+            """, (segment_id,))
+            
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result and result[0]:
+                table_name = result[0]
+                # Extract t_[number] pattern
+                match = re.match(r't_(\d+)', table_name.lower())
+                if match:
+                    return f"t_{match.group(1)}"
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting current target table pattern: {e}")
+            return None
+    
+    def _match_segments(self, segments_mentioned: List[str], current_segment_id: int) -> Dict[str, Any]:
+        """
+        Match mentioned segments with available segments and get target tables
+        
+        Args:
+            segments_mentioned (List[str]): List of segment names mentioned
+            current_segment_id (int): Current segment ID for pattern matching
+            
+        Returns:
+            Dict[str, Any]: Enhanced segment information
+        """
+        segments_df = self._load_segments_data()
+        if segments_df.empty or not segments_mentioned:
+            return {"matched_segments": [], "segment_target_tables": {}}
+        
+        # Get available segment names
+        available_segments = segments_df['segement_name'].unique().tolist()
+        current_pattern = self._get_current_target_table_pattern(current_segment_id)
+        
+        matched_segments = []
+        segment_target_tables = {}
+        
+        for mentioned_segment in segments_mentioned:
+            # Find closest match
+            match_result = find_closest_match(mentioned_segment, available_segments, threshold=0.4)
+            
+            if match_result['match']:
+                matched_segment = match_result['match']
+                matched_segments.append(matched_segment)
+                
+                # Get target tables for this segment
+                segment_rows = segments_df[segments_df['segement_name'] == matched_segment]
+                target_tables = segment_rows['table_name'].tolist()
+                
+                # If multiple target tables and we have a current pattern, prefer matching pattern
+                if len(target_tables) > 1 and current_pattern:
+                    pattern_matches = [table for table in target_tables if table.lower().startswith(current_pattern)]
+                    if pattern_matches:
+                        target_tables = pattern_matches
+                
+                segment_target_tables[matched_segment] = target_tables
+            else:
+                # Keep original if no good match found
+                matched_segments.append(mentioned_segment)
+                segment_target_tables[mentioned_segment] = []
+        
+        return {
+            "matched_segments": matched_segments,
+            "segment_target_tables": segment_target_tables
+        }
+    
+    def _match_tables(self, tables_mentioned: List[str]) -> Dict[str, Any]:
+        """
+        Match mentioned tables with available tables
+        
+        Args:
+            tables_mentioned (List[str]): List of table names mentioned
+            
+        Returns:
+            Dict[str, Any]: Enhanced table information
+        """
+        available_tables = self._get_available_tables()
+        
+        if not tables_mentioned or not available_tables:
+            return {"matched_tables": [], "table_match_confidence": {}}
+        
+        matched_tables = []
+        table_match_confidence = {}
+        
+        for mentioned_table in tables_mentioned:
+            match_result = find_closest_match(mentioned_table, available_tables, threshold=0.6)
+            
+            if match_result['match']:
+                matched_table = match_result['match']
+                confidence = match_result['score']
+                
+                # Check if this is a high-confidence exact or near-exact match
+                if confidence >= 0.9 or len(match_result['all_matches']) == 1:
+                    # High confidence, use the match
+                    matched_tables.append(matched_table)
+                    table_match_confidence[matched_table] = confidence
+                elif len(match_result['all_matches']) > 1:
+                    # Multiple close matches, need to be careful
+                    best_match = match_result['all_matches'][0]
+                    second_best = match_result['all_matches'][1] if len(match_result['all_matches']) > 1 else None
+                    
+                    if second_best is None or (best_match[1] - second_best[1]) > 0.2:
+                        # Clear winner
+                        matched_tables.append(best_match[0])
+                        table_match_confidence[best_match[0]] = best_match[1]
+                    else:
+                        # Ambiguous, keep original
+                        matched_tables.append(mentioned_table)
+                        table_match_confidence[mentioned_table] = 0.5
+                else:
+                    matched_tables.append(matched_table)
+                    table_match_confidence[matched_table] = confidence
+            else:
+                # No good match, keep original
+                matched_tables.append(mentioned_table)
+                table_match_confidence[mentioned_table] = 0.0
+        
+        return {
+            "matched_tables": matched_tables,
+            "table_match_confidence": table_match_confidence
+        }
+    
+    def _match_columns(self, columns_mentioned: List[str], matched_tables: List[str], 
+                      segment_target_tables: Dict[str, List[str]]) -> Dict[str, Any]:
+        """
+        Match mentioned columns with available columns in tables
+        
+        Args:
+            columns_mentioned (List[str]): List of column names mentioned
+            matched_tables (List[str]): List of matched table names
+            segment_target_tables (Dict[str, List[str]]): Segment target tables
+            
+        Returns:
+            Dict[str, Any]: Enhanced column information
+        """
+        if not columns_mentioned:
+            return {"matched_columns": [], "columns_in_mentioned_table": {}}
+        
+        # Get all potential tables to search (matched tables + segment target tables)
+        all_potential_tables = set(matched_tables)
+        for tables in segment_target_tables.values():
+            all_potential_tables.update(tables)
+        
+        # Get columns for all potential tables
+        table_columns = self._get_all_table_columns(list(all_potential_tables))
+        
+        matched_columns = []
+        columns_in_mentioned_table = {}
+        
+        for mentioned_column in columns_mentioned:
+            best_match = None
+            best_score = 0.0
+            column_found_in_tables = []
+            
+            # Search in all potential tables
+            for table_name, available_columns in table_columns.items():
+                if not available_columns:
+                    continue
+                    
+                match_result = find_closest_match(mentioned_column, available_columns, threshold=0.6)
+                
+                if match_result['match']:
+                    if match_result['score'] > best_score:
+                        best_match = match_result['match']
+                        best_score = match_result['score']
+                    
+                    # Track which tables contain this column (or close matches)
+                    column_found_in_tables.append((table_name, match_result['match'], match_result['score']))
+            
+            # Use best match or keep original
+            final_column = best_match if best_match and best_score >= 0.6 else mentioned_column
+            matched_columns.append(final_column)
+            
+            # Build table->columns mapping
+            for table_name, matched_col, score in column_found_in_tables:
+                if score >= 0.6:  # Only include good matches
+                    if table_name not in columns_in_mentioned_table:
+                        columns_in_mentioned_table[table_name] = []
+                    if matched_col not in columns_in_mentioned_table[table_name]:
+                        columns_in_mentioned_table[table_name].append(matched_col)
+        
+        return {
+            "matched_columns": matched_columns,
+            "columns_in_mentioned_table": columns_in_mentioned_table
+        }
+    
+    def enhance_classification_details(self, classification_details: Dict[str, Any], 
+                                     current_segment_id: int) -> Dict[str, Any]:
+        """
+        Main function to enhance classification details with fuzzy matching
+        
+        Args:
+            classification_details (Dict[str, Any]): Original classification details
+            current_segment_id (int): Current segment ID for context
+            
+        Returns:
+            Dict[str, Any]: Enhanced classification details
+        """
+        try:
+            # Make a copy to avoid modifying original
+            enhanced_details = classification_details.copy()
+            
+            # Extract mentioned items
+            tables_mentioned = classification_details.get("detected_elements", {}).get("sap_tables_mentioned", [])
+            columns_mentioned = classification_details.get("detected_elements", {}).get("columns_Mentioned", [])
+            segments_mentioned = classification_details.get("detected_elements", {}).get("segments_mentioned", [])
+            
+            # 1. Match segments first (as they can provide additional tables)
+            segment_match_result = self._match_segments(segments_mentioned, current_segment_id)
+            
+            # 2. Match tables
+            table_match_result = self._match_tables(tables_mentioned)
+            
+            # 3. Match columns (using both matched tables and segment target tables)
+            column_match_result = self._match_columns(
+                columns_mentioned,
+                table_match_result["matched_tables"],
+                segment_match_result["segment_target_tables"]
+            )
+            
+            # 4. Create the enhanced structure
+            enhanced_matching_info = {
+                "tables_mentioned": table_match_result["matched_tables"],
+                "columns_mentioned": column_match_result["matched_columns"],
+                "columns_in_mentioned_table": column_match_result["columns_in_mentioned_table"],
+                "segments_mentioned": segment_match_result["matched_segments"],
+                "segment_target_tables": segment_match_result["segment_target_tables"],
+                "table_match_confidence": table_match_result["table_match_confidence"]
+            }
+
+            enhanced_matching_info["segment glossary"] = segment_match_result["segment_target_tables"]
+            # 5. Update the enhanced details
+            enhanced_details["enhanced_matching"] = enhanced_matching_info
+            
+            # 6. Update the detected_elements with matched values
+            if "detected_elements" not in enhanced_details:
+                enhanced_details["detected_elements"] = {}
+            
+            enhanced_details["detected_elements"]["sap_tables_mentioned"] = table_match_result["matched_tables"]
+            enhanced_details["detected_elements"]["columns_Mentioned"] = column_match_result["matched_columns"]
+            enhanced_details["detected_elements"]["segments_mentioned"] = segment_match_result["matched_segments"]
+            
+            logger.info(f"Enhanced classification details: {enhanced_matching_info}")
+            
+            return enhanced_details
+            
+        except Exception as e:
+            logger.error(f"Error enhancing classification details: {e}")
+            return classification_details
+
+def enhance_classification_before_processing(classification_details: Dict[str, Any], 
+                                           current_segment_id: int,
+                                           db_path: str = None,
+                                           segments_csv_path: str = "segments.csv") -> Dict[str, Any]:
+    """
+    Convenience function to enhance classification details
+    
+    Args:
+        classification_details (Dict[str, Any]): Original classification details
+        current_segment_id (int): Current segment ID
+        db_path (str, optional): Database path
+        segments_csv_path (str, optional): Segments CSV path
+        
+    Returns:
+        Dict[str, Any]: Enhanced classification details
+    """
+    enhancer = ClassificationEnhancer(db_path, segments_csv_path)
+    return enhancer.enhance_classification_details(classification_details, current_segment_id)
+
+def classify_query_with_llm(query):
+    """
+    Use LLM to classify the query type based on linguistic patterns and semantic understanding
     
     Parameters:
     query (str): The natural language query
@@ -57,111 +535,184 @@ def classify_query_with_spacy(query):
     str: Query classification (SIMPLE_TRANSFORMATION, JOIN_OPERATION, etc.)
     dict: Additional details about the classification
     """
-    doc = nlp(query.lower())
-    
-    # Initialize matcher with vocabulary
-    matcher = Matcher(nlp.vocab)
-    
-    # Define patterns for JOIN operations
-    join_patterns = [
-        [{"LOWER": "join"}, {"OP": "*"}, {"LOWER": {"IN": ["table", "tables"]}}],
-        [{"LOWER": {"IN": ["merge", "combine", "link"]}}, {"OP": "*"}, {"LOWER": {"IN": ["data", "tables", "information"]}}],
-        [{"LOWER": {"IN": ["from", "using"]}}, {"OP": "*"}, {"LOWER": {"IN": ["both", "all"]}}, {"OP": "*"}, {"LOWER": {"IN": ["tables", "segments"]}}],
-        [{"LOWER": "where"}, {"OP": "*"}, {"LOWER": {"IN": ["equals", "matches", "="]}}, {"OP": "*"}, {"LOWER": {"IN": ["matnr", "material", "number"]}}]
-    ]
-    
-    # Define patterns for CROSS_SEGMENT operations
-    segment_patterns = [
-        [{"LOWER": {"IN": ["segment", "basic", "marc", "makt", "mvke"]}}],
-        [{"LOWER": {"IN": ["previous", "prior", "last", "earlier"]}}, {"OP": "*"}, {"LOWER": {"IN": ["segment", "transformation", "data"]}}],
-        [{"LOWER": {"IN": ["use", "consider", "refer"]}}, {"OP": "*"}, {"LOWER": {"IN": ["segment", "basic", "marc", "makt"]}}]
-    ]
-    
-    # Define patterns for VALIDATION operations
-    validation_patterns = [
-        [{"LOWER": {"IN": ["validate", "verify", "ensure"]}}],
-        [{"LOWER": "if"}, {"OP": "*"}, {"LOWER": {"IN": ["exists", "valid", "present", "available"]}}],
-        [{"LOWER": {"IN": ["missing", "invalid", "correct", "consistent"]}}],
-        [{"LOWER": {"IN": ["every", "all", "each"]}}, {"OP": "*"}, {"LOWER": {"IN": ["must", "should", "has to"]}}]
-    ]
-    
-    # Define patterns for AGGREGATION operations
-    aggregation_patterns = [
-        [{"LOWER": {"IN": ["count", "sum", "average", "mean", "calculate", "total"]}}],
-        [{"LOWER": "group"}, {"LOWER": "by"}],
-        [{"LOWER": {"IN": ["minimum", "maximum", "min", "max", "highest", "lowest"]}}],
-        [{"LOWER": {"IN": ["statistics", "aggregation", "aggregate", "statistical"]}}]
-    ]
-    
-    # Add patterns to matcher
-    matcher.add("JOIN", join_patterns)
-    matcher.add("SEGMENT", segment_patterns)
-    matcher.add("VALIDATION", validation_patterns)
-    matcher.add("AGGREGATION", aggregation_patterns)
-    
-    # Find matches
-    matches = matcher(doc)
-    
-    # Count match types
-    match_counts = {"JOIN": 0, "SEGMENT": 0, "VALIDATION": 0, "AGGREGATION": 0}
-    match_details = {"JOIN": [], "SEGMENT": [], "VALIDATION": [], "AGGREGATION": []}
-    
-    for match_id, start, end in matches:
-        match_type = nlp.vocab.strings[match_id]
-        match_text = doc[start:end].text
-        match_counts[match_type] += 1
-        match_details[match_type].append(match_text)
-    
-    tables_mentioned = []
-    common_sap_tables = ["MARA", "MARC", "MAKT", "MVKE", "MARM", "MLAN", "EKKO", "EKPO", "VBAK", "VBAP", "KNA1", "LFA1"]
-    segment_keywords = ["BASIC", "PLANT", "SALES", "PURCHASING", "CLASSIFICATION", "MRP", "WAREHOUSE"]
+    try:
+        # Create comprehensive prompt for query classification
+        prompt = f"""
+You are an expert data transformation analyst. Analyze the following natural language query and classify it into one of these categories:
 
-    for token in doc:
-        # Check for known SAP tables
-        if token.text.upper() in common_sap_tables:
-            tables_mentioned.append(token.text.upper())
-        # Also detect uppercase tokens that might be table names
-        elif token.text.isupper() and len(token.text) >= 3 and token.text.isalpha():
-            tables_mentioned.append(token.text)
-        # Check for segment mentions
-        elif token.text.upper() in segment_keywords:
-            # This could indicate a cross-segment operation
-            if "SEGMENT" not in match_counts:
-                match_counts["SEGMENT"] = 0
-                match_details["SEGMENT"] = []
-            match_counts["SEGMENT"] += 1
-            match_details["SEGMENT"].append(f"{token.text} segment")
+1. **SIMPLE_TRANSFORMATION**: Basic data operations like filtering, single table operations, field transformations
+2. **JOIN_OPERATION**: Operations involving multiple tables that need to be joined together
+3. **CROSS_SEGMENT**: Operations that reference previous segments or transformations in a workflow
+4. **VALIDATION_OPERATION**: Data validation, checking data quality, ensuring data integrity
+5. **AGGREGATION_OPERATION**: Statistical operations like sum, count, average, grouping operations
+
+USER QUERY: "{query}"
+
+CLASSIFICATION CRITERIA:
+
+**JOIN_OPERATION indicators:**
+- Words like: "join", "merge", "combine", "link", "from both", "using data from"
+- References to connecting data between tables
+
+**CROSS_SEGMENT indicators:**
+- References to previous segments: "basic segment", "marc segment", "makt segment"
+- Temporal references: "previous", "prior", "last", "earlier" segment/transformation
+- Segment keywords: "BASIC", "PLANT", "SALES", "PURCHASING", "CLASSIFICATION", "MRP", "WAREHOUSE"
+- Phrases like: "from segment", "use segment", "based on segment", "transformation X"
+
+**VALIDATION_OPERATION indicators:**
+- Words like: "validate", "verify", "ensure", "check", "confirm"
+- Data quality terms: "missing", "invalid", "correct", "consistent", "duplicate"
+- Conditional validation: "if exists", "must be", "should have"
+
+**AGGREGATION_OPERATION indicators:**
+- Statistical functions: "count", "sum", "average", "mean", "total", "calculate"
+- Grouping operations: "group by", "per", "for each"
+- Comparative terms: "minimum", "maximum", "highest", "lowest"
+
+**SIMPLE_TRANSFORMATION indicators:**
+- Single table operations
+- Basic filtering: "where", "with condition", "having"
+- Field transformations: "bring", "get", "extract", "convert"
+- Simple data operations without joins or complex logic
+
+ADDITIONAL DETECTION:
+- **SAP Tables**: Look for mentions of SAP Tables
+- **Segment Names**: Look for: Basic, Plant, Sales, Purchasing, Classification, MRP, Warehouse segments
+- **Table Count**: If multiple SAP tables mentioned, likely JOIN_OPERATION
+- **Segment References**: Any reference to numbered transformations (Transformation 1, Step 2, etc.)
+
+
+Respond with a JSON object:
+```json
+{{
+    "primary_classification": "CATEGORY_NAME",
+    "confidence": 0.95,
+    "reasoning": "Brief explanation of why this classification was chosen",
+    "detected_elements": {{
+        "sap_tables_mentioned": ["Table1", "Table2"],
+        "segments_mentioned": ["Segment_name1", "Segment_name2"],
+        "join_indicators": ["merge", "combine"],
+        "validation_indicators": [],
+        "aggregation_indicators": [],
+        "transformation_references": ["previous segment"],
+        "has_multiple_tables": true
+        "columns_Mentioned": ["Column1", "Column2"]
+    }},
+    "secondary_possibilities": ["OTHER_CATEGORY"]
+}}
+```
+"""
+
+        # Call Gemini API for classification
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            logger.error("GEMINI_API_KEY not found in environment variables")
+            # Fallback to simple classification
+            return _fallback_classification(query)
+            
+        client = genai.Client(api_key=api_key)
+        
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-preview-04-17", 
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.1)  # Low temperature for consistent classification
+        )
+        
+        if not response or not hasattr(response, "text"):
+            logger.warning("Invalid response from Gemini API for query classification")
+            return _fallback_classification(query)
+            
+        # Parse JSON response
+        try:
+            json_str = re.search(r"```json(.*?)```", response.text, re.DOTALL)
+            if json_str:
+                result = json.loads(json_str.group(1).strip())
+            else:
+                # Try to parse the whole response as JSON
+                result = json.loads(response.text.strip())
+            with open("classification_response.json", "w") as f:
+                json.dump(result, f, indent=4)
+            # Extract classification and details
+            primary_class = result.get("primary_classification", "SIMPLE_TRANSFORMATION")
+            
+            # Create detailed response in the expected format
+            details = {
+                "confidence": result.get("confidence", 0.8),
+                "reasoning": result.get("reasoning", "LLM-based classification"),
+                "detected_elements": result.get("detected_elements", {}),
+                "secondary_possibilities": result.get("secondary_possibilities", []),
+                "sap_tables_mentioned": result.get("detected_elements", {}).get("sap_tables_mentioned", []),
+                "segments_mentioned": result.get("detected_elements", {}).get("segments_mentioned", []),
+                "has_multiple_tables": result.get("detected_elements", {}).get("has_multiple_tables", False),
+                "join_indicators": result.get("detected_elements", {}).get("join_indicators", []),
+                "validation_indicators": result.get("detected_elements", {}).get("validation_indicators", []),
+                "aggregation_indicators": result.get("detected_elements", {}).get("aggregation_indicators", []),
+                "transformation_references": result.get("detected_elements", {}).get("transformation_references", []),
+                "columns_Mentioned": result.get("detected_elements", {}).get("columns_Mentioned", [])
+            }
+            
+            return primary_class, details
+            
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Error parsing LLM classification response: {e}")
+            logger.error(f"Raw response: {response.text}")
+            return _fallback_classification(query)
+            
+    except Exception as e:
+        logger.error(f"Error in classify_query_with_llm: {e}")
+        return _fallback_classification(query)
+
+
+def _fallback_classification(query):
+    """
+    Fallback classification using simple keyword matching when LLM fails
+    """
+    query_lower = query.lower()
     
-    # Determine primary classification based on match counts
-    if match_counts["JOIN"] > 0 or len(set(tables_mentioned)) > 1:
+    # Simple keyword-based classification
+    join_keywords = ["join", "merge", "combine", "link", "both tables", "multiple tables"]
+    segment_keywords = ["segment", "basic", "marc", "makt", "previous", "prior", "transformation"]
+    validation_keywords = ["validate", "verify", "check", "ensure", "missing", "invalid"]
+    aggregation_keywords = ["count", "sum", "average", "total", "group by", "calculate"]
+    
+    # Check for multiple SAP tables
+    sap_tables = ["mara", "marc", "makt", "mvke", "marm", "mlan", "ekko", "ekpo", "vbak", "vbap", "kna1", "lfa1"]
+    tables_found = [table for table in sap_tables if table in query_lower]
+    
+    # Classification logic
+    if len(tables_found) > 1 or any(keyword in query_lower for keyword in join_keywords):
         primary_class = "JOIN_OPERATION"
-    elif match_counts["SEGMENT"] > 0:
+    elif any(keyword in query_lower for keyword in segment_keywords):
         primary_class = "CROSS_SEGMENT"
-    elif match_counts["VALIDATION"] > 0:
+    elif any(keyword in query_lower for keyword in validation_keywords):
         primary_class = "VALIDATION_OPERATION"
-    elif match_counts["AGGREGATION"] > 0:
+    elif any(keyword in query_lower for keyword in aggregation_keywords):
         primary_class = "AGGREGATION_OPERATION"
     else:
-        # Default to simple transformation
         primary_class = "SIMPLE_TRANSFORMATION"
     
-    # Gather details about the classification
+    # Create basic details
     details = {
-        "match_counts": match_counts,
-        "match_details": match_details,
-        "tables_mentioned": tables_mentioned,
-        "has_multiple_tables": len(set(tables_mentioned)) > 1,
-        "tokens": [token.text for token in doc]
+        "confidence": 0.6,  # Lower confidence for fallback
+        "reasoning": "Fallback keyword-based classification",
+        "detected_elements": {
+            "sap_tables_mentioned": [table.upper() for table in tables_found],
+            "segments_mentioned": [],
+            "has_multiple_tables": len(tables_found) > 1,
+            "join_indicators": [kw for kw in join_keywords if kw in query_lower],
+            "validation_indicators": [kw for kw in validation_keywords if kw in query_lower],
+            "aggregation_indicators": [kw for kw in aggregation_keywords if kw in query_lower],
+            "transformation_references": [kw for kw in segment_keywords if kw in query_lower]
+        },
+        "secondary_possibilities": []
     }
     
     return primary_class, details
 
+
+
 PROMPT_TEMPLATES = {
-    # (Same templates as original planner.py)
-    # Templates are not modified for SQL-based approach since planner's job
-    # remains the same - extract intent, entities, etc. The actual SQL generation
-    # happens in the SQLGenerator class
-    
     "JOIN_OPERATION": """
     You are a data transformation assistant specializing in SAP data mappings and JOIN operations. 
     Your task is to analyze a natural language query about joining tables and map it to the appropriate source tables, fields, and join conditions.
@@ -181,6 +732,8 @@ PROMPT_TEMPLATES = {
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
     
+    Additional_Context:{additional_context}
+
     INSTRUCTIONS:
     1. Identify key entities in the join query:
        - All source tables needed for the join
@@ -227,6 +780,8 @@ PROMPT_TEMPLATES = {
     {target_df_sample}
     
     USER QUERY: {question}
+
+    Additional_Context:{additional_context}
 
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
@@ -278,6 +833,8 @@ PROMPT_TEMPLATES = {
     
     USER QUERY: {question}
 
+    Additional_Context:{additional_context}
+
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
     
@@ -324,7 +881,7 @@ PROMPT_TEMPLATES = {
     {target_df_sample}
     
     USER QUERY: {question}
-
+    Additional_Context:{additional_context}
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
     
@@ -370,7 +927,7 @@ PROMPT_TEMPLATES = {
     {target_df_sample}
     
     USER QUERY: {question}
-
+    Additional_Context:{additional_context}
     Note:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
     
@@ -489,9 +1046,14 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             logger.warning(f"Error getting target data sample: {e}")
             target_df_sample = []
             
-        # If query_type not provided, determine it now
+        # If query_type not provided, determine it now 
         if not query_type:
-            query_type, classification_details = classify_query_with_spacy(query)
+            query_type, classification_details = classify_query_with_llm(query)
+            enhanced_classification = enhance_classification_before_processing(
+                classification_details, segment_id, db_path=os.environ.get('DB_PATH')
+            )
+            classification_details = enhanced_classification
+        
         
         # Get the appropriate prompt template
         prompt_template = PROMPT_TEMPLATES.get(query_type, PROMPT_TEMPLATES["SIMPLE_TRANSFORMATION"])
@@ -525,9 +1087,11 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             question=query,
             table_desc=list(table_desc.itertuples(index=False)),
             target_df_sample=target_df_sample_str,
-            segment_mapping=context_manager.get_segments(session_id) if session_id else [],  # FIXED: was 'semgent_mapping'
+            segment_mapping=context_manager.get_segments(session_id) if session_id else [],
+            additional_context=classification_details
         )
-        
+        with open("prompt.txt", "w") as f:
+            f.write(formatted_prompt)
         # Call Gemini API with customized prompt
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
@@ -551,8 +1115,8 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         else:
             # Try to parse the whole response as JSON
             parsed_data = json.loads(response.text.strip())
-            
         # Add query type to the parsed data
+        logger.info(f"Parsed data: {parsed_data}")
         parsed_data["query_type"] = query_type
         
         # Add other standard information
@@ -861,7 +1425,6 @@ def check_distinct_requirement(sentence):
                 return True
 
     return False
-
 
 class ContextualSessionManager:
     """
@@ -1298,7 +1861,7 @@ def fetch_data_by_ids(object_id, segment_id, project_id, conn):
             logger.warning(
                 f"No data found for object_id={object_id}, segment_id={segment_id}, project_id={project_id}"
             )
-
+        joined_df.to_csv("joined_data.csv", index=False)
         return joined_df
     except sqlite3.Error as e:
         logger.error(f"SQLite error in fetch_data_by_ids: {e}")
@@ -1348,13 +1911,10 @@ def missing_values_handling(df):
             # Count null values
             null_count = df_processed["source_field_name"].isna().sum()
             if null_count > 0:
-                # Ensure we don't propagate empty strings from target_sap_field
                 df_processed["target_sap_field"] = df_processed[
                     "target_sap_field"
                 ].replace(r"^\s*$", pd.NA, regex=True)
                 valid_targets = df_processed["target_sap_field"].notna()
-
-                # Fill missing source fields with target fields where available
                 missing_sources = df_processed["source_field_name"].isna()
                 fill_indices = missing_sources & valid_targets
 
@@ -1366,7 +1926,6 @@ def missing_values_handling(df):
         return df_processed
     except Exception as e:
         logger.error(f"Error in missing_values_handling: {e}")
-        # Return the original dataframe if there's an error
         return df
 
 def parse_data_with_context(
@@ -1621,6 +2180,16 @@ def parse_data_with_context(
         logger.error(f"Error in parse_data_with_context: {e}")
         return None
 
+def additonal_info_extraction(classification_details: dict):
+    """
+    Extract additional information from the classification details
+    Parameters:
+    classification_details (dict): The classification details from the query classification
+    Returns:
+    dict: Extracted additional information
+    """
+
+
 
 def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
     """
@@ -1659,7 +2228,14 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
             logger.info(f"Created new session: {session_id}")
         
         # Classify the query type using spaCy
-        query_type, classification_details = classify_query_with_spacy(query)
+        query_type, classification_details = classify_query_with_llm(query)
+        enhanced_classification = enhance_classification_before_processing(
+            classification_details, segment_id, db_path=os.environ.get('DB_PATH')
+        )
+        classification_details = enhanced_classification
+        logger.info(f"Query type: {query_type}")
+        logger.info(f"Classification details: {classification_details}")
+
         
         # Process the query based on its type
         return process_query_by_type(

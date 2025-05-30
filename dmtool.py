@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types
 from typing import Dict, Any
 
-from planner import process_query as planner_process_query
+from planner import process_query
 from planner import (
     validate_sql_identifier,
     APIError)
@@ -577,7 +577,7 @@ class DMTool:
 
             # 1. Process query with the planner - this stays the same
             logger.info(f"Processing query: {query}")
-            resolved_data = planner_process_query(
+            resolved_data = process_query(
                 object_id, segment_id, project_id, query, session_id=session_id
             )
             
