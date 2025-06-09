@@ -100,7 +100,7 @@ def find_closest_match(query, word_list, threshold=0.6):
             word_level_sim = word_matches / total_words if total_words > 0 else 0
         
         # Combine scores with weights
-        final_score = (overall_sim * 0.6) + (substring_bonus) + (word_level_sim * 0.4)
+        final_score = (overall_sim * 0.4) + (substring_bonus) + (word_level_sim * 0.5)
         final_score = min(final_score, 1.0)  # Cap at 1.0
         
         if final_score >= threshold:
@@ -222,7 +222,9 @@ class ClassificationEnhancer:
             return self._segments_df
             
         try:
-            self._segments_df = pd.read_csv(self.segments_csv_path)
+            conn = sqlite3.connect(self.db_path)
+            self._segments_df = pd.read_sql("SELECT * FROM connection_segments", conn)
+            conn.close()
             return self._segments_df
         except Exception as e:
             logger.error(f"Error loading segments CSV: {e}")
@@ -264,58 +266,58 @@ class ClassificationEnhancer:
         except Exception as e:
             logger.error(f"Error getting current target table pattern: {e}")
             return None
-    
+        
     def _match_segments(self, segments_mentioned: List[str], current_segment_id: int) -> Dict[str, Any]:
-        """
-        Match mentioned segments with available segments and get target tables
-        
-        Args:
-            segments_mentioned (List[str]): List of segment names mentioned
-            current_segment_id (int): Current segment ID for pattern matching
-            
-        Returns:
-            Dict[str, Any]: Enhanced segment information
-        """
-        segments_df = self._load_segments_data()
-        if segments_df.empty or not segments_mentioned:
-            return {"matched_segments": [], "segment_target_tables": {}}
-        
-        # Get available segment names
-        available_segments = segments_df['segement_name'].unique().tolist()
-        current_pattern = self._get_current_target_table_pattern(current_segment_id)
-        
-        matched_segments = []
-        segment_target_tables = {}
-        
-        for mentioned_segment in segments_mentioned:
-            # Find closest match
-            match_result = find_closest_match(mentioned_segment, available_segments, threshold=0.4)
-            
-            if match_result['match']:
-                matched_segment = match_result['match']
-                matched_segments.append(matched_segment)
-                
-                # Get target tables for this segment
-                segment_rows = segments_df[segments_df['segement_name'] == matched_segment]
-                target_tables = segment_rows['table_name'].tolist()
-                
-                # If multiple target tables and we have a current pattern, prefer matching pattern
-                if len(target_tables) > 1 and current_pattern:
-                    pattern_matches = [table for table in target_tables if table.lower().startswith(current_pattern)]
-                    if pattern_matches:
-                        target_tables = pattern_matches
-                
-                segment_target_tables[matched_segment] = target_tables
-            else:
-                # Keep original if no good match found
-                matched_segments.append(mentioned_segment)
-                segment_target_tables[mentioned_segment] = []
-        
-        return {
-            "matched_segments": matched_segments,
-            "segment_target_tables": segment_target_tables
-        }
-    
+            """
+            Match mentioned segments with available segments and get target tables
+
+            Args:
+                segments_mentioned (List[str]): List of segment names mentioned
+                current_segment_id (int): Current segment ID for pattern matching
+
+            Returns:
+                Dict[str, Any]: Enhanced segment information
+            """
+            segments_df = self._load_segments_data()
+            if segments_df.empty or not segments_mentioned:
+                return {"matched_segments": [], "segment_target_tables": {}}
+
+            # Get available segment names
+            available_segments = segments_df['segement_name'].unique().tolist()
+            current_pattern = self._get_current_target_table_pattern(current_segment_id)
+
+            matched_segments = []
+            segment_target_tables = {}
+
+            for mentioned_segment in segments_mentioned:
+                # Find closest match
+                match_result = find_closest_match(mentioned_segment, available_segments, threshold=0.3)
+
+                if match_result['match']:
+                    matched_segment = match_result['match']
+                    matched_segments.append(matched_segment)
+
+                    # Get target tables for this segment
+                    segment_rows = segments_df[segments_df['segement_name'] == matched_segment]
+                    target_tables = segment_rows['table_name'].tolist()
+
+                    # If multiple target tables and we have a current pattern, prefer matching pattern
+                    if len(target_tables) > 1 and current_pattern:
+                        pattern_matches = [table for table in target_tables if table.lower().startswith(current_pattern)]
+                        if pattern_matches:
+                            target_tables = pattern_matches
+
+                    segment_target_tables[matched_segment] = target_tables
+                else:
+                    # Keep original if no good match found
+                    matched_segments.append(mentioned_segment)
+                    segment_target_tables[mentioned_segment] = []
+
+            return {
+                "matched_segments": matched_segments,
+                "segment_target_tables": segment_target_tables
+            }
+
     def _match_tables(self, tables_mentioned: List[str]) -> Dict[str, Any]:
         """
         Match mentioned tables with available tables
@@ -457,7 +459,6 @@ class ClassificationEnhancer:
             columns_mentioned = classification_details.get("detected_elements", {}).get("columns_Mentioned", [])
             segments_mentioned = classification_details.get("detected_elements", {}).get("segments_mentioned", [])
             
-            # 1. Match segments first (as they can provide additional tables)
             segment_match_result = self._match_segments(segments_mentioned, current_segment_id)
             
             # 2. Match tables
@@ -644,6 +645,8 @@ Respond with a JSON object:
                 "transformation_references": result.get("detected_elements", {}).get("transformation_references", []),
                 "columns_Mentioned": result.get("detected_elements", {}).get("columns_Mentioned", [])
             }
+            with open("classification_response.json", "w") as f:
+                json.dump(result, f, indent=4)
             
             return primary_class, details
             
@@ -725,7 +728,9 @@ PROMPT_TEMPLATES = {
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
     
-    Additional_Context:{additional_context}
+    These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
+    Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
+    Important Query Context:{additional_context}
 
     INSTRUCTIONS:
     1. Identify key entities in the join query:
@@ -774,7 +779,9 @@ PROMPT_TEMPLATES = {
     
     USER QUERY: {question}
 
-    Additional_Context:{additional_context}
+    These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
+    Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
+    Important Query Context:{additional_context}
 
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
@@ -826,7 +833,9 @@ PROMPT_TEMPLATES = {
     
     USER QUERY: {question}
 
-    Additional_Context:{additional_context}
+    These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
+    Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
+    Important Query Context:{additional_context}
 
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
@@ -874,10 +883,13 @@ PROMPT_TEMPLATES = {
     {target_df_sample}
     
     USER QUERY: {question}
-    Additional_Context:{additional_context}
+
+    These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
+    Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
+    Important Query Context:{additional_context}    
+    
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
-    
     
     INSTRUCTIONS:
     1. Identify the aggregation functions required (sum, count, average, etc.)
@@ -920,7 +932,11 @@ PROMPT_TEMPLATES = {
     {target_df_sample}
     
     USER QUERY: {question}
-    Additional_Context:{additional_context}
+
+    These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
+    Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
+    Important Query Context:{additional_context}
+    
     Note:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
     
@@ -1045,8 +1061,8 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
                 classification_details, segment_id, db_path=os.environ.get('DB_PATH')
             )
             classification_details = enhanced_classification
-        
-        
+        with open("classification_details.json", "w") as f:
+            json.dump(classification_details, f, indent=4)
         # Get the appropriate prompt template
         prompt_template = PROMPT_TEMPLATES.get(query_type, PROMPT_TEMPLATES["SIMPLE_TRANSFORMATION"])
         
@@ -1074,7 +1090,6 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         # Format the prompt with all inputs
         table_desc = joined_df[joined_df.columns.tolist()[:-1]]
         
-        # FIX: Change 'semgent_mapping' to 'segment_mapping'
         formatted_prompt = prompt_template.format(
             question=query,
             table_desc=list(table_desc.itertuples(index=False)),
@@ -1082,6 +1097,9 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             segment_mapping=context_manager.get_segments(session_id) if session_id else [],
             additional_context=classification_details
         )
+        with open("formatted_prompt.txt", "w") as f:
+            f.write(formatted_prompt)
+        
         # Call Gemini API with customized prompt
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
@@ -1106,6 +1124,9 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             # Try to parse the whole response as JSON
             parsed_data = json.loads(response.text.strip())
         # Add query type to the parsed data
+        with open("parsed_data.json", "w") as f:
+            json.dump(parsed_data, f, indent=4)
+        
         logger.info(f"Parsed data: {parsed_data}")
         parsed_data["query_type"] = query_type
         

@@ -21,7 +21,7 @@ from generator import SQLGenerator
 from executor import SQLExecutor
 from logging_config import setup_logging
 
-setup_logging(log_to_file=True, log_to_console=False)
+setup_logging(log_to_file=True, log_to_console=True)
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +359,12 @@ class DMTool:
 
     Use this Template for the SQLite generation plan:
     {template["plan"]}
+
+    Note:
+    Tables with t_[number] like t_24 are target tables , these can act as both source and target tables.
+    These can be have different names for same column data as the source table
+    key mapping is used to match columns between source and target tables.
+    for example, if source table has MATNR and target table has Product, then if key mapping mentions then use them for matching in where clauses.
 
     Requirements:
     - Generate a step-by-step SQLite generation plan

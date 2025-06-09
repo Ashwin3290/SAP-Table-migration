@@ -7,16 +7,10 @@ c = conn.cursor()
 c.execute("Delete from t_24_Product_Plant_Data_Ext")
 conn.commit()
 
-
-# c.execute("INSERT INTO t_24_Product_Basic_Data_mandatory_Ext (PRODUCT) SELECT MATNR FROM MARA WHERE MTART = 'ROH';")
-# conn.commit()
-
-# c.execute("""UPDATE t_24_Product_Basic_Data_mandatory_Ext
-# SET MEINS = (
-#     SELECT COALESCE(
-#         (SELECT T1.MEINS FROM MARA_500 AS T1 WHERE T1.MATNR = t_24_Product_Basic_Data_mandatory_Ext.Product),
-#         (SELECT T2.MEINS FROM MARA_700 AS T2 WHERE T2.MATNR = t_24_Product_Basic_Data_mandatory_Ext.Product AND T2.MTART = 'ROH'),     
-#         (SELECT T3.MEINS FROM MARA AS T3 WHERE T3.MATNR = t_24_Product_Basic_Data_mandatory_Ext.Product)
-#     )
-# );""")
-# conn.commit()
+# c.execute("""INSERT INTO t_24_Product_Plant_Data_Ext (PRODUCT, WERKS)
+# SELECT
+#   MARC.MATNR,
+#   MARC.WERKS
+# FROM t_24_Product_Basic_Data_mandatory_Ext
+# JOIN MARC ON t_24_Product_Basic_Data_mandatory_Ext.PRODUCT = MARC.MATNR
+# WHERE MARC.WERKS IN ('1710', '9999');""")
