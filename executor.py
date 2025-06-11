@@ -7,6 +7,8 @@ import os
 from dotenv import load_dotenv
 from typing import Dict, List, Any, Optional, Union, Tuple
 
+from sqlite_utils import add_sqlite_functions
+
 load_dotenv()
 
 # Set up logging
@@ -46,6 +48,7 @@ class SQLExecutor:
             # Connect to the database
             conn = sqlite3.connect(self.db_path)
             print(query)
+            add_sqlite_functions(conn)
             
             # Configure connection to return rows as dictionaries
             conn.row_factory = sqlite3.Row

@@ -38,6 +38,20 @@
     ]
   },
   {
+    "id": "complex_nested_conditional",
+    "prompt": "For materials with {condition1}, check {field1} in {table1}. If {field1} in ({values1}) then '{result1}', else check {field1} in {table2}. If {field1} in ({values2}) then '{result2}', else '{result3}'. For materials not matching {condition1}, set to '{default_result}'",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {new_field} TEXT; UPDATE {target_table} SET {new_field} = CASE WHEN {condition1} THEN (CASE WHEN (SELECT {field1} FROM {table1} WHERE {key_field} = {target_table}.{key_field}) IN ({values1}) THEN '{result1}' WHEN (SELECT {field1} FROM {table2} WHERE {key_field} = {target_table}.{key_field}) IN ({values2}) THEN '{result2}' ELSE '{result3}' END) ELSE '{default_result}' END",
+    "plan": [
+      "1. Add new column to store the result",
+      "2. Identify the primary condition to check material types",
+      "3. For matching materials, implement nested conditional logic",
+      "4. Check field values in first table against first set of values",
+      "5. If not found, check field values in second table against second set",
+      "6. Apply default values for non-matching conditions",
+      "7. Update the target table with the computed values"
+    ]
+  },
+  {
     "id": "join_segment_data",
     "prompt": "Join {field1} from {segment1} with {field2} from {segment2} and Bring {field3} for conditions",
     "query": "INSERT INTO {target_table} ({target_fields}) SELECT t1.{field1}, t2.{field3} FROM {segment1_table} t1 JOIN {segment2_table} t2 ON t1.{field1} = t2.{field2} WHERE t2.{filter_field} IN ({filter_values})",
@@ -49,6 +63,30 @@
       "5. Apply appropriate filters",
       "6. Determine if INSERT or UPDATE operation is needed based on target data",
       "7. Execute the operation to update the target table"
+    ]
+  },
+  {
+    "id": "multi_table_join_with_lookup",
+    "prompt": "Join {entity1} from {table1} with {entity2} from {table2}, then use {lookup_field} from {table2} to get {result_fields} from {table3}",
+    "query": "UPDATE {target_table} SET {target_fields} = (SELECT {result_fields} FROM {table1} t1 JOIN {table2} t2 ON t1.{entity1} = t2.{entity2} JOIN {table3} t3 ON t2.{lookup_field} = t3.{lookup_field} WHERE t1.{key_field} = {target_table}.{key_field})",
+    "plan": [
+      "1. Identify the primary entities to join between first two tables",
+      "2. Identify the lookup field to connect to the third table",
+      "3. Identify the result fields to retrieve from the third table",
+      "4. Create a three-table JOIN query",
+      "5. Update the target table with the joined data"
+    ]
+  },
+  {
+    "id": "region_based_conditional",
+    "prompt": "If {country_field} is European country then '{european_value}', if Asian country then '{asian_value}', else '{other_value}'",
+    "query": "UPDATE {target_table} SET {target_field} = CASE WHEN {country_field} IN ('DE', 'FR', 'IT', 'ES', 'NL', 'BE', 'AT', 'CH', 'SE', 'NO', 'DK', 'FI', 'IE', 'PT', 'GR', 'PL', 'CZ', 'SK', 'HU', 'SI', 'HR', 'BG', 'RO', 'EE', 'LV', 'LT', 'LU', 'MT', 'CY') THEN '{european_value}' WHEN {country_field} IN ('CN', 'JP', 'KR', 'IN', 'TH', 'SG', 'MY', 'ID', 'PH', 'VN', 'TW', 'HK', 'MO') THEN '{asian_value}' ELSE '{other_value}' END",
+    "plan": [
+      "1. Identify the country field to check",
+      "2. Define European country codes list",
+      "3. Define Asian country codes list", 
+      "4. Create CASE expression with regional conditions",
+      "5. Update target field with appropriate regional values"
     ]
   },
   {
@@ -67,13 +105,24 @@
   {
     "id": "date_formatting",
     "prompt": "Add a new column for {date_type} from the {date_field}",
-    "query": "ALTER TABLE {target_table} ADD COLUMN {target_field} TEXT; UPDATE {target_table} SET {target_field} = CASE WHEN '{date_type}' = 'day' THEN substr({date_field}, 7, 2) WHEN '{date_type}' = 'month' THEN substr({date_field}, 5, 2) WHEN '{date_type}' = 'year' THEN substr({date_field}, 1, 4) WHEN '{date_type}' = 'quarter' THEN CASE WHEN CAST(substr({date_field}, 5, 2) AS INTEGER) BETWEEN 1 AND 3 THEN 'Q1' WHEN CAST(substr({date_field}, 5, 2) AS INTEGER) BETWEEN 4 AND 6 THEN 'Q2' WHEN CAST(substr({date_field}, 5, 2) AS INTEGER) BETWEEN 7 AND 9 THEN 'Q3' ELSE 'Q4' END END",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {target_field} TEXT; UPDATE {target_table} SET {target_field} = CASE WHEN '{date_type}' = 'day' THEN substr({date_field}, 7, 2) WHEN '{date_type}' = 'month' THEN substr({date_field}, 5, 2) WHEN '{date_type}' = 'year' THEN substr({date_field}, 1, 4) WHEN '{date_type}' = 'quarter' THEN CASE WHEN CAST(substr({date_field}, 5, 2) AS INTEGER) BETWEEN 1 AND 3 THEN 'Q1' WHEN CAST(substr({date_field}, 5, 2) AS INTEGER) BETWEEN 4 AND 6 THEN 'Q2' WHEN CAST(substr({date_field}, 5, 2) AS INTEGER) BETWEEN 7 AND 9 THEN 'Q3' ELSE 'Q4' END WHEN '{date_type}' = 'day_name' THEN CASE strftime('%w', substr({date_field}, 1, 4) || '-' || substr({date_field}, 5, 2) || '-' || substr({date_field}, 7, 2)) WHEN '0' THEN 'Sunday' WHEN '1' THEN 'Monday' WHEN '2' THEN 'Tuesday' WHEN '3' THEN 'Wednesday' WHEN '4' THEN 'Thursday' WHEN '5' THEN 'Friday' WHEN '6' THEN 'Saturday' END END",
     "plan": [
       "1. Identify the date field to format",
-      "2. Identify the type of date information to extract (day, month, year, quarter)",
+      "2. Identify the type of date information to extract (day, month, year, quarter, day_name)",
       "3. Add a new column to store the extracted information",
       "4. Create appropriate SQLite date extraction expressions",
       "5. Update the new column with the formatted date information"
+    ]
+  },
+  {
+    "id": "date_calculation",
+    "prompt": "Add a new column for {calculation_type} based on {date_field}",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {target_field} TEXT; UPDATE {target_table} SET {target_field} = CASE WHEN '{calculation_type}' = 'last_month_end' THEN date(substr({date_field}, 1, 4) || '-' || substr({date_field}, 5, 2) || '-01', '-1 day') WHEN '{calculation_type}' = 'system_date' THEN date('now') END",
+    "plan": [
+      "1. Identify the calculation type (last_month_end, system_date, etc.)",
+      "2. Add a new column to store the calculated date",
+      "3. Implement the appropriate date calculation logic",
+      "4. Update the new column with the calculated values"
     ]
   },
   {
@@ -89,11 +138,35 @@
   {
     "id": "clean_special_characters",
     "prompt": "Remove special characters from {field}",
-    "query": "UPDATE {target_table} SET {field} = regexp_replace({field}, '[^a-zA-Z0-9 ]', '', 'g')",
+    "query": "UPDATE {target_table} SET {field} = regexp_replace({field}, '[/[^a-zA-Z0-9 ]/g]', '', 'i')",
     "plan": [
       "1. Identify the field to clean",
       "2. Use regular expressions to remove special characters",
       "3. Update the field with the cleaned text"
+    ]
+  },
+  {
+    "id": "complex_string_manipulation",
+    "prompt": "If {field} has one word use as-is in {target_field}, else skip first word and take first {length} characters from remaining words",
+    "query": "UPDATE {target_table} SET {target_field} = CASE WHEN length({field}) - length(replace({field}, ' ', '')) = 0 THEN {field} ELSE substr(substr({field}, instr({field}, ' ') + 1), 1, {length}) END",
+    "plan": [
+      "1. Identify the source field to manipulate",
+      "2. Check if the field contains only one word (no spaces)",
+      "3. If one word, use the entire word",
+      "4. If multiple words, skip the first word and extract specified length from remaining",
+      "5. Update the target field with the processed text"
+    ]
+  },
+  {
+    "id": "lookup_table_mapping",
+    "prompt": "From {lookup_table} take {result_field} corresponding to {key_field} and put into {target_field}",
+    "query": "UPDATE {target_table} SET {target_field} = (SELECT {result_field} FROM {lookup_table} WHERE {key_field} = {target_table}.{source_field})",
+    "plan": [
+      "1. Identify the lookup table and mapping fields",
+      "2. Identify the key field to match on",
+      "3. Identify the result field to retrieve",
+      "4. Create UPDATE with subquery to perform the lookup",
+      "5. Update target field with mapped values"
     ]
   },
   {
@@ -162,6 +235,51 @@
       "3. Identify the default value to use if both are NULL",
       "4. Create a CASE expression with COALESCE to implement the logic",
       "5. Prepare the UPDATE statement"
+    ]
+  },
+  {
+    "id": "cross_table_validation",
+    "prompt": "Bring {field1} from {table1} for {filter_condition} and check if same {field2} is available in {table2} with {validation_condition}",
+    "query": "INSERT INTO {target_table} ({target_field}) SELECT t1.{field1} FROM {table1} t1 WHERE t1.{filter_field} = '{filter_value}' AND EXISTS (SELECT 1 FROM {table2} t2 WHERE t2.{field2} = t1.{field1} AND t2.{validation_field} = '{validation_value}')",
+    "plan": [
+      "1. Identify the source table and field to retrieve",
+      "2. Identify the filter condition for the source table",
+      "3. Identify the validation table and conditions",
+      "4. Create a query with EXISTS clause for cross-table validation",
+      "5. Insert only records that pass both conditions"
+    ]
+  },
+  {
+    "id": "field_update_from_source",
+    "prompt": "For every {entity} in the target table, fetch the {source_field} from the {source_table} and update the {target_field}",
+    "query": "UPDATE {target_table} SET {target_field} = (SELECT {source_field} FROM {source_table} WHERE {key_field} = {target_table}.{key_field})",
+    "plan": [
+      "1. Identify the source table and field to fetch",
+      "2. Identify the target field to update",
+      "3. Identify the key field for joining",
+      "4. Create UPDATE statement with subquery",
+      "5. Execute the update operation"
+    ]
+  },
+  {
+    "id": "set_default_values",
+    "prompt": "Set default value '{default_value}' for {field}",
+    "query": "UPDATE {target_table} SET {field} = '{default_value}'",
+    "plan": [
+      "1. Identify the field to set default value for",
+      "2. Identify the default value to assign",
+      "3. Execute UPDATE statement to set the default value"
+    ]
+  },
+  {
+    "id": "conditional_default_assignment",
+    "prompt": "If {condition_field} = '{condition_value}' then default '{value1}', else default '{value2}'",
+    "query": "UPDATE {target_table} SET {target_field} = CASE WHEN {condition_field} = '{condition_value}' THEN '{value1}' ELSE '{value2}' END",
+    "plan": [
+      "1. Identify the condition field and value to check",
+      "2. Identify the conditional default values",
+      "3. Create CASE expression for conditional assignment",
+      "4. Update the target field with conditional defaults"
     ]
   }
 ]

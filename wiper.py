@@ -4,7 +4,7 @@ conn=sqlite3.connect('db.sqlite3')
 c = conn.cursor()
 # # c.execute("select * from t_24_Product_Plant_Data_Ext")
 # # print(c.fetchall())
-c.execute("Delete from t_24_Product_Plant_Data_Ext")
+c.execute("Delete from t_25_Product_Additional_Descriptions")
 conn.commit()
 
 # c.execute("""INSERT INTO t_24_Product_Plant_Data_Ext (PRODUCT, WERKS)

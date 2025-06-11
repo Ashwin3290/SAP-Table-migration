@@ -406,6 +406,7 @@ class DMTool:
             
             # Extract and return the plan
             if response and hasattr(response, "text"):
+                logger.info(f"response text {response.text.strip()}")
                 return response.text.strip()
             else:
                 logger.warning("Invalid response from LLM in create_sql_plan")

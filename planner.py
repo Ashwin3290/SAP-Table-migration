@@ -645,9 +645,6 @@ Respond with a JSON object:
                 "transformation_references": result.get("detected_elements", {}).get("transformation_references", []),
                 "columns_Mentioned": result.get("detected_elements", {}).get("columns_Mentioned", [])
             }
-            with open("classification_response.json", "w") as f:
-                json.dump(result, f, indent=4)
-            
             return primary_class, details
             
         except (json.JSONDecodeError, KeyError) as e:
@@ -1061,8 +1058,6 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
                 classification_details, segment_id, db_path=os.environ.get('DB_PATH')
             )
             classification_details = enhanced_classification
-        with open("classification_details.json", "w") as f:
-            json.dump(classification_details, f, indent=4)
         # Get the appropriate prompt template
         prompt_template = PROMPT_TEMPLATES.get(query_type, PROMPT_TEMPLATES["SIMPLE_TRANSFORMATION"])
         
@@ -1097,8 +1092,6 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             segment_mapping=context_manager.get_segments(session_id) if session_id else [],
             additional_context=classification_details
         )
-        with open("formatted_prompt.txt", "w") as f:
-            f.write(formatted_prompt)
         
         # Call Gemini API with customized prompt
         api_key = os.environ.get("GEMINI_API_KEY")
@@ -1123,9 +1116,6 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         else:
             # Try to parse the whole response as JSON
             parsed_data = json.loads(response.text.strip())
-        # Add query type to the parsed data
-        with open("parsed_data.json", "w") as f:
-            json.dump(parsed_data, f, indent=4)
         
         logger.info(f"Parsed data: {parsed_data}")
         parsed_data["query_type"] = query_type
