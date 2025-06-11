@@ -5,6 +5,7 @@ import pandas as pd
 import uuid
 import os
 from dotenv import load_dotenv
+from datetime import datetime
 from typing import Dict, List, Any, Optional, Union, Tuple
 
 from sqlite_utils import add_sqlite_functions
@@ -220,3 +221,280 @@ class SQLExecutor:
             return False, ""
         
         return True, backup_name
+    
+    def execute_multi_statement_query(self, multi_sql, sql_params, session_id=None):
+        """Execute multiple SQL statements with recovery support"""
+        try:
+            from planner import ContextualSessionManager
+            context_manager = ContextualSessionManager()
+            
+            # Split into individual statements
+            statements = self.split_sql_statements(multi_sql)
+            
+            # Check if we have a previous execution state to resume from
+            if session_id:
+                execution_state = context_manager.load_multi_query_state(session_id)
+                if execution_state:
+                    return self.resume_execution(execution_state, statements, sql_params, context_manager, session_id)
+            
+            # Fresh execution
+            return self.execute_with_recovery(statements, sql_params, session_id, context_manager)
+            
+        except Exception as e:
+            logger.error(f"Error in execute_multi_statement_query: {e}")
+            return {"error_type": "MultiQueryError", "error_message": str(e)}
+        
+    def resume_execution(self, execution_state, statements, sql_params, context_manager, session_id):
+        """Resume execution from a previously failed multi-query operation"""
+        try:
+            logger.info(f"Resuming multi-query execution from session {session_id}")
+            
+            # Get the current execution state
+            completed_count = execution_state.get("completed_count", 0)
+            failed_count = execution_state.get("failed_count", 0)
+            previous_statements = execution_state.get("statements", [])
+            
+            # Validate that we have matching statements
+            if len(statements) != len(previous_statements):
+                logger.warning("Statement count mismatch during resume, starting fresh execution")
+                return self.execute_with_recovery(statements, sql_params, session_id, context_manager)
+            
+            # Start from where we left off
+            results = []
+            
+            # Add results from previously completed statements
+            for prev_statement in previous_statements:
+                if prev_statement.get("status") == "completed":
+                    results.append(prev_statement.get("result", {}))
+            
+            # Find the index to resume from (first failed or first incomplete statement)
+            resume_index = completed_count
+            
+            # Update execution state for resume
+            execution_state["resumed_at"] = datetime.now().isoformat() if 'datetime' in globals() else "resumed"
+            execution_state["resume_attempt"] = execution_state.get("resume_attempt", 0) + 1
+            
+            logger.info(f"Resuming from statement {resume_index + 1}/{len(statements)}")
+            
+            # Execute remaining statements
+            for i in range(resume_index, len(statements)):
+                statement = statements[i]
+                
+                try:
+                    logger.info(f"Executing statement {i+1}/{len(statements)} (resumed): {statement[:100]}...")
+                    
+                    # Execute individual statement
+                    result = self.execute_query(statement, sql_params, fetch_results=False)
+                    
+                    if isinstance(result, dict) and "error_type" in result:
+                        # Statement failed again
+                        statement_result = {
+                            "statement": statement,
+                            "index": i,
+                            "status": "failed", 
+                            "error": result,
+                            "can_retry": self._can_retry_statement(statement, result),
+                            "resume_attempt": execution_state.get("resume_attempt", 1)
+                        }
+                        execution_state["failed_count"] += 1
+                        
+                        # Update the failed statement in execution state
+                        if i < len(execution_state["statements"]):
+                            execution_state["statements"][i] = statement_result
+                        else:
+                            execution_state["statements"].append(statement_result)
+                        
+                        # Save updated state
+                        context_manager.save_multi_query_state(session_id, execution_state)
+                        
+                        # Return failure info
+                        return {
+                            "multi_query_result": True,
+                            "completed_statements": execution_state["completed_count"],
+                            "failed_statement_index": i,
+                            "failed_statement": statement,
+                            "error": result,
+                            "can_resume": True,
+                            "session_id": session_id,
+                            "all_results": results,
+                            "is_resumed_execution": True,
+                            "resume_attempt": execution_state.get("resume_attempt", 1)
+                        }
+                    else:
+                        # Statement succeeded
+                        statement_result = {
+                            "statement": statement,
+                            "index": i,
+                            "status": "completed",
+                            "result": result,
+                            "resumed_execution": True
+                        }
+                        execution_state["completed_count"] += 1
+                        results.append(result)
+                        
+                        # Update the statement in execution state
+                        if i < len(execution_state["statements"]):
+                            execution_state["statements"][i] = statement_result
+                        else:
+                            execution_state["statements"].append(statement_result)
+                        
+                        # Reduce failed count if this was previously failed
+                        prev_statement = next((s for s in previous_statements if s.get("index") == i), None)
+                        if prev_statement and prev_statement.get("status") == "failed":
+                            execution_state["failed_count"] = max(0, execution_state["failed_count"] - 1)
+                    
+                except Exception as e:
+                    # Unexpected error during resume
+                    logger.error(f"Unexpected error during resume at statement {i}: {e}")
+                    return {
+                        "error_type": "ResumeExecutionError",
+                        "error_message": f"Resume failed at statement {i+1}: {str(e)}",
+                        "completed_statements": execution_state["completed_count"],
+                        "failed_statement": statement,
+                        "session_id": session_id,
+                        "is_resumed_execution": True
+                    }
+            
+            # All remaining statements completed successfully
+            context_manager.cleanup_multi_query_state(session_id)
+            
+            logger.info(f"Multi-query execution resumed and completed successfully. Total statements: {len(statements)}")
+            
+            return {
+                "multi_query_result": True, 
+                "completed_statements": len(statements),
+                "all_results": results,
+                "success": True,
+                "is_resumed_execution": True,
+                "resume_attempt": execution_state.get("resume_attempt", 1)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in resume_execution: {e}")
+            return {
+                "error_type": "ResumeExecutionError",
+                "error_message": f"Failed to resume execution: {str(e)}",
+                "session_id": session_id
+            }
+
+    def split_sql_statements(self, multi_sql):
+        """Split multi-SQL into individual statements, handling edge cases"""
+        statements = []
+        current_statement = ""
+        in_string = False
+        string_char = None
+        
+        for char in multi_sql:
+            if char in ("'", '"') and not in_string:
+                in_string = True
+                string_char = char
+            elif char == string_char and in_string:
+                in_string = False
+                string_char = None
+            elif char == ';' and not in_string:
+                if current_statement.strip():
+                    statements.append(current_statement.strip())
+                current_statement = ""
+                continue
+            
+            current_statement += char
+        
+        # Add final statement if exists
+        if current_statement.strip():
+            statements.append(current_statement.strip())
+        
+        return statements
+
+    def execute_with_recovery(self, statements, sql_params, session_id, context_manager):
+        """Execute statements one by one with failure tracking"""
+        results = []
+        execution_state = {
+            "statements": [],
+            "completed_count": 0,
+            "failed_count": 0,
+            "session_id": session_id,
+            "original_sql": "; ".join(statements)
+        }
+        
+        for i, statement in enumerate(statements):
+            try:
+                logger.info(f"Executing statement {i+1}/{len(statements)}: {statement[:100]}...")
+                
+                # Execute individual statement
+                result = self.execute_query(statement, sql_params, fetch_results=False)
+                
+                if isinstance(result, dict) and "error_type" in result:
+                    # Statement failed
+                    statement_result = {
+                        "statement": statement,
+                        "index": i,
+                        "status": "failed", 
+                        "error": result,
+                        "can_retry": self._can_retry_statement(statement, result)
+                    }
+                    execution_state["failed_count"] += 1
+                    execution_state["statements"].append(statement_result)
+                    
+                    # Save state and return partial results
+                    if session_id:
+                        context_manager.save_multi_query_state(session_id, execution_state)
+                    
+                    # Return partial success with failure info
+                    return {
+                        "multi_query_result": True,
+                        "completed_statements": execution_state["completed_count"],
+                        "failed_statement_index": i,
+                        "failed_statement": statement,
+                        "error": result,
+                        "can_resume": True,
+                        "session_id": session_id,
+                        "all_results": results
+                    }
+                else:
+                    # Statement succeeded
+                    statement_result = {
+                        "statement": statement,
+                        "index": i,
+                        "status": "completed",
+                        "result": result
+                    }
+                    execution_state["completed_count"] += 1
+                    results.append(result)
+                    
+                execution_state["statements"].append(statement_result)
+                
+            except Exception as e:
+                # Unexpected error
+                logger.error(f"Unexpected error executing statement {i}: {e}")
+                return {
+                    "error_type": "StatementExecutionError",
+                    "error_message": f"Statement {i+1} failed: {str(e)}",
+                    "completed_statements": execution_state["completed_count"],
+                    "failed_statement": statement
+                }
+        
+        # All statements completed successfully
+        if session_id:
+            context_manager.cleanup_multi_query_state(session_id)
+        
+        return {
+            "multi_query_result": True, 
+            "completed_statements": len(statements),
+            "all_results": results,
+            "success": True
+        }
+
+    def _can_retry_statement(self, statement, error):
+        """Determine if a failed statement can be safely retried"""
+        error_msg = error.get("error_message", "").lower()
+        
+        # DDL statements that might fail because resource already exists
+        if "alter table" in statement.lower() and "add column" in statement.lower():
+            if "already exists" in error_msg or "duplicate column" in error_msg:
+                return False  # Column already exists, no need to retry
+        
+        # UPDATE/INSERT statements can usually be retried
+        if any(keyword in statement.lower() for keyword in ["update", "insert", "select"]):
+            return True
+            
+        return True  # Default: allow retry

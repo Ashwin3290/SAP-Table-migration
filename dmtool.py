@@ -533,20 +533,47 @@ class DMTool:
                 # 3. Generate SQLite query instead of Python code
                 sql_query, sql_params = self.sql_generator.generate_sql(sql_plan, planner_info, template)
                 
-                # 4. Execute the SQLite query
                 result = self._execute_sql_query(sql_query, sql_params, planner_info)
-                
+
                 # 5. Process the results
                 if isinstance(result, dict) and "error_type" in result:
                     logger.error(f"SQLite execution error: {result}")
-                    return  f"SQLite execution failed: {result.get('error_message', 'Unknown error')}", session_id
-                
+                    return None, f"SQLite execution failed: {result.get('error_message', 'Unknown error')}", session_id
+
+                if isinstance(result, dict) and result.get("multi_query_result"):
+                    logger.info(f"Processing multi-query result: {result.get('completed_statements', 0)} statements completed")
+                    multi_result = self._handle_multi_query_result(result, planner_info, session_id)
+                    
+                    if result.get("success") and len(multi_result) == 2:
+                        try:
+                            context_manager = ContextualSessionManager()
+                            transformation_data = {
+                                "original_query": query,
+                                "generated_sql": sql_query,
+                                "query_type": query_type,
+                                "source_tables": planner_info.get("source_table_name", []),
+                                "target_table": planner_info.get("target_table_name", []),
+                                "fields_affected": planner_info.get("target_sap_fields", []),
+                                "execution_result": {
+                                    "success": True,
+                                    "rows_affected": len(multi_result[0]) if isinstance(multi_result[0], pd.DataFrame) else 0,
+                                    "is_multi_step": True,
+                                    "steps_completed": result.get("completed_statements", 0)
+                                },
+                                "is_multi_step": True,
+                                "steps_completed": result.get("completed_statements", 0)
+                            }
+                            context_manager.add_transformation_record(session_id, transformation_data)
+                        except Exception as e:
+                            logger.warning(f"Could not save transformation record for multi-query: {e}")
+                    
+                    return multi_result
+
                 # 6. Register the target table for this segment
                 if "target_table_name" in resolved_data:
                     target_table = resolved_data["target_table_name"]
                     if isinstance(target_table, list) and len(target_table) > 0:
                         target_table = target_table[0]
-                                        # add session info
                 segment_name = self._get_segment_name(segment_id, conn)
                 if segment_name:
                     context_manager.add_segment(
@@ -554,6 +581,33 @@ class DMTool:
                         segment_name,
                         planner_info["target_table_name"],
                     )
+
+                try:
+                    context_manager = ContextualSessionManager()
+                    
+                    # Prepare transformation data
+                    transformation_data = {
+                        "original_query": query,
+                        "generated_sql": sql_query,
+                        "query_type": query_type,
+                        "source_tables": planner_info.get("source_table_name", []),
+                        "target_table": target_table,
+                        "fields_affected": planner_info.get("target_sap_fields", []),
+                        "execution_result": {
+                            "success": True,
+                            "rows_affected": len(target_data) if isinstance(target_data, pd.DataFrame) else 0,
+                            "is_multi_step": isinstance(result, dict) and result.get("multi_query_result", False),
+                            "steps_completed": result.get("completed_statements", 1) if isinstance(result, dict) else 1
+                        },
+                        "is_multi_step": isinstance(result, dict) and result.get("multi_query_result", False),
+                        "steps_completed": result.get("completed_statements", 1) if isinstance(result, dict) else 1
+                    }
+                    
+                    context_manager.add_transformation_record(session_id, transformation_data)
+                    
+                except Exception as e:
+                    logger.warning(f"Could not save transformation record: {e}")
+
                 if target_table and query_type in ["SIMPLE_TRANSFORMATION", "JOIN_OPERATION", "CROSS_SEGMENT", "AGGREGATION_OPERATION"]:
                     try:
                         # Get the full target table data to show actual results
@@ -602,9 +656,16 @@ class DMTool:
                     pass
             return None, f"An error occurred: {e}", session_id
 
+    def _is_multi_statement_query(self, sql_query):
+        """Detect if SQL contains multiple statements"""
+        if not sql_query or not isinstance(sql_query, str):
+            return False        
+        statements = self.sql_executor.split_sql_statements(sql_query)
+        return len(statements) > 1
+
     def _execute_sql_query(self, sql_query, sql_params, planner_info):
         """
-        Execute SQLite query using the SQLExecutor
+        Execute SQLite query using the SQLExecutor with multi-statement support
         
         Parameters:
         sql_query (str): The SQLite query to execute
@@ -614,6 +675,15 @@ class DMTool:
         Returns:
         Union[pd.DataFrame, dict]: Results or error information
         """
+        
+        # NEW: Check if this is a multi-statement query
+        if self._is_multi_statement_query(sql_query):
+            logger.info("Detected multi-statement query, using multi-query executor")
+            return self.sql_executor.execute_multi_statement_query(
+                sql_query, sql_params, planner_info.get("session_id")
+            )
+        
+        # Existing single statement logic
         query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
         
         if query_type == "SIMPLE_TRANSFORMATION":
@@ -684,3 +754,83 @@ class DMTool:
         except Exception as e:
             logger.error(f"Error in _insert_dataframe_to_table: {e}")
             return False
+
+def _handle_multi_query_result(self, result, planner_info, session_id):
+    """Handle results from multi-statement query execution"""
+    
+    # Check if this was a resumed execution
+    is_resumed = result.get("is_resumed_execution", False)
+    resume_attempt = result.get("resume_attempt", 1)
+    
+    if result.get("success"):
+        # All statements completed successfully
+        target_table = planner_info["target_table_name"][0] if planner_info.get("target_table_name") else None
+        
+        if target_table:
+            # Get final state of target table
+            try:
+                select_query = f"SELECT * FROM {validate_sql_identifier(target_table)}"
+                target_data = self.sql_executor.execute_and_fetch_df(select_query)
+                
+                if isinstance(target_data, pd.DataFrame) and not target_data.empty:
+                    # Add metadata about the multi-step operation
+                    target_data.attrs['transformation_summary'] = {
+                        'rows': len(target_data),
+                        'target_table': target_table,
+                        'query_type': 'MULTI_STEP_OPERATION',
+                        'steps_completed': result.get("completed_statements", 0),
+                        'is_multi_step': True,
+                        'is_resumed_execution': is_resumed,
+                        'resume_attempt': resume_attempt
+                    }
+                    
+                    success_message = "Multi-step operation completed successfully"
+                    if is_resumed:
+                        success_message += f" (resumed from previous failure, attempt #{resume_attempt})"
+                    
+                    target_data.attrs['message'] = success_message
+                    return target_data, session_id
+                else:
+                    # Target table exists but is empty
+                    empty_df = pd.DataFrame()
+                    success_message = f"Multi-step operation completed. Target table '{target_table}' is empty after transformation"
+                    if is_resumed:
+                        success_message += f" (resumed execution, attempt #{resume_attempt})"
+                    empty_df.attrs['message'] = success_message
+                    return empty_df, session_id
+                    
+            except Exception as e:
+                logger.warning(f"Could not fetch final target data after multi-query: {e}")
+                # Return success indicator even if we can't fetch final data
+                success_message = "Multi-step operation completed successfully"
+                if is_resumed:
+                    success_message += f" (resumed execution, attempt #{resume_attempt})"
+                success_df = pd.DataFrame({'status': [success_message]})
+                return success_df, session_id
+        else:
+            # No target table specified, return success indicator
+            success_message = "Multi-step operation completed successfully"
+            if is_resumed:
+                success_message += f" (resumed execution, attempt #{resume_attempt})"
+            success_df = pd.DataFrame({'status': [success_message]})
+            return success_df, session_id
+    
+    else:
+        # Partial failure - return informative error message
+        completed = result.get("completed_statements", 0)
+        total_statements = completed + 1  # At least one more failed
+        failed_statement = result.get("failed_statement", "")
+        error_info = result.get("error", {})
+        
+        resume_info = ""
+        if is_resumed:
+            resume_info = f"\n🔄 This was resume attempt #{resume_attempt}"
+        
+        error_message = f"""Multi-step operation partially completed:
+✅ Completed steps: {completed}/{total_statements}
+❌ Failed at step {completed + 1}: {failed_statement[:100]}{'...' if len(failed_statement) > 100 else ''}
+💡 Error: {error_info.get('error_message', 'Unknown error')}
+🔄 Can resume from failed step: {result.get('can_resume', False)}
+📝 Session ID: {session_id}{resume_info}"""
+        
+        return None, error_message, session_id

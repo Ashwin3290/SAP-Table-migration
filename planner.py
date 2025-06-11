@@ -13,17 +13,15 @@ from pathlib import Path
 import spacy
 import traceback
 from dotenv import load_dotenv
+from difflib import SequenceMatcher
 from typing import Dict, List, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Load environment variables
 load_dotenv()
 
-# Import SQL related modules
 from executor import SQLExecutor
 
-# Initialize SQL executor
 sql_executor = SQLExecutor()
 
 from spacy.matcher import Matcher
@@ -42,11 +40,6 @@ except OSError:
         from spacy.cli import download
         download("en_core_web_sm")
         nlp = spacy.load("en_core_web_sm")
-        
-
-
-from difflib import SequenceMatcher
-
 
 def find_closest_match(query, word_list, threshold=0.6):
     """
@@ -375,7 +368,7 @@ class ClassificationEnhancer:
         }
     
     def _match_columns(self, columns_mentioned: List[str], matched_tables: List[str], 
-                      segment_target_tables: Dict[str, List[str]]) -> Dict[str, Any]:
+                    segment_target_tables: Dict[str, List[str]]) -> Dict[str, Any]:
         """
         Match mentioned columns with available columns in tables
         
@@ -599,7 +592,6 @@ Respond with a JSON object:
 }}
 ```
 """
-
         # Call Gemini API for classification
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
@@ -656,7 +648,6 @@ Respond with a JSON object:
         logger.error(f"Error in classify_query_with_llm: {e}")
         return _fallback_classification(query)
 
-
 def _fallback_classification(query):
     """
     Fallback classification using simple keyword matching when LLM fails
@@ -702,8 +693,6 @@ def _fallback_classification(query):
     }
     
     return primary_class, details
-
-
 
 PROMPT_TEMPLATES = {
     "JOIN_OPERATION": """
@@ -1679,6 +1668,192 @@ class ContextualSessionManager:
             logger.error(f"Failed to get key mapping for session {session_id}: {e}")
             return []
 
+    def add_transformation_record(self, session_id, transformation_data):
+        """Add a transformation record to the session context"""
+        try:
+            if not session_id:
+                logger.warning("No session ID provided for add_transformation_record")
+                return False
+                
+            context_path = f"{self.storage_path}/{session_id}/context.json"
+            
+            # Get existing context or create new
+            context = self.get_context(session_id)
+            if not context:
+                context = {
+                    "session_id": session_id,
+                    "created_at": datetime.now().isoformat(),
+                    "transformation_history": [],
+                    "target_table_state": {
+                        "populated_fields": [],
+                        "remaining_mandatory_fields": [],
+                        "total_rows": 0,
+                        "rows_with_data": 0,
+                    }
+                }
+            
+            # Initialize transformation_history if not exists
+            if "transformation_history" not in context:
+                context["transformation_history"] = []
+            
+            # Add transformation record
+            transformation_record = {
+                "transformation_id": f"t_{len(context['transformation_history']) + 1}",
+                "timestamp": datetime.now().isoformat(),
+                "original_query": transformation_data.get("original_query", ""),
+                "generated_sql": transformation_data.get("generated_sql", ""),
+                "query_type": transformation_data.get("query_type", ""),
+                "source_tables": transformation_data.get("source_tables", []),
+                "target_table": transformation_data.get("target_table", ""),
+                "fields_affected": transformation_data.get("fields_affected", []),
+                "execution_result": transformation_data.get("execution_result", {}),
+                "is_multi_step": transformation_data.get("is_multi_step", False),
+                "steps_completed": transformation_data.get("steps_completed", 1)
+            }
+            
+            context["transformation_history"].append(transformation_record)
+            
+            # Save updated context
+            os.makedirs(os.path.dirname(context_path), exist_ok=True)
+            with open(context_path, "w") as f:
+                json.dump(context, f, indent=2)
+                
+            logger.info(f"Added transformation record {transformation_record['transformation_id']} to session {session_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error adding transformation record: {e}")
+            return False
+
+    def get_transformation_history(self, session_id):
+        """Get all transformation records for a session"""
+        try:
+            context = self.get_context(session_id)
+            if context and "transformation_history" in context:
+                return context["transformation_history"]
+            return []
+        except Exception as e:
+            logger.error(f"Error getting transformation history: {e}")
+            return []
+
+    def find_transformation_by_reference(self, session_id, reference_text):
+        """Find transformation records that match a reference (e.g., 'previous transformation', 'transformation 2')"""
+        try:
+            history = self.get_transformation_history(session_id)
+            if not history:
+                return []
+            
+            reference_lower = reference_text.lower()
+            matches = []
+            
+            # Direct transformation number reference (e.g., "transformation 2", "step 3")
+            import re
+            number_match = re.search(r'(?:transformation|step|query)\s*(\d+)', reference_lower)
+            if number_match:
+                transform_num = int(number_match.group(1))
+                if 1 <= transform_num <= len(history):
+                    matches.append(history[transform_num - 1])
+            
+            # "Previous" or "last" reference
+            elif any(word in reference_lower for word in ['previous', 'last', 'prior', 'earlier']):
+                if history:
+                    matches.append(history[-1])  # Get last transformation
+            
+            # Search by query content similarity
+            else:
+                for record in history:
+                    if (reference_lower in record.get("original_query", "").lower() or
+                        any(table.lower() in reference_lower for table in record.get("source_tables", [])) or
+                        record.get("target_table", "").lower() in reference_lower):
+                        matches.append(record)
+            
+            return matches
+            
+        except Exception as e:
+            logger.error(f"Error finding transformation by reference: {e}")
+            return []
+
+    def save_multi_query_state(self, session_id, multi_query_state):
+        """Save multi-query execution state"""
+        try:
+            if not session_id:
+                return False
+                
+            session_dir = f"{self.storage_path}/{session_id}"
+            os.makedirs(session_dir, exist_ok=True)
+            
+            state_file = f"{session_dir}/multi_query_state.json"
+            with open(state_file, 'w') as f:
+                json.dump(multi_query_state, f, indent=2, default=str)
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving multi-query state: {e}")
+            return False
+
+    def load_multi_query_state(self, session_id):
+        """Load multi-query execution state"""
+        try:
+            if not session_id:
+                return None
+                
+            state_file = f"{self.storage_path}/{session_id}/multi_query_state.json"
+            
+            if os.path.exists(state_file):
+                with open(state_file, 'r') as f:
+                    return json.load(f)
+                    
+        except Exception as e:
+            logger.error(f"Error loading multi-query state: {e}")
+        
+        return None
+
+    def cleanup_multi_query_state(self, session_id):
+        """Clean up multi-query execution state after successful completion"""
+        try:
+            if not session_id:
+                return
+                
+            state_file = f"{self.storage_path}/{session_id}/multi_query_state.json"
+            if os.path.exists(state_file):
+                os.remove(state_file)
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up multi-query state: {e}")
+
+    def get_transformation_context_for_query(self, session_id, current_query):
+        """Get relevant transformation context that might be referenced in current query"""
+        try:
+            history = self.get_transformation_history(session_id)
+            if not history:
+                return None
+            
+            # Look for references to previous transformations in the current query
+            references = self.find_transformation_by_reference(session_id, current_query)
+            
+            if references:
+                return {
+                    "referenced_transformations": references,
+                    "transformation_summary": {
+                        "total_transformations": len(history),
+                        "last_transformation": history[-1] if history else None,
+                        "available_tables": list(set([t.get("target_table") for t in history if t.get("target_table")]))
+                    }
+                }
+            
+            return {
+                "transformation_summary": {
+                    "total_transformations": len(history),
+                    "last_transformation": history[-1] if history else None,
+                    "available_tables": list(set([t.get("target_table") for t in history if t.get("target_table")]))
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting transformation context: {e}")
+            return None
+
 def fetch_data_by_ids(object_id, segment_id, project_id, conn):
     """Fetch data mappings from the database"""
     try:
@@ -1935,7 +2110,6 @@ def clean_table_name(table_name):
     if not table_name:
         return table_name
         
-    # Remove common suffixes
     suffixes = [" Table", " table", " TABLE", "_Table", "_table", "_TABLE"]
     cleaned_name = table_name
     
@@ -1945,7 +2119,6 @@ def clean_table_name(table_name):
             break
             
     return cleaned_name
-
 
 def process_info(resolved_data, conn):
     """
