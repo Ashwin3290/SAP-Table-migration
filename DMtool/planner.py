@@ -18,16 +18,18 @@ from typing import Dict, List, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Load environment variables
 load_dotenv()
 
-from executor import SQLExecutor
+# Import SQL related modules
+from DMtool.executor import SQLExecutor
 
+# Initialize SQL executor
 sql_executor = SQLExecutor()
 
 from spacy.matcher import Matcher
 from spacy.tokens import Span
 
-# Load spaCy model
 try:
     nlp = spacy.load("en_core_web_md")
 except OSError:
@@ -52,7 +54,7 @@ def find_closest_match(query, word_list, threshold=0.6):
         
     Returns:
         dict: Contains 'match' (best matching word), 'score' (similarity score), 
-              and 'all_matches' (list of all matches above threshold)
+        and 'all_matches' (list of all matches above threshold)
     """
     if not query or not word_list:
         return {"match": None, "score": 0.0, "all_matches": []}
@@ -513,7 +515,7 @@ def enhance_classification_before_processing(classification_details: Dict[str, A
     enhancer = ClassificationEnhancer(db_path, segments_csv_path)
     return enhancer.enhance_classification_details(classification_details, current_segment_id)
 
-def classify_query_with_llm(query, target_table):
+def classify_query_with_llm(query):
     """
     Use LLM to classify the query type based on linguistic patterns and semantic understanding
     
@@ -536,9 +538,6 @@ You are an expert data transformation analyst. Analyze the following natural lan
 5. **AGGREGATION_OPERATION**: Statistical operations like sum, count, average, grouping operations
 
 USER QUERY: "{query}"
-
-Note:
-if the query says Target table then it indicates {target_table}
 
 CLASSIFICATION CRITERIA:
 
@@ -1045,7 +1044,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             
         # If query_type not provided, determine it now 
         if not query_type:
-            query_type, classification_details = classify_query_with_llm(query,target_table)
+            query_type, classification_details = classify_query_with_llm(query)
             enhanced_classification = enhance_classification_before_processing(
                 classification_details, segment_id, db_path=os.environ.get('DB_PATH')
             )

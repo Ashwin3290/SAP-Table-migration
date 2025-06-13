@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Union, Tuple
 
-from sqlite_utils import add_sqlite_functions
+from DMtool.sqlite_utils import add_sqlite_functions
 
 load_dotenv()
 
@@ -224,7 +224,7 @@ class SQLExecutor:
     
     def execute_multi_statement_query(self, multi_sql, sql_params,context_manager=None, session_id=None):
         """Execute multiple SQL statements with recovery support"""
-        try:            
+        try:
             # Split into individual statements
             statements = self.split_sql_statements(multi_sql)
             
@@ -373,6 +373,7 @@ class SQLExecutor:
                 "error_message": f"Failed to resume execution: {str(e)}",
                 "session_id": session_id
             }
+
 
     def split_sql_statements(self, multi_sql):
         """Split multi-SQL into individual statements, handling edge cases"""
