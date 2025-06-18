@@ -358,14 +358,9 @@ def is_phone(phone: str) -> bool:
         # Remove common separators
         clean_phone = re.sub(r'[^\d]', '', phone)
         
-        # Check if it's between 7 and 15 digits
         return 7 <= len(clean_phone) <= 15
     except Exception:
         return False
-
-# =============================================================================
-# MAIN FUNCTION TO REGISTER ALL UTILITIES
-# =============================================================================
 
 def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
     """
@@ -430,13 +425,11 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
         conn.create_function("is_numeric", 1, is_numeric)
         conn.create_function("is_email", 1, is_email)
         conn.create_function("is_phone", 1, is_phone)
-        functions_added += 3
-        
-        logger.info(f"✅ Successfully added {functions_added} custom functions to SQLite connection")
+        functions_added += 3        
         return True
         
     except Exception as e:
-        logger.error(f"❌ Error adding custom functions to SQLite connection: {e}")
+        logger.error(f"Error adding custom functions to SQLite connection: {e}")
         return False
 
 def get_connection_with_functions(db_path: str) -> sqlite3.Connection:
@@ -453,112 +446,12 @@ def get_connection_with_functions(db_path: str) -> sqlite3.Connection:
         conn = sqlite3.connect(db_path)
         
         if add_sqlite_functions(conn):
-            logger.info(f"✅ Created SQLite connection with custom functions for: {db_path}")
+            logger.info(f"Created SQLite connection with custom functions for: {db_path}")
             return conn
         else:
-            logger.warning(f"⚠️ Created SQLite connection but failed to add custom functions for: {db_path}")
+            logger.warning(f"Created SQLite connection but failed to add custom functions for: {db_path}")
             return conn
             
     except Exception as e:
-        logger.error(f"❌ Error creating SQLite connection: {e}")
+        logger.error(f"Error creating SQLite connection: {e}")
         raise
-
-def test_functions(conn: sqlite3.Connection) -> bool:
-    """
-    Test if custom functions are working correctly
-    
-    Args:
-        conn (sqlite3.Connection): SQLite connection to test
-    
-    Returns:
-        bool: True if all tests pass, False otherwise
-    """
-    try:
-        cursor = conn.cursor()
-        tests_passed = 0
-        total_tests = 0
-        
-        # Test regex functions
-        total_tests += 1
-        test_result = cursor.execute(
-            "SELECT regexp_replace('Hello @World!', '[^a-zA-Z0-9 ]', '')"
-        ).fetchone()[0]
-        if test_result == "Hello World":
-            tests_passed += 1
-            logger.info("✅ regexp_replace test passed")
-        else:
-            logger.error(f"❌ regexp_replace test failed. Expected: 'Hello World', Got: '{test_result}'")
-        
-        # Test string functions
-        total_tests += 1
-        test_result = cursor.execute(
-            "SELECT proper_case('hello world')"
-        ).fetchone()[0]
-        if test_result == "Hello World":
-            tests_passed += 1
-            logger.info("✅ proper_case test passed")
-        else:
-            logger.error(f"❌ proper_case test failed. Expected: 'Hello World', Got: '{test_result}'")
-        
-        # Test math functions
-        total_tests += 1
-        test_result = cursor.execute(
-            "SELECT safe_divide(10, 0, -1)"
-        ).fetchone()[0]
-        if test_result == -1.0:
-            tests_passed += 1
-            logger.info("✅ safe_divide test passed")
-        else:
-            logger.error(f"❌ safe_divide test failed. Expected: -1.0, Got: '{test_result}'")
-        
-        # Test validation functions
-        total_tests += 1
-        test_result = cursor.execute(
-            "SELECT is_email('test@example.com')"
-        ).fetchone()[0]
-        if test_result == 1:  # SQLite boolean true
-            tests_passed += 1
-            logger.info("✅ is_email test passed")
-        else:
-            logger.error(f"❌ is_email test failed. Expected: 1, Got: '{test_result}'")
-        
-        success_rate = tests_passed / total_tests * 100
-        logger.info(f"🔍 Test Results: {tests_passed}/{total_tests} tests passed ({success_rate:.1f}%)")
-        
-        return tests_passed == total_tests
-        
-    except Exception as e:
-        logger.error(f"❌ Error testing custom functions: {e}")
-        return False
-
-# For backwards compatibility
-add_regex_functions = add_sqlite_functions
-
-if __name__ == "__main__":
-    # Example usage and testing
-    import tempfile
-    import os
-    
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp_file:
-        test_db = tmp_file.name
-    
-    try:
-        print("🧪 Testing SQLite custom functions...")
-        
-        conn = sqlite3.connect(test_db)
-        add_sqlite_functions(conn)
-        
-        if test_functions(conn):
-            print("✅ All tests passed! Custom functions are working correctly.")
-        else:
-            print("❌ Some tests failed.")
-            
-        conn.close()
-        
-        print("\n🎉 SQLite custom functions are ready to use!")
-        
-    finally:
-        try:
-            os.unlink(test_db)
-        except:
-            pass

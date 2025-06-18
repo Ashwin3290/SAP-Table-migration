@@ -430,9 +430,7 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
         conn.create_function("is_numeric", 1, is_numeric)
         conn.create_function("is_email", 1, is_email)
         conn.create_function("is_phone", 1, is_phone)
-        functions_added += 3
-        
-        logger.info(f"✅ Successfully added {functions_added} custom functions to SQLite connection")
+        functions_added += 3        
         return True
         
     except Exception as e:

@@ -281,5 +281,116 @@
       "3. Create CASE expression for conditional assignment",
       "4. Update the target field with conditional defaults"
     ]
+  },
+    {
+    "id": "extract_day_from_yyyymmdd_field",
+    "prompt": "Add a new column named {new_column} to the target table. For each record, extract only the day part from the {source_field} field (for example, from \"20231208\" extract \"08\") and store it in the {new_column} column.",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = substr(CAST({source_field} AS TEXT), 7, 2)",
+    "plan": [
+      "1. Add a new column to the target table for storing the extracted day",
+      "2. Cast the source field to TEXT to ensure string operations work correctly",
+      "3. Use substr() to extract characters 7-8 (day part) from YYYYMMDD format",
+      "4. Update all records with the extracted day values"
+    ]
+  },
+  {
+    "id": "extract_year_from_yyyymmdd_field", 
+    "prompt": "Add a new column named {new_column} to the target table. For each record, extract only the year part from the {source_field} field (for example, from \"20231208\" extract \"2023\") and store it in the {new_column} column.",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = substr(CAST({source_field} AS TEXT), 1, 4)",
+    "plan": [
+      "1. Add a new column to the target table for storing the extracted year",
+      "2. Cast the source field to TEXT to ensure string operations work correctly", 
+      "3. Use substr() to extract characters 1-4 (year part) from YYYYMMDD format",
+      "4. Update all records with the extracted year values"
+    ]
+  },
+  {
+    "id": "extract_month_from_yyyymmdd_field",
+    "prompt": "Add a new column named {new_column} to the target table. For each record, extract only the month part from the {source_field} field (for example, from \"20231208\" extract \"12\") and store it in the {new_column} column.",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = substr(CAST({source_field} AS TEXT), 5, 2)",
+    "plan": [
+      "1. Add a new column to the target table for storing the extracted month",
+      "2. Cast the source field to TEXT to ensure string operations work correctly",
+      "3. Use substr() to extract characters 5-6 (month part) from YYYYMMDD format", 
+      "4. Update all records with the extracted month values"
+    ]
+  },
+  {
+    "id": "extract_quarter_from_yyyymmdd_field",
+    "prompt": "Add a new column named {new_column} to the target table. For each record, determine the quarter (Q1, Q2, Q3, or Q4) of the date in the {source_field} field and store this value in the {new_column} column.",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = CASE WHEN CAST(substr(CAST({source_field} AS TEXT), 5, 2) AS INTEGER) BETWEEN 1 AND 3 THEN 'Q1' WHEN CAST(substr(CAST({source_field} AS TEXT), 5, 2) AS INTEGER) BETWEEN 4 AND 6 THEN 'Q2' WHEN CAST(substr(CAST({source_field} AS TEXT), 5, 2) AS INTEGER) BETWEEN 7 AND 9 THEN 'Q3' ELSE 'Q4' END",
+    "plan": [
+      "1. Add a new column to the target table for storing the quarter",
+      "2. Extract the month part from YYYYMMDD format using substr()",
+      "3. Convert the month to integer for comparison",
+      "4. Use CASE statement to determine quarter: Q1 (Jan-Mar), Q2 (Apr-Jun), Q3 (Jul-Sep), Q4 (Oct-Dec)",
+      "5. Update all records with the calculated quarter values"
+    ]
+  },
+  {
+    "id": "calculate_last_date_previous_month",
+    "prompt": "Add a new column named {new_column} to the target table. For each record, calculate the last date of the previous month based on the value in the {source_field} field, and store this date in the {new_column} column.",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = date(substr(CAST({source_field} AS TEXT), 1, 4) || '-' || substr(CAST({source_field} AS TEXT), 5, 2) || '-01', '-1 day')",
+    "plan": [
+      "1. Add a new column to the target table for storing the last date of previous month",
+      "2. Convert YYYYMMDD to YYYY-MM-01 format (first day of the month)",
+      "3. Use SQLite date function with '-1 day' to get the last day of previous month",
+      "4. Update all records with the calculated previous month's last date"
+    ]
+  },
+  {
+    "id": "add_system_date_column",
+    "prompt": "Add a new column to the target table named {new_column}. Populate this column with the system date (i.e., the current date) for all material records in the target table.",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = date('now')",
+    "plan": [
+      "1. Add a new column to the target table for storing the system date",
+      "2. Use SQLite's date('now') function to get the current date",
+      "3. Update all records with the current system date"
+    ]
+  },
+  {
+    "id": "extract_day_name_from_yyyymmdd_field",
+    "prompt": "Add a new column into the target table with column name \"{new_column}\" and find the Day(Monday , Tuesday , ......) of the date present in the {source_field} field of target table and update in {new_column} field",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = strftime('%A', date(substr(CAST({source_field} AS TEXT), 1, 4) || '-' || substr(CAST({source_field} AS TEXT), 5, 2) || '-' || substr(CAST({source_field} AS TEXT), 7, 2)))",
+    "plan": [
+      "1. Add a new column to the target table for storing the day name",
+      "2. Convert YYYYMMDD format to SQLite date format (YYYY-MM-DD)",
+      "3. Use strftime('%A', date) to get full day name (Monday, Tuesday, etc.)",
+      "4. Update all records with the calculated day names"
+    ]
+  },
+  {
+    "id": "drop_column_from_target_table",
+    "prompt": "Delete column {column_name} from the target table",
+    "query": "CREATE TABLE temp_table AS SELECT * FROM {target_table}; DROP TABLE {target_table}; CREATE TABLE {target_table} AS SELECT {remaining_columns} FROM temp_table; DROP TABLE temp_table",
+    "plan": [
+      "1. Create a temporary table with all data from the target table",
+      "2. Drop the original target table",
+      "3. Recreate the target table without the specified column",
+      "4. Copy data back excluding the dropped column",
+      "5. Drop the temporary table to clean up"
+    ]
+  },
+  {
+    "id": "extract_weekday_number_from_yyyymmdd",
+    "prompt": "Add a new column named {new_column} to the target table. For each record, extract the day of the week as a number (0=Sunday, 1=Monday, etc.) from the {source_field} field and store it in the {new_column} column.",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = strftime('%w', date(substr(CAST({source_field} AS TEXT), 1, 4) || '-' || substr(CAST({source_field} AS TEXT), 5, 2) || '-' || substr(CAST({source_field} AS TEXT), 7, 2)))",
+    "plan": [
+      "1. Add a new column to the target table for storing the weekday number",
+      "2. Convert YYYYMMDD format to SQLite date format (YYYY-MM-DD)", 
+      "3. Use strftime('%w', date) to get weekday number (0=Sunday, 1=Monday, etc.)",
+      "4. Update all records with the calculated weekday numbers"
+    ]
+  },
+  {
+    "id": "format_date_yyyymmdd_to_readable",
+    "prompt": "Add a new column named {new_column} to the target table. For each record, convert the date in {source_field} field from YYYYMMDD format to a readable format like 'December 08, 2023' and store it in the {new_column} column.",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = strftime('%B %d, %Y', date(substr(CAST({source_field} AS TEXT), 1, 4) || '-' || substr(CAST({source_field} AS TEXT), 5, 2) || '-' || substr(CAST({source_field} AS TEXT), 7, 2)))",
+    "plan": [
+      "1. Add a new column to the target table for storing the formatted date",
+      "2. Convert YYYYMMDD format to SQLite date format (YYYY-MM-DD)",
+      "3. Use strftime('%B %d, %Y', date) to format as 'Month DD, YYYY'",
+      "4. Update all records with the human-readable formatted dates"
+    ]
   }
 ]

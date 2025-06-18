@@ -31,7 +31,6 @@ from spacy.tokens import Span
 try:
     nlp = spacy.load("en_core_web_md")
 except OSError:
-    # Fallback to smaller model if medium not available
     try:
         nlp = spacy.load("en_core_web_sm")
     except OSError:
@@ -969,7 +968,7 @@ PROMPT_TEMPLATES = {
     """
 }
 
-def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, query_type=None, classification_details=None, target_sap_fields=None):
+def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
     """
     Process a query based on its classified type
     
@@ -1044,12 +1043,13 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             target_df_sample = []
             
         # If query_type not provided, determine it now 
-        if not query_type:
-            query_type, classification_details = classify_query_with_llm(query,target_table)
-            enhanced_classification = enhance_classification_before_processing(
-                classification_details, segment_id, db_path=os.environ.get('DB_PATH')
-            )
-            classification_details = enhanced_classification
+        query_type, classification_details = classify_query_with_llm(query,target_table)
+        enhanced_classification = enhance_classification_before_processing(
+            classification_details, segment_id, db_path=os.environ.get('DB_PATH')
+        )
+        classification_details = enhanced_classification
+        logger.info(f"Query type: {query_type}")
+        logger.info(f"Classification details: {classification_details}")
         # Get the appropriate prompt template
         prompt_template = PROMPT_TEMPLATES.get(query_type, PROMPT_TEMPLATES["SIMPLE_TRANSFORMATION"])
         
@@ -1516,6 +1516,60 @@ class ContextualSessionManager:
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
             raise SessionError(f"Failed to create session: {e}")
+        
+    def record_executed_query(self, session_id, query):
+        """Record an executed query"""
+        try:
+            if not session_id:
+                logger.warning("No session ID provided for record_executed_query")
+                return False
+
+            context_path = f"{self.storage_path}/{session_id}/queries.json"
+            if not os.path.exists(context_path):
+                queries = []
+            else:
+                try:
+                    with open(context_path, "r") as f:
+                        queries = json.load(f)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        f"Invalid JSON in queries file, creating new queries"
+                    )
+                    queries = []
+
+            queries.append(query)
+
+            with open(context_path, "w") as f:
+                json.dump(queries, f, indent=2)
+
+            return True
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in context file for session {session_id}: {e}")
+            return False
+
+    def get_executed_queries(self,session_id):
+        """Get the executed queries for a session"""
+        try:
+            if not session_id:
+                logger.warning("No session ID provided for record_executed_query")
+                return False
+
+            context_path = f"{self.storage_path}/{session_id}/queries.json"
+            if not os.path.exists(context_path):
+                queries = []
+            else:
+                try:
+                    with open(context_path, "r") as f:
+                        queries = json.load(f)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        f"Invalid JSON in queries file, creating new queries"
+                    )
+                    queries = []
+            return queries
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in context file for session {session_id}: {e}")
+            return []
 
     def get_context(self, session_id):
         """Get the current context for a session"""
@@ -1986,7 +2040,6 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
     dict: Processed information including context or None if key validation fails
     """
     try:
-        # Validate inputs
         if not query or not isinstance(query, str):
             logger.error(f"Invalid query: {query}")
             return None
@@ -1998,34 +2051,19 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
             )
             return None
 
-        # Initialize context manager
         context_manager = ContextualSessionManager()
 
-        # Create a session if none provided
         if not session_id:
             session_id = context_manager.create_session()
             logger.info(f"Created new session: {session_id}")
-        
-        # Classify the query type using spaCy
-        query_type, classification_details = classify_query_with_llm(query)
-        enhanced_classification = enhance_classification_before_processing(
-            classification_details, segment_id, db_path=os.environ.get('DB_PATH')
-        )
-        classification_details = enhanced_classification
-        logger.info(f"Query type: {query_type}")
-        logger.info(f"Classification details: {classification_details}")
-
-        
-        # Process the query based on its type
+    
         return process_query_by_type(
             object_id, 
             segment_id, 
             project_id, 
             query, 
             session_id, 
-            query_type, 
-            classification_details,
-            target_sap_fields  # Pass target_sap_fields to process_query_by_type
+            target_sap_fields
         )
     except Exception as e:
         logger.error(f"Error in process_query: {e}")
@@ -2065,24 +2103,17 @@ def get_or_create_session_target_df(session_id, target_table, conn):
         target_path = f"{session_path}/target_latest.csv"
 
         if os.path.exists(target_path):
-            # Load existing target data
             try:
                 target_df = pd.read_csv(target_path)
                 return target_df
             except Exception as e:
                 logger.error(f"Error reading existing target CSV: {e}")
-                # If there's an error reading the file, get fresh data from the database
-
-        # Get fresh target data from the database - use SQL executor
         try:
-            # Validate target table name
             safe_table = validate_sql_identifier(target_table)
             
-            # Use SQL executor to get full table
             target_df = sql_executor.execute_and_fetch_df(f"SELECT * FROM {safe_table}")
             
             if isinstance(target_df, dict) and "error_type" in target_df:
-                # If SQL executor failed, fall back to original approach
                 logger.warning(f"SQL approach failed in get_or_create_session_target_df, using fallback: {target_df.get('error_message')}")
                 
                 # Use a parameterized query for safety
