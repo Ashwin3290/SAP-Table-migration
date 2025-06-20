@@ -8,7 +8,7 @@ from google.genai import types
 import os
 import pandas as pd
 
-# Set up logging
+
 logger = logging.getLogger(__name__)
 
 class SQLiteQueryAnalyzer:
@@ -28,21 +28,21 @@ class SQLiteQueryAnalyzer:
         tuple: (fixed_query, params, success_status)
         """
         try:
-            # If the query is already valid, return it
+
             if self._is_valid_sqlite_query(sql_query):
                 return sql_query, sql_params, True
                 
             
-            # First, analyze the query for issues
+
             analysis = self._analyze_sqlite_query(sql_query, planner_info)
             
             best_query = sql_query
             best_params = sql_params
             
-            # Make up to max_attempts to fix the query
+
             for attempt in range(max_attempts):
                 
-                # Generate fixed query based on analysis and previous attempts
+
                 fixed_query, fixed_params = self._fix_sqlite_query(
                     best_query, 
                     sql_params, 
@@ -51,20 +51,20 @@ class SQLiteQueryAnalyzer:
                     attempt
                 )
                 
-                # If the fixed query is valid, return it
+
                 if self._is_valid_sqlite_query(fixed_query):
                     return fixed_query, fixed_params, True
                     
-                # Check if this fixed query is better than the previous best
+
                 if self._compare_query_quality(fixed_query, best_query, planner_info):
                     best_query = fixed_query
                     best_params = fixed_params
                     
-                # Update analysis for next attempt
+
                 if attempt < max_attempts - 1:
                     analysis = self._analyze_sqlite_query(fixed_query, planner_info)
                     
-            # Return the best query we found, even if it's not perfect
+
             logger.warning(f"Could not generate a perfectly valid query after {max_attempts} attempts")
             return best_query, best_params, False
                 
@@ -84,7 +84,7 @@ class SQLiteQueryAnalyzer:
         str: Analysis of the query issues
         """
         try:
-            # Create comprehensive prompt for analysis
+
             prompt = f"""
 You are an expert SQLite database engineer. Analyze the following SQL query for SQLite compatibility issues and other problems.
 
@@ -111,7 +111,7 @@ INSTRUCTIONS:
 Your analysis should be in a structured format with clear categories of issues.
 """
 
-            # Call the LLM for analysis
+
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
                 model="gemini-2.5-flash-preview-04-17", 
@@ -119,7 +119,7 @@ Your analysis should be in a structured format with clear categories of issues.
                 config=types.GenerateContentConfig(temperature=0.1)
             )
             
-            # Extract and return the analysis
+
             if response and hasattr(response, "text"):
                 return response.text.strip()
             else:
@@ -144,7 +144,7 @@ Your analysis should be in a structured format with clear categories of issues.
         tuple: (fixed_query, fixed_params)
         """
         try:
-            # Create comprehensive prompt for fixing
+
             prompt = f"""
 You are an expert SQLite database engineer. Fix the following SQL query based on the analysis.
 
@@ -188,7 +188,7 @@ REQUIREMENTS:
    - SQLite has no BOOLEAN type (use INTEGER 0/1)
 """
 
-            # Call the LLM for fixing
+
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
                 model="gemini-2.5-flash-preview-04-17", 
@@ -196,11 +196,11 @@ REQUIREMENTS:
                 config=types.GenerateContentConfig(temperature=0.2)
             )
             
-            # Extract the fixed query
+
             if response and hasattr(response, "text"):
                 fixed_query = response.text.strip()
                 
-                # Remove markdown code blocks if present
+
                 import re
                 sql_match = re.search(r"```(?:sqlite|sql)\s*(.*?)\s*```", fixed_query, re.DOTALL)
                 if sql_match:
@@ -229,28 +229,30 @@ REQUIREMENTS:
         bool: True if valid, False otherwise
         """
         try:
-            # Perform basic validation
+
             if not sql_query or len(sql_query) < 10:
                 return False
                 
-            # Check for basic SQL keywords
+
             sql_upper = sql_query.upper()
             has_select = "SELECT" in sql_upper
             has_insert = "INSERT" in sql_upper
             has_update = "UPDATE" in sql_upper
             has_create = "CREATE" in sql_upper
+            has_drop = "DROP" in sql_upper
+            has_alter = "ALTER" in sql_upper
             
-            if not (has_select or has_insert or has_update or has_create):
+            if not (has_select or has_insert or has_update or has_create, has_drop or has_alter):
                 return False
                 
-            # Check for obvious SQLite incompatible syntax
+
             if "RIGHT JOIN" in sql_upper or "FULL JOIN" in sql_upper:
                 return False
                 
-            if "ISNULL" in sql_upper:  # Should be IFNULL in SQLite
+            if "ISNULL" in sql_upper:
                 return False
                 
-            # More advanced checks could be added
+
             
             return True
         except Exception as e:
@@ -270,18 +272,18 @@ REQUIREMENTS:
         bool: True if new query is better, False otherwise
         """
         try:
-            # Basic validation
+
             if not new_query:
                 return False
             
             if not old_query:
                 return True
                 
-            # If old query isn't valid but new one is
+
             if not self._is_valid_sqlite_query(old_query) and self._is_valid_sqlite_query(new_query):
                 return True
                 
-            # Check for improvement in including required fields
+
             source_fields = planner_info.get("source_field_names", [])
             target_fields = planner_info.get("target_sap_fields", [])
             
@@ -291,15 +293,15 @@ REQUIREMENTS:
             new_target_count = sum(1 for field in target_fields if field in new_query)
             old_target_count = sum(1 for field in target_fields if field in old_query)
             
-            # If new query includes more source fields
+
             if new_field_count > old_field_count:
                 return True
                 
-            # If new query includes more target fields
+
             if new_target_count > old_target_count:
                 return True
                 
-            # Check for specific SQLite patterns
+
             sqlite_patterns = ["IFNULL", "CASE WHEN", "COALESCE", "GROUP BY", "LEFT JOIN"]
             sqlite_score_new = sum(1 for pattern in sqlite_patterns if pattern.upper() in new_query.upper())
             sqlite_score_old = sum(1 for pattern in sqlite_patterns if pattern.upper() in old_query.upper())
@@ -307,7 +309,7 @@ REQUIREMENTS:
             if sqlite_score_new > sqlite_score_old:
                 return True
                 
-            # Default to keeping the old query
+
             return False
         except Exception as e:
             logger.error(f"Error in _compare_query_quality: {e}")

@@ -18,26 +18,19 @@ from typing import Dict, List, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Load environment variables
 load_dotenv()
 
-# Import SQL related modules
 from DMtool.executor import SQLExecutor
 
-# Initialize SQL executor
 sql_executor = SQLExecutor()
-
-from spacy.matcher import Matcher
-from spacy.tokens import Span
 
 try:
     nlp = spacy.load("en_core_web_md")
 except OSError:
-    # Fallback to smaller model if medium not available
     try:
         nlp = spacy.load("en_core_web_sm")
     except OSError:
-        # In case no model is installed
+
         print("Downloading spaCy model...")
         from spacy.cli import download
         download("en_core_web_sm")
@@ -54,34 +47,34 @@ def find_closest_match(query, word_list, threshold=0.6):
         
     Returns:
         dict: Contains 'match' (best matching word), 'score' (similarity score), 
-        and 'all_matches' (list of all matches above threshold)
+              and 'all_matches' (list of all matches above threshold)
     """
     if not query or not word_list:
         return {"match": None, "score": 0.0, "all_matches": []}
     
-    # Clean the query (remove extra spaces, convert to lowercase)
+
     clean_query = re.sub(r'\s+', ' ', query.strip().lower())
     
     matches = []
     for word in word_list:
         clean_word = word.lower()
         
-        # Calculate similarity using different methods
-        # Method 1: Overall sequence similarity
+
+
         overall_sim = SequenceMatcher(None, clean_query, clean_word).ratio()
         
-        # Method 2: Substring matching bonus
+
         substring_bonus = 0
         if clean_query in clean_word or clean_word in clean_query:
             substring_bonus = 0.2
         
-        # Method 3: Word-level matching for multi-word strings
+
         query_words = clean_query.split()
         word_words = clean_word.split()
         word_level_sim = 0
         
         if len(query_words) > 1 or len(word_words) > 1:
-            # For multi-word matching, check individual words
+
             word_matches = 0
             total_words = max(len(query_words), len(word_words))
             
@@ -94,9 +87,9 @@ def find_closest_match(query, word_list, threshold=0.6):
             
             word_level_sim = word_matches / total_words if total_words > 0 else 0
         
-        # Combine scores with weights
+
         final_score = (overall_sim * 0.4) + (substring_bonus) + (word_level_sim * 0.5)
-        final_score = min(final_score, 1.0)  # Cap at 1.0
+        final_score = min(final_score, 1.0)
         
         if final_score >= threshold:
             matches.append({
@@ -105,10 +98,10 @@ def find_closest_match(query, word_list, threshold=0.6):
                 'original_word': word
             })
     
-    # Sort by score (highest first)
+
     matches.sort(key=lambda x: x['score'], reverse=True)
     
-    # Return results
+
     result = {
         'match': matches[0]['word'] if matches else None,
         'score': matches[0]['score'] if matches else 0.0,
@@ -150,7 +143,7 @@ class ClassificationEnhancer:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get all table names
+
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = [row[0] for row in cursor.fetchall()]
             
@@ -179,9 +172,9 @@ class ClassificationEnhancer:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get column information
+
             cursor.execute(f"PRAGMA table_info({table_name})")
-            columns = [row[1] for row in cursor.fetchall()]  # row[1] is column name
+            columns = [row[1] for row in cursor.fetchall()]
             
             conn.close()
             self._table_columns[table_name] = columns
@@ -239,7 +232,7 @@ class ClassificationEnhancer:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get the target table for current segment
+
             cursor.execute("""
                 SELECT table_name 
                 FROM connection_segments 
@@ -251,7 +244,7 @@ class ClassificationEnhancer:
             
             if result and result[0]:
                 table_name = result[0]
-                # Extract t_[number] pattern
+
                 match = re.match(r't_(\d+)', table_name.lower())
                 if match:
                     return f"t_{match.group(1)}"
@@ -277,7 +270,7 @@ class ClassificationEnhancer:
             if segments_df.empty or not segments_mentioned:
                 return {"matched_segments": [], "segment_target_tables": {}}
 
-            # Get available segment names
+
             available_segments = segments_df['segement_name'].unique().tolist()
             current_pattern = self._get_current_target_table_pattern(current_segment_id)
 
@@ -285,18 +278,18 @@ class ClassificationEnhancer:
             segment_target_tables = {}
 
             for mentioned_segment in segments_mentioned:
-                # Find closest match
+
                 match_result = find_closest_match(mentioned_segment, available_segments, threshold=0.3)
 
                 if match_result['match']:
                     matched_segment = match_result['match']
                     matched_segments.append(matched_segment)
 
-                    # Get target tables for this segment
+
                     segment_rows = segments_df[segments_df['segement_name'] == matched_segment]
                     target_tables = segment_rows['table_name'].tolist()
 
-                    # If multiple target tables and we have a current pattern, prefer matching pattern
+
                     if len(target_tables) > 1 and current_pattern:
                         pattern_matches = [table for table in target_tables if table.lower().startswith(current_pattern)]
                         if pattern_matches:
@@ -304,7 +297,7 @@ class ClassificationEnhancer:
 
                     segment_target_tables[matched_segment] = target_tables
                 else:
-                    # Keep original if no good match found
+
                     matched_segments.append(mentioned_segment)
                     segment_target_tables[mentioned_segment] = []
 
@@ -338,29 +331,29 @@ class ClassificationEnhancer:
                 matched_table = match_result['match']
                 confidence = match_result['score']
                 
-                # Check if this is a high-confidence exact or near-exact match
+
                 if confidence >= 0.9 or len(match_result['all_matches']) == 1:
-                    # High confidence, use the match
+
                     matched_tables.append(matched_table)
                     table_match_confidence[matched_table] = confidence
                 elif len(match_result['all_matches']) > 1:
-                    # Multiple close matches, need to be careful
+
                     best_match = match_result['all_matches'][0]
                     second_best = match_result['all_matches'][1] if len(match_result['all_matches']) > 1 else None
                     
                     if second_best is None or (best_match[1] - second_best[1]) > 0.2:
-                        # Clear winner
+
                         matched_tables.append(best_match[0])
                         table_match_confidence[best_match[0]] = best_match[1]
                     else:
-                        # Ambiguous, keep original
+
                         matched_tables.append(mentioned_table)
                         table_match_confidence[mentioned_table] = 0.5
                 else:
                     matched_tables.append(matched_table)
                     table_match_confidence[matched_table] = confidence
             else:
-                # No good match, keep original
+
                 matched_tables.append(mentioned_table)
                 table_match_confidence[mentioned_table] = 0.0
         
@@ -385,12 +378,12 @@ class ClassificationEnhancer:
         if not columns_mentioned:
             return {"matched_columns": [], "columns_in_mentioned_table": {}}
         
-        # Get all potential tables to search (matched tables + segment target tables)
+
         all_potential_tables = set(matched_tables)
         for tables in segment_target_tables.values():
             all_potential_tables.update(tables)
         
-        # Get columns for all potential tables
+
         table_columns = self._get_all_table_columns(list(all_potential_tables))
         
         matched_columns = []
@@ -401,7 +394,7 @@ class ClassificationEnhancer:
             best_score = 0.0
             column_found_in_tables = []
             
-            # Search in all potential tables
+
             for table_name, available_columns in table_columns.items():
                 if not available_columns:
                     continue
@@ -413,16 +406,16 @@ class ClassificationEnhancer:
                         best_match = match_result['match']
                         best_score = match_result['score']
                     
-                    # Track which tables contain this column (or close matches)
+
                     column_found_in_tables.append((table_name, match_result['match'], match_result['score']))
             
-            # Use best match or keep original
+
             final_column = best_match if best_match and best_score >= 0.6 else mentioned_column
             matched_columns.append(final_column)
             
-            # Build table->columns mapping
+
             for table_name, matched_col, score in column_found_in_tables:
-                if score >= 0.6:  # Only include good matches
+                if score >= 0.6:
                     if table_name not in columns_in_mentioned_table:
                         columns_in_mentioned_table[table_name] = []
                     if matched_col not in columns_in_mentioned_table[table_name]:
@@ -446,27 +439,27 @@ class ClassificationEnhancer:
             Dict[str, Any]: Enhanced classification details
         """
         try:
-            # Make a copy to avoid modifying original
+
             enhanced_details = classification_details.copy()
             
-            # Extract mentioned items
+
             tables_mentioned = classification_details.get("detected_elements", {}).get("sap_tables_mentioned", [])
             columns_mentioned = classification_details.get("detected_elements", {}).get("columns_Mentioned", [])
             segments_mentioned = classification_details.get("detected_elements", {}).get("segments_mentioned", [])
             
             segment_match_result = self._match_segments(segments_mentioned, current_segment_id)
             
-            # 2. Match tables
+
             table_match_result = self._match_tables(tables_mentioned)
             
-            # 3. Match columns (using both matched tables and segment target tables)
+
             column_match_result = self._match_columns(
                 columns_mentioned,
                 table_match_result["matched_tables"],
                 segment_match_result["segment_target_tables"]
             )
             
-            # 4. Create the enhanced structure
+
             enhanced_matching_info = {
                 "tables_mentioned": table_match_result["matched_tables"],
                 "columns_mentioned": column_match_result["matched_columns"],
@@ -477,10 +470,10 @@ class ClassificationEnhancer:
             }
 
             enhanced_matching_info["segment glossary"] = segment_match_result["segment_target_tables"]
-            # 5. Update the enhanced details
+
             enhanced_details["enhanced_matching"] = enhanced_matching_info
             
-            # 6. Update the detected_elements with matched values
+
             if "detected_elements" not in enhanced_details:
                 enhanced_details["detected_elements"] = {}
             
@@ -515,7 +508,7 @@ def enhance_classification_before_processing(classification_details: Dict[str, A
     enhancer = ClassificationEnhancer(db_path, segments_csv_path)
     return enhancer.enhance_classification_details(classification_details, current_segment_id)
 
-def classify_query_with_llm(query):
+def classify_query_with_llm(query, target_table):
     """
     Use LLM to classify the query type based on linguistic patterns and semantic understanding
     
@@ -527,7 +520,7 @@ def classify_query_with_llm(query):
     dict: Additional details about the classification
     """
     try:
-        # Create comprehensive prompt for query classification
+
         prompt = f"""
 You are an expert data transformation analyst. Analyze the following natural language query and classify it into one of these categories:
 
@@ -538,6 +531,9 @@ You are an expert data transformation analyst. Analyze the following natural lan
 5. **AGGREGATION_OPERATION**: Statistical operations like sum, count, average, grouping operations
 
 USER QUERY: "{query}"
+
+Note:
+if the query says Target table then it indicates {target_table}
 
 CLASSIFICATION CRITERIA:
 
@@ -594,37 +590,37 @@ Respond with a JSON object:
 }}
 ```
 """
-        # Call Gemini API for classification
+
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
             logger.error("GEMINI_API_KEY not found in environment variables")
-            # Fallback to simple classification
+
             return _fallback_classification(query)
             
         client = genai.Client(api_key=api_key)
         
         response = client.models.generate_content(
-            model="gemini-2.5-flash-preview-04-17", 
+            model="gemini-2.5-flash", 
             contents=prompt,
-            config=types.GenerateContentConfig(temperature=0.1)  # Low temperature for consistent classification
+            config=types.GenerateContentConfig(temperature=0.1)
         )
         
         if not response or not hasattr(response, "text"):
             logger.warning("Invalid response from Gemini API for query classification")
             return _fallback_classification(query)
             
-        # Parse JSON response
+
         try:
             json_str = re.search(r"```json(.*?)```", response.text, re.DOTALL)
             if json_str:
                 result = json.loads(json_str.group(1).strip())
             else:
-                # Try to parse the whole response as JSON
+
                 result = json.loads(response.text.strip())
-            # Extract classification and details
+
             primary_class = result.get("primary_classification", "SIMPLE_TRANSFORMATION")
             
-            # Create detailed response in the expected format
+
             details = {
                 "confidence": result.get("confidence", 0.8),
                 "reasoning": result.get("reasoning", "LLM-based classification"),
@@ -656,17 +652,17 @@ def _fallback_classification(query):
     """
     query_lower = query.lower()
     
-    # Simple keyword-based classification
+
     join_keywords = ["join", "merge", "combine", "link", "both tables", "multiple tables"]
     segment_keywords = ["segment", "basic", "marc", "makt", "previous", "prior", "transformation"]
     validation_keywords = ["validate", "verify", "check", "ensure", "missing", "invalid"]
     aggregation_keywords = ["count", "sum", "average", "total", "group by", "calculate"]
     
-    # Check for multiple SAP tables
+
     sap_tables = ["mara", "marc", "makt", "mvke", "marm", "mlan", "ekko", "ekpo", "vbak", "vbap", "kna1", "lfa1"]
     tables_found = [table for table in sap_tables if table in query_lower]
     
-    # Classification logic
+
     if len(tables_found) > 1 or any(keyword in query_lower for keyword in join_keywords):
         primary_class = "JOIN_OPERATION"
     elif any(keyword in query_lower for keyword in segment_keywords):
@@ -678,9 +674,9 @@ def _fallback_classification(query):
     else:
         primary_class = "SIMPLE_TRANSFORMATION"
     
-    # Create basic details
+
     details = {
-        "confidence": 0.6,  # Lower confidence for fallback
+        "confidence": 0.6,
         "reasoning": "Fallback keyword-based classification",
         "detected_elements": {
             "sap_tables_mentioned": [table.upper() for table in tables_found],
@@ -968,7 +964,7 @@ PROMPT_TEMPLATES = {
     """
 }
 
-def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, query_type=None, classification_details=None, target_sap_fields=None):
+def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
     """
     Process a query based on its classified type
     
@@ -987,17 +983,17 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
     """
     conn = None
     try:
-        # Initialize context manager
+
         context_manager = ContextualSessionManager()
         
-        # Get existing context and visited segments
+
         previous_context = context_manager.get_context(session_id) if session_id else None
         visited_segments = previous_context.get("segments_visited", {}) if previous_context else {}
         
-        # Connect to database
+
         conn = sqlite3.connect(os.environ.get('DB_PATH'))
         
-        # Track current segment
+
         try:
             cursor = conn.cursor()
             cursor.execute("SELECT segement_name FROM connection_segments WHERE segment_id = ?", (segment_id,))
@@ -1008,25 +1004,25 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         except Exception as e:
             logger.warning(f"Error tracking segment: {e}")
         
-        # Fetch mapping data
+
         joined_df = fetch_data_by_ids(object_id, segment_id, project_id, conn)
         
-        # Handle missing values
+
         joined_df = missing_values_handling(joined_df)
         
-        # Get target data sample - Use SQL directly instead of DataFrame
+
         target_df_sample = None
         try:
-            # Get the target table name from joined_df
+
             target_table = joined_df["table_name"].unique().tolist()
             if target_table and len(target_table) > 0:
-                # Get current target data using SQL
+
                 target_df_sample = sql_executor.get_table_sample(target_table[0])
                 
-                # If SQL-based retrieval fails, try the original approach as fallback
+
                 if isinstance(target_df_sample, dict) and "error_type" in target_df_sample:
                     logger.warning(f"SQL-based target data sample retrieval failed, using fallback")
-                    # Get a connection to fetch current target data
+
                     target_df = get_or_create_session_target_df(
                         session_id, target_table[0], conn
                     )
@@ -1036,23 +1032,24 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
                         else []
                     )
                 else:
-                    # Convert DataFrame to dict for consistency
+
                     target_df_sample = target_df_sample.head(5).to_dict("records") if not target_df_sample.empty else []
         except Exception as e:
             logger.warning(f"Error getting target data sample: {e}")
             target_df_sample = []
             
-        # If query_type not provided, determine it now 
-        if not query_type:
-            query_type, classification_details = classify_query_with_llm(query)
-            enhanced_classification = enhance_classification_before_processing(
-                classification_details, segment_id, db_path=os.environ.get('DB_PATH')
-            )
-            classification_details = enhanced_classification
-        # Get the appropriate prompt template
+
+        query_type, classification_details = classify_query_with_llm(query,target_table)
+        enhanced_classification = enhance_classification_before_processing(
+            classification_details, segment_id, db_path=os.environ.get('DB_PATH')
+        )
+        classification_details = enhanced_classification
+        logger.info(f"Query type: {query_type}")
+        logger.info(f"Classification details: {classification_details}")
+
         prompt_template = PROMPT_TEMPLATES.get(query_type, PROMPT_TEMPLATES["SIMPLE_TRANSFORMATION"])
         
-        # Format target data sample for the prompt
+
         target_df_sample_str = "No current target data available"
         if target_df_sample:
             try:
@@ -1060,7 +1057,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             except Exception as e:
                 logger.warning(f"Error formatting target data sample: {e}")
                 
-        # Format visited segments for the prompt
+
         visited_segments_str = "No previously visited segments"
         if visited_segments:
             try:
@@ -1073,8 +1070,51 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             except Exception as e:
                 logger.warning(f"Error formatting visited segments: {e}")
                 
-        # Format the prompt with all inputs
+
         table_desc = joined_df[joined_df.columns.tolist()[:-1]]
+        additional_context_prompt = f"""
+COMPREHENSIVE QUERY ANALYSIS:
+
+CLASSIFICATION RESULTS:
+- Query Type: {classification_details.get('primary_classification', 'Unknown')}
+- Confidence: {classification_details.get('confidence', 0)}
+- Reasoning: {classification_details.get('reasoning', 'Not provided')}
+
+DETECTED ELEMENTS:
+- SAP Tables Mentioned: {', '.join(classification_details.get('detected_elements', {}).get('sap_tables_mentioned', [])) or 'None'}
+- Columns Mentioned: {', '.join(classification_details.get('detected_elements', {}).get('columns_Mentioned', [])) or 'None'}
+- Segments Referenced: {', '.join(classification_details.get('detected_elements', {}).get('segments_mentioned', [])) or 'None'}
+- Join Indicators: {', '.join(classification_details.get('detected_elements', {}).get('join_indicators', [])) or 'None'}
+- Validation Indicators: {', '.join(classification_details.get('detected_elements', {}).get('validation_indicators', [])) or 'None'}
+- Aggregation Indicators: {', '.join(classification_details.get('detected_elements', {}).get('aggregation_indicators', [])) or 'None'}
+- Transformation References: {', '.join(classification_details.get('detected_elements', {}).get('transformation_references', [])) or 'None'}
+- Has Multiple Tables: {classification_details.get('detected_elements', {}).get('has_multiple_tables', False)}
+
+TABLE VALIDATION:
+- Valid Tables: {', '.join(classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('valid_tables', {}).keys()) or 'None found'}
+- Invalid Tables: {', '.join([t.get('original_name', '') for t in classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('invalid_tables', [])]) or 'None'}
+- Schema Errors: {len(classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('schema_errors', []))} errors
+
+COLUMN VALIDATION:
+- Columns Found in Database: {', '.join(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('columns_found_in_tables', {}).keys()) or 'None'}
+- Missing Columns: {', '.join(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('missing_columns', [])) or 'None'}
+- Total Tables Scanned: {len(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('table_columns', {}))}
+
+DETAILED COLUMN-TABLE MAPPING:
+{chr(10).join([f"- Column '{col}': found in {len(tables)} table(s) → {', '.join([t.get('table', '') + '(' + t.get('actual_column_name', '') + ')' for t in tables])}" for col, tables in classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('columns_found_in_tables', {}).items()]) or '- No valid column mappings found'}
+
+TABLE COLUMNS AVAILABLE:
+{chr(10).join([f"- {table}: {', '.join(cols[:5])}{' ...' if len(cols) > 5 else ''} ({len(cols)} total)" for table, cols in classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('table_columns', {}).items()]) or '- No table schemas available'}
+
+SEGMENT MAPPINGS:
+{chr(10).join([f"- Segment '{seg}' → Tables: {', '.join(tables)}" for seg, tables in classification_details.get('enhanced_matching', {}).get('segment_target_tables', {}).items()]) or '- No segment mappings available'}
+
+FUZZY MATCHING RESULTS:
+- Tables with Confidence: {', '.join([f"{table}({conf:.0%})" for table, conf in classification_details.get('enhanced_matching', {}).get('table_match_confidence', {}).items()]) or 'None'}
+- Columns in Mentioned Tables: {', '.join([f"{table}:[{', '.join(cols)}]" for table, cols in classification_details.get('enhanced_matching', {}).get('columns_in_mentioned_table', {}).items()]) or 'None'}
+
+INSTRUCTIONS: Use ONLY the validated table and column names from the mappings above. If a column is missing or a table is invalid, do not include it in your SQL generation.
+"""
         
         formatted_prompt = prompt_template.format(
             question=query,
@@ -1084,7 +1124,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             additional_context=classification_details
         )
         
-        # Call Gemini API with customized prompt
+
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
             logger.error("GEMINI_API_KEY not found in environment variables")
@@ -1093,31 +1133,31 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         client = genai.Client(api_key=api_key)
         
         response = client.models.generate_content(
-            model="gemini-2.5-flash-preview-04-17", 
+            model="gemini-2.5-flash", 
             contents=formatted_prompt,
             config=types.GenerateContentConfig(
                 temperature=0.5, top_p=0.95, top_k=40
             ),
         )
         
-        # Extract and parse JSON from response
+
         json_str = re.search(r"```json(.*?)```", response.text, re.DOTALL)
         if json_str:
             parsed_data = json.loads(json_str.group(1).strip())
         else:
-            # Try to parse the whole response as JSON
+
             parsed_data = json.loads(response.text.strip())
         
         logger.info(f"Parsed data: {parsed_data}")
         parsed_data["query_type"] = query_type
         
-        # Add other standard information
+
         parsed_data["target_table_name"] = joined_df["table_name"].unique().tolist()
         parsed_data["key_mapping"] = context_manager.get_key_mapping(session_id) if session_id else []
         parsed_data["visited_segments"] = visited_segments
         parsed_data["session_id"] = session_id
         
-        # Add the classification details
+
         parsed_data["classification_details"] = classification_details
         if target_sap_fields is not None:
             if isinstance(target_sap_fields, list):
@@ -1125,7 +1165,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             else:
                 parsed_data["target_sap_fields"] = [target_sap_fields]
                 
-        # Fetch table schema information for SQL generation
+
         schema_info = {}
         for table_name in parsed_data.get("source_table_name", []):
             try:
@@ -1137,7 +1177,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
                 
         parsed_data["table_schemas"] = schema_info
         
-        # Check target table schema too
+
         target_table_names = parsed_data.get("target_table_name", [])
         if target_table_names:
             target_table = target_table_names[0] if isinstance(target_table_names, list) else target_table_names
@@ -1148,19 +1188,19 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             except Exception as e:
                 logger.warning(f"Error fetching schema for target table {target_table}: {e}")
                 
-        # Process the resolved data to get table information
+
         results = process_info(parsed_data, conn)
         
-        # Handle key mapping differently based on query type
+
         if query_type == "SIMPLE_TRANSFORMATION":
-            # For simple transformations, use original key mapping logic
+
             results = _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn)
         else:
-            # For other operations, we don't enforce strict key mapping
-            # Just pass through the existing key mappings
+
+
             results["key_mapping"] = parsed_data["key_mapping"]
         
-        # Add session_id and other metadata
+
         results["session_id"] = session_id
         results["query_type"] = query_type
         results["visited_segments"] = visited_segments
@@ -1169,7 +1209,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             "name": segment_name if 'segment_name' in locals() else f"segment_{segment_id}"
         }
         
-        # Add table schemas to results
+
         results["table_schemas"] = parsed_data.get("table_schemas", {})
         results["target_table_schema"] = parsed_data.get("target_table_schema", [])
         
@@ -1192,57 +1232,57 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
     
     if not key_mapping:
         try:
-            # Check if we have a target field and it's a key
+
             for target_field in results["target_sap_fields"]:
                 target_field_filter = joined_df["target_sap_field"] == target_field
                 if target_field_filter.any() and joined_df[target_field_filter]["isKey"].values[0] == "True":
-                    # We're working with a primary key field
+
                     logger.info(f"Target field '{target_field}' is identified as a primary key")
 
-                    # Check if we have insertion fields to map
+
                     if results["insertion_fields"] and len(results["insertion_fields"]) > 0:
-                        # CRITICAL FIX: Don't use target field as source field
-                        # Instead, use the actual insertion field from source table
+
+
                         source_field = None
                         
-                        # First try to find a matching source field from the insertion fields
+
                         for field in results["insertion_fields"]:
                             if field in results["source_field_names"]:
                                 source_field = field
                                 break
                                 
-                        # If no direct match, take the first insertion field
+
                         if not source_field and results["insertion_fields"]:
                             source_field = results["insertion_fields"][0]
                             
-                        # Get source table
+
                         source_table = (
                             results["source_table_name"][0]
                             if results["source_table_name"]
                             else None
                         )
 
-                        # Verify the source data meets primary key requirements
+
                         if source_table and source_field:
                             error = None
                             try:
-                                # Get the source data using SQL instead of DataFrame
+
                                 has_nulls = False
                                 has_duplicates = False
                                 
                                 try:
-                                    # Validate table and field names to prevent SQL injection
+
                                     safe_table = validate_sql_identifier(source_table)
                                     safe_field = validate_sql_identifier(source_field)
                                     
-                                    # Check for nulls
+
                                     null_query = f"SELECT COUNT(*) AS null_count FROM {safe_table} WHERE {safe_field} IS NULL"
                                     null_result = sql_executor.execute_query(null_query)
                                     
                                     if isinstance(null_result, list) and null_result:
                                         has_nulls = null_result[0].get("null_count", 0) > 0
                                     
-                                    # Check for duplicates
+
                                     dup_query = f"""
                                     SELECT COUNT(*) AS dup_count
                                     FROM (
@@ -1260,13 +1300,13 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
                                         
                                 except Exception as e:
                                     logger.error(f"Failed to query source data for key validation: {e}")
-                                    has_nulls = True  # Assume worst case
-                                    has_duplicates = True  # Assume worst case
+                                    has_nulls = True
+                                    has_duplicates = True
                                     
-                                # Only proceed if the data satisfies primary key requirements
-                                # or if the query explicitly indicates working with distinct values
+
+
                                 if has_nulls or has_duplicates:
-                                    # Check if the query is requesting distinct values
+
                                     restructured_query = results.get("restructured_query", "")
                                     is_distinct_query = (
                                         check_distinct_requirement(restructured_query) if restructured_query 
@@ -1274,7 +1314,7 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
                                     )
 
                                     if not is_distinct_query:
-                                        # The data doesn't meet primary key requirements and query doesn't indicate distinct values
+
                                         error_msg = f"Cannot use '{source_field}' as a primary key: "
                                         if has_nulls and has_duplicates:
                                             error_msg += "contains null values and duplicate entries"
@@ -1294,7 +1334,7 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
                                 error = f"Error during key validation: {e}"
                                 
                         if not error and source_field:
-                            # If we've reached here, it's safe to add the key mapping
+
                             logger.info(f"Adding key mapping: {target_field} -> {source_field}")
                             key_mapping = context_manager.add_key_mapping(
                                 session_id, target_field, source_field
@@ -1305,14 +1345,14 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
                         logger.warning("No insertion fields found for key mapping")
                         key_mapping = context_manager.get_key_mapping(session_id)
                 else:
-                    # Not a key field, just get existing mappings
+
                     key_mapping = context_manager.get_key_mapping(session_id)
         except Exception as e:
             logger.error(f"Error processing key mapping: {e}")
-            # Continue with empty key mapping
+
             key_mapping = []
 
-    # Safely add key mapping to results
+
     results["key_mapping"] = key_mapping
     
     return results
@@ -1344,7 +1384,7 @@ def validate_sql_identifier(identifier):
     if not identifier:
         raise SQLInjectionError("Empty SQL identifier provided")
 
-    # Check for common SQL injection patterns
+
     dangerous_patterns = [
         ";",
         "--",
@@ -1364,7 +1404,7 @@ def validate_sql_identifier(identifier):
                 f"Potentially dangerous SQL pattern found: {pattern}"
             )
 
-    # Only allow alphanumeric characters, underscores, and some specific characters
+
     if not re.match(r"^[a-zA-Z0-9_\-\.]+$", identifier):
         raise SQLInjectionError("SQL identifier contains invalid characters")
     return identifier
@@ -1381,13 +1421,13 @@ def check_distinct_requirement(sentence):
     Returns:
         bool: True if the sentence likely requires distinct values, False otherwise
     """
-    # Load the spaCy model - using the medium English model for better word vectors
+
     nlp = spacy.load("en_core_web_md")
 
-    # Process the input sentence
+
     doc = nlp(sentence.lower())
 
-    # Target words we're looking for similarity to
+
     target_words = ["distinct", "unique", "different", "individual", "separate"]
     target_docs = [nlp(word) for word in target_words]
 
@@ -1410,7 +1450,7 @@ def check_distinct_requirement(sentence):
         if token.is_stop or token.is_punct:
             continue
 
-        # Check similarity with each target word
+
         for target_doc in target_docs:
             similarity = token.similarity(target_doc[0])
             if similarity > similarity_threshold:
@@ -1454,7 +1494,7 @@ class ContextualSessionManager:
                     )
                     segments = []
             
-            # Add the new segment
+
             segment_info ={
                     "segment_name": segment_name,
                     "target_table_name": target_table_name,
@@ -1462,7 +1502,7 @@ class ContextualSessionManager:
             if segment_info not in segments:
                 segments.append()
             
-            # Save the updated segments
+
             with open(context_path, "w") as f:
                 json.dump(segments, f, indent=2)
             return True
@@ -1494,7 +1534,7 @@ class ContextualSessionManager:
             session_path = f"{self.storage_path}/{session_id}"
             os.makedirs(session_path, exist_ok=True)
 
-            # Initialize empty context
+
             context = {
                 "session_id": session_id,
                 "created_at": datetime.now().isoformat(),
@@ -1507,7 +1547,7 @@ class ContextualSessionManager:
                 },
             }
 
-            # Save initial context
+
             with open(f"{session_path}/context.json", "w") as f:
                 json.dump(context, f, indent=2)
 
@@ -1515,6 +1555,60 @@ class ContextualSessionManager:
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
             raise SessionError(f"Failed to create session: {e}")
+        
+    def record_executed_query(self, session_id, query):
+        """Record an executed query"""
+        try:
+            if not session_id:
+                logger.warning("No session ID provided for record_executed_query")
+                return False
+
+            context_path = f"{self.storage_path}/{session_id}/queries.json"
+            if not os.path.exists(context_path):
+                queries = []
+            else:
+                try:
+                    with open(context_path, "r") as f:
+                        queries = json.load(f)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        f"Invalid JSON in queries file, creating new queries"
+                    )
+                    queries = []
+
+            queries.append(query)
+
+            with open(context_path, "w") as f:
+                json.dump(queries, f, indent=2)
+
+            return True
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in context file for session {session_id}: {e}")
+            return False
+
+    def get_executed_queries(self,session_id):
+        """Get the executed queries for a session"""
+        try:
+            if not session_id:
+                logger.warning("No session ID provided for record_executed_query")
+                return False
+
+            context_path = f"{self.storage_path}/{session_id}/queries.json"
+            if not os.path.exists(context_path):
+                queries = []
+            else:
+                try:
+                    with open(context_path, "r") as f:
+                        queries = json.load(f)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        f"Invalid JSON in queries file, creating new queries"
+                    )
+                    queries = []
+            return queries
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in context file for session {session_id}: {e}")
+            return []
 
     def get_context(self, session_id):
         """Get the current context for a session"""
@@ -1544,7 +1638,7 @@ class ContextualSessionManager:
                 logger.warning("No session ID provided for track_segment")
                 return False
                 
-            # Get existing context or create new
+
             context_path = f"{self.storage_path}/{session_id}/context.json"
             context = None
             
@@ -1556,11 +1650,11 @@ class ContextualSessionManager:
                     logger.warning(f"Error reading context file: {e}")
                     context = {"session_id": session_id}
             else:
-                # Create session directory if it doesn't exist
+
                 os.makedirs(os.path.dirname(context_path), exist_ok=True)
                 context = {"session_id": session_id}
                 
-            # Get segment name if not provided and conn exists
+
             if not segment_name and conn:
                 try:
                     cursor = conn.cursor()
@@ -1574,18 +1668,18 @@ class ContextualSessionManager:
                     logger.error(f"Error fetching segment name: {e}")
                     segment_name = f"segment_{segment_id}"
                     
-            # Initialize segments_visited if needed
+
             if "segments_visited" not in context:
                 context["segments_visited"] = {}
                 
-            # Add to visited segments
+
             context["segments_visited"][str(segment_id)] = {
                 "name": segment_name,
                 "visited_at": datetime.now().isoformat(),
                 "table_name": ''.join(c if c.isalnum() else '_' for c in segment_name.lower())
             }
             
-            # Save updated context
+
             with open(context_path, 'w') as f:
                 json.dump(context, f, indent=2)
                 
@@ -1601,7 +1695,7 @@ class ContextualSessionManager:
                 logger.warning("No session ID provided for add_key_mapping")
                 raise SessionError("No session ID provided")
 
-            # Validate parameters to prevent injection
+
             if not target_col or not isinstance(target_col, str):
                 logger.warning(f"Invalid target column: {target_col}")
                 return []
@@ -1612,7 +1706,7 @@ class ContextualSessionManager:
 
             file_path = f"{self.storage_path}/{session_id}/key_mapping.json"
 
-            # If directory doesn't exist, create it
+
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
             if not os.path.exists(file_path):
@@ -1630,7 +1724,7 @@ class ContextualSessionManager:
                     logger.error(f"Error reading key mapping file: {e}")
                     key_mappings = []
 
-            # Add the new mapping
+
             if not any(
                 mapping
                 for mapping in key_mappings
@@ -1641,7 +1735,7 @@ class ContextualSessionManager:
                     {"target_col": target_col, "source_col": source_col}
                 )
 
-            # Save the updated mappings
+
             with open(file_path, "w") as f:
                 json.dump(key_mappings, f, indent=2)
 
@@ -1679,7 +1773,7 @@ class ContextualSessionManager:
                 
             context_path = f"{self.storage_path}/{session_id}/context.json"
             
-            # Get existing context or create new
+
             context = self.get_context(session_id)
             if not context:
                 context = {
@@ -1694,11 +1788,11 @@ class ContextualSessionManager:
                     }
                 }
             
-            # Initialize transformation_history if not exists
+
             if "transformation_history" not in context:
                 context["transformation_history"] = []
             
-            # Add transformation record
+
             transformation_record = {
                 "transformation_id": f"t_{len(context['transformation_history']) + 1}",
                 "timestamp": datetime.now().isoformat(),
@@ -1715,7 +1809,7 @@ class ContextualSessionManager:
             
             context["transformation_history"].append(transformation_record)
             
-            # Save updated context
+
             os.makedirs(os.path.dirname(context_path), exist_ok=True)
             with open(context_path, "w") as f:
                 json.dump(context, f, indent=2)
@@ -1748,7 +1842,7 @@ class ContextualSessionManager:
             reference_lower = reference_text.lower()
             matches = []
             
-            # Direct transformation number reference (e.g., "transformation 2", "step 3")
+
             import re
             number_match = re.search(r'(?:transformation|step|query)\s*(\d+)', reference_lower)
             if number_match:
@@ -1756,12 +1850,12 @@ class ContextualSessionManager:
                 if 1 <= transform_num <= len(history):
                     matches.append(history[transform_num - 1])
             
-            # "Previous" or "last" reference
+
             elif any(word in reference_lower for word in ['previous', 'last', 'prior', 'earlier']):
                 if history:
-                    matches.append(history[-1])  # Get last transformation
+                    matches.append(history[-1])
             
-            # Search by query content similarity
+
             else:
                 for record in history:
                     if (reference_lower in record.get("original_query", "").lower() or
@@ -1831,7 +1925,7 @@ class ContextualSessionManager:
             if not history:
                 return None
             
-            # Look for references to previous transformations in the current query
+
             references = self.find_transformation_by_reference(session_id, current_query)
             
             if references:
@@ -1859,7 +1953,7 @@ class ContextualSessionManager:
 def fetch_data_by_ids(object_id, segment_id, project_id, conn):
     """Fetch data mappings from the database"""
     try:
-        # Validate parameters
+
         if not all(isinstance(x, int) for x in [object_id, segment_id, project_id]):
             logger.error("Invalid parameter types for fetch_data_by_ids")
             raise ValueError("Object ID, segment ID, and project ID must be integers")
@@ -1915,22 +2009,22 @@ def fetch_data_by_ids(object_id, segment_id, project_id, conn):
 def missing_values_handling(df):
     """Handle missing values in the dataframe"""
     try:
-        # Check if dataframe is empty or None
+
         if df is None or df.empty:
             logger.warning("Empty dataframe passed to missing_values_handling")
             return df
 
-        # Make a copy to avoid modifying the original
+
         df_processed = df.copy()
 
-        # Handle source_table column
+
         if "source_table" in df_processed.columns:
-            # Convert empty strings and whitespace-only to NaN first
+
             df_processed["source_table"] = df_processed["source_table"].replace(
                 r"^\s*$", pd.NA, regex=True
             )
 
-            # Fill NaN values if there are any non-NaN values
+
             if not df_processed["source_table"].dropna().empty:
                 non_na_values = df_processed["source_table"].dropna()
                 if len(non_na_values) > 0:
@@ -1939,17 +2033,17 @@ def missing_values_handling(df):
                         fill_value
                     )
 
-        # Handle source_field_name based on target_sap_field
+
         if (
             "source_field_name" in df_processed.columns
             and "target_sap_field" in df_processed.columns
         ):
-            # Convert empty strings to NaN first
+
             df_processed["source_field_name"] = df_processed[
                 "source_field_name"
             ].replace(r"^\s*$", pd.NA, regex=True)
 
-            # Count null values
+
             null_count = df_processed["source_field_name"].isna().sum()
             if null_count > 0:
                 df_processed["target_sap_field"] = df_processed[
@@ -1985,46 +2079,30 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
     dict: Processed information including context or None if key validation fails
     """
     try:
-        # Validate inputs
         if not query or not isinstance(query, str):
             logger.error(f"Invalid query: {query}")
             return None
 
-        # Validate IDs
+
         if not all(isinstance(x, int) for x in [object_id, segment_id, project_id]):
             logger.error(
                 f"Invalid ID types: object_id={type(object_id)}, segment_id={type(segment_id)}, project_id={type(project_id)}"
             )
             return None
 
-        # Initialize context manager
         context_manager = ContextualSessionManager()
 
-        # Create a session if none provided
         if not session_id:
             session_id = context_manager.create_session()
             logger.info(f"Created new session: {session_id}")
-        
-        # Classify the query type using spaCy
-        query_type, classification_details = classify_query_with_llm(query)
-        enhanced_classification = enhance_classification_before_processing(
-            classification_details, segment_id, db_path=os.environ.get('DB_PATH')
-        )
-        classification_details = enhanced_classification
-        logger.info(f"Query type: {query_type}")
-        logger.info(f"Classification details: {classification_details}")
-
-        
-        # Process the query based on its type
+    
         return process_query_by_type(
             object_id, 
             segment_id, 
             project_id, 
             query, 
             session_id, 
-            query_type, 
-            classification_details,
-            target_sap_fields  # Pass target_sap_fields to process_query_by_type
+            target_sap_fields
         )
     except Exception as e:
         logger.error(f"Error in process_query: {e}")
@@ -2064,27 +2142,20 @@ def get_or_create_session_target_df(session_id, target_table, conn):
         target_path = f"{session_path}/target_latest.csv"
 
         if os.path.exists(target_path):
-            # Load existing target data
             try:
                 target_df = pd.read_csv(target_path)
                 return target_df
             except Exception as e:
                 logger.error(f"Error reading existing target CSV: {e}")
-                # If there's an error reading the file, get fresh data from the database
-
-        # Get fresh target data from the database - use SQL executor
         try:
-            # Validate target table name
             safe_table = validate_sql_identifier(target_table)
             
-            # Use SQL executor to get full table
             target_df = sql_executor.execute_and_fetch_df(f"SELECT * FROM {safe_table}")
             
             if isinstance(target_df, dict) and "error_type" in target_df:
-                # If SQL executor failed, fall back to original approach
                 logger.warning(f"SQL approach failed in get_or_create_session_target_df, using fallback: {target_df.get('error_message')}")
                 
-                # Use a parameterized query for safety
+
                 query = f"SELECT * FROM {safe_table}"
                 target_df = pd.read_sql_query(query, conn)
                 
@@ -2134,7 +2205,7 @@ def process_info(resolved_data, conn):
     dict: Processed information including table samples
     """
     try:
-        # Validate inputs
+
         if resolved_data is None:
             logger.error("None resolved_data passed to process_info")
             return None
@@ -2143,10 +2214,10 @@ def process_info(resolved_data, conn):
             logger.error("None database connection passed to process_info")
             return None
             
-        # Get query type - default to SIMPLE_TRANSFORMATION
+
         query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")
         
-        # Define required fields based on query type (same as original)
+
         required_fields = {
             "SIMPLE_TRANSFORMATION": [
                 "source_table_name", "source_field_names", "target_table_name",
@@ -2174,13 +2245,13 @@ def process_info(resolved_data, conn):
             ]
         }
         
-        # Check if all required fields for this query type are present
+
         current_required_fields = required_fields.get(query_type, required_fields["SIMPLE_TRANSFORMATION"])
         
         for field in current_required_fields:
             if field not in resolved_data:
                 logger.warning(f"Missing required field in resolved_data: {field}")
-                # Initialize missing fields with sensible defaults
+
                 if field in ["source_table_name", "source_field_names", "filtering_fields", 
                             "insertion_fields", "group_by_fields"]:
                     resolved_data[field] = []
@@ -2199,7 +2270,7 @@ def process_info(resolved_data, conn):
                 elif field == "cross_segment_joins":
                     resolved_data[field] = []
 
-        # Initialize result dictionary with fields based on query type
+
         result = {
             "query_type": query_type,
             "source_table_name": resolved_data["source_table_name"],
@@ -2209,7 +2280,7 @@ def process_info(resolved_data, conn):
             "restructured_query": resolved_data["Resolved_query"],
         }
         
-        # Add type-specific fields
+
         if query_type == "SIMPLE_TRANSFORMATION":
             result["filtering_fields"] = resolved_data["filtering_fields"]
             result["insertion_fields"] = resolved_data["insertion_fields"]
@@ -2228,35 +2299,35 @@ def process_info(resolved_data, conn):
             result["aggregation_functions"] = resolved_data["aggregation_functions"]
             result["group_by_fields"] = resolved_data["group_by_fields"]
             
-            # Add filtering fields if present
+
             if "filtering_fields" in resolved_data:
                 result["filtering_fields"] = resolved_data["filtering_fields"]
             else:
                 result["filtering_fields"] = []
 
-        # Add data samples using SQL approach for better memory efficiency
+
         source_data = {}
         try:
             for table in resolved_data["source_table_name"]:
-                # Clean the table name to remove suffixes
+
                 cleaned_table = clean_table_name(table)
                 
                 try:
-                    # Validate the table name
+
                     safe_table = validate_sql_identifier(cleaned_table)
                     
-                    # Use SQL executor to get a sample of data
+
                     source_df = sql_executor.get_table_sample(safe_table, limit=5)
                     
                     if isinstance(source_df, dict) and "error_type" in source_df:
-                        # If SQL executor failed, fall back to original approach
+
                         logger.warning(f"SQL source sample failed for {safe_table}, using fallback: {source_df.get('error_message')}")
                         
-                        # Use pandas read_sql as fallback
+
                         query = f"SELECT * FROM {safe_table} LIMIT 5"
                         source_df = pd.read_sql_query(query, conn)
                         
-                    # Store the sample data
+
                     source_data[table] = source_df
                 except Exception as e:
                     logger.error(f"Error fetching source data for table {cleaned_table}: {e}")
@@ -2267,7 +2338,7 @@ def process_info(resolved_data, conn):
             
         result["source_data_samples"] = source_data
         
-        # Add schema information
+
         result["table_schemas"] = resolved_data.get("table_schemas", {})
         result["target_table_schema"] = resolved_data.get("target_table_schema", [])
         

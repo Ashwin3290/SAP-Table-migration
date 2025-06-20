@@ -1,4 +1,4 @@
-from dmtool import DMTool
+from DMtool.dmtool import DMTool
 
 dm_tool = DMTool()
 
