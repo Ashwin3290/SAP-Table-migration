@@ -172,14 +172,12 @@
   {
     "id": "delete_column",
     "prompt": "Delete column {column} from the target table",
-    "query": "CREATE TABLE temp_table AS SELECT * FROM {target_table}; DROP TABLE {target_table}; CREATE TABLE {target_table} AS SELECT {columns_except_deleted} FROM temp_table; DROP TABLE temp_table",
+    "query": "Alter Table {target_table} Drop Column {column};",
     "plan": [
-      "1. Identify the column to delete",
-      "2. Create a temporary table with all data from the target table",
-      "3. Drop the original table",
-      "4. Recreate the table without the deleted column",
-      "5. Drop the temporary table"
-    ]
+      "1. Identify the target table to modify",
+      "2. Identify the column to delete",
+      "3. Drop the specified column from the target table"
+    ]  
   },
   {
     "id": "conditional_update",
@@ -357,18 +355,6 @@
       "2. Convert YYYYMMDD format to SQLite date format (YYYY-MM-DD)",
       "3. Use strftime('%A', date) to get full day name (Monday, Tuesday, etc.)",
       "4. Update all records with the calculated day names"
-    ]
-  },
-  {
-    "id": "drop_column_from_target_table",
-    "prompt": "Delete column {column_name} from the target table",
-    "query": "CREATE TABLE temp_table AS SELECT * FROM {target_table}; DROP TABLE {target_table}; CREATE TABLE {target_table} AS SELECT {remaining_columns} FROM temp_table; DROP TABLE temp_table",
-    "plan": [
-      "1. Create a temporary table with all data from the target table",
-      "2. Drop the original target table",
-      "3. Recreate the target table without the specified column",
-      "4. Copy data back excluding the dropped column",
-      "5. Drop the temporary table to clean up"
     ]
   },
   {

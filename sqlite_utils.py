@@ -11,7 +11,7 @@ Usage:
     conn = sqlite3.connect('your_database.db')
     add_sqlite_functions(conn)
     
-    # Now you can use all custom functions in your queries
+
     cursor = conn.execute("SELECT regexp_replace(column, '[^a-zA-Z0-9 ]', '', 'g') FROM table")
 """
 
@@ -25,9 +25,9 @@ from typing import Optional, Union, Any
 
 logger = logging.getLogger(__name__)
 
-# =============================================================================
-# REGEX FUNCTIONS
-# =============================================================================
+
+
+
 
 def regexp_replace(string: str, pattern: str, replacement: str, flags: Optional[str] = None) -> str:
     """SQLite regexp_replace function implementation"""
@@ -111,9 +111,9 @@ def regexp_extract(pattern: str, string: str, group: int = 0, flags: Optional[st
         logger.warning(f"Error in regexp_extract: {e}")
         return None
 
-# =============================================================================
-# STRING FUNCTIONS
-# =============================================================================
+
+
+
 
 def split_string(string: str, delimiter: str = ',', index: Optional[int] = None) -> str:
     """Split string by delimiter and return specific index or all parts"""
@@ -186,9 +186,9 @@ def right_pad(string: str, length: int, pad_char: str = ' ') -> str:
         logger.warning(f"Error in right_pad: {e}")
         return str(string) if string is not None else ""
 
-# =============================================================================
-# MATHEMATICAL FUNCTIONS
-# =============================================================================
+
+
+
 
 def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
     """Safe division that returns default value for division by zero"""
@@ -231,9 +231,9 @@ def power_of(base: float, exponent: float) -> float:
         logger.warning(f"Error in power_of: {e}")
         return 0.0
 
-# =============================================================================
-# DATE/TIME FUNCTIONS
-# =============================================================================
+
+
+
 
 def date_add_days(date_str: str, days: int, format_str: str = '%Y-%m-%d') -> str:
     """Add days to a date string"""
@@ -286,9 +286,9 @@ def format_date(date_str: str, input_format: str = '%Y%m%d', output_format: str 
         logger.warning(f"Error in format_date: {e}")
         return str(date_str) if date_str is not None else ""
 
-# =============================================================================
-# JSON FUNCTIONS
-# =============================================================================
+
+
+
 
 def json_extract_value(json_str: str, key: str) -> str:
     """Extract value from JSON string by key"""
@@ -317,9 +317,9 @@ def is_valid_json(json_str: str) -> bool:
     except Exception:
         return False
 
-# =============================================================================
-# VALIDATION FUNCTIONS
-# =============================================================================
+
+
+
 
 def is_numeric(value: str) -> bool:
     """Check if string represents a numeric value"""
@@ -355,7 +355,7 @@ def is_phone(phone: str) -> bool:
             return False
         
         phone = str(phone).strip()
-        # Remove common separators
+
         clean_phone = re.sub(r'[^\d]', '', phone)
         
         return 7 <= len(clean_phone) <= 15
@@ -375,7 +375,7 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
     try:
         functions_added = 0
         
-        # REGEX FUNCTIONS
+
         conn.create_function("regexp_replace", 3, lambda p, r, s: regexp_replace(p, r, s))
         conn.create_function("regexp_replace", 4, regexp_replace)
         conn.create_function("regexp", 2, lambda p, s: regexp_match(p, s))
@@ -387,7 +387,7 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
         conn.create_function("regexp_extract", 4, regexp_extract)
         functions_added += 9
         
-        # STRING FUNCTIONS
+
         conn.create_function("split_string", 2, lambda s, d: split_string(s, d))
         conn.create_function("split_string", 3, split_string)
         conn.create_function("proper_case", 1, proper_case)
@@ -398,7 +398,7 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
         conn.create_function("right_pad", 3, right_pad)
         functions_added += 7
         
-        # MATHEMATICAL FUNCTIONS
+
         conn.create_function("safe_divide", 2, lambda n, d: safe_divide(n, d))
         conn.create_function("safe_divide", 3, safe_divide)
         conn.create_function("percentage", 2, lambda p, w: percentage(p, w))
@@ -406,7 +406,7 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
         conn.create_function("power_of", 2, power_of)
         functions_added += 5
         
-        # DATE/TIME FUNCTIONS
+
         conn.create_function("date_add_days", 2, lambda d, n: date_add_days(d, n))
         conn.create_function("date_add_days", 3, date_add_days)
         conn.create_function("date_diff_days", 2, lambda d1, d2: date_diff_days(d1, d2))
@@ -416,12 +416,12 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
         conn.create_function("format_date", 3, format_date)
         functions_added += 7
         
-        # JSON FUNCTIONS
+
         conn.create_function("json_extract_value", 2, json_extract_value)
         conn.create_function("is_valid_json", 1, is_valid_json)
         functions_added += 2
         
-        # VALIDATION FUNCTIONS
+
         conn.create_function("is_numeric", 1, is_numeric)
         conn.create_function("is_email", 1, is_email)
         conn.create_function("is_phone", 1, is_phone)

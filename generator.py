@@ -9,6 +9,8 @@ import traceback
 import os
 from typing import Dict, List, Any, Optional, Union, Tuple
 
+from query_analyzer import SQLiteQueryAnalyzer
+
 logger = logging.getLogger(__name__)
 
 class SQLGenerator:
@@ -26,14 +28,14 @@ class SQLGenerator:
     def _initialize_templates(self) -> Dict[str, str]:
         """Initialize SQL query templates for different operations"""
         templates = {
-            # Simple SELECT query
+
             "select": """
                 SELECT {select_fields}
                 FROM {table}
                 {where_clause}
             """,
             
-            # JOIN operation
+
             "join": """
                 SELECT {select_fields}
                 FROM {main_table} {main_alias}
@@ -41,7 +43,7 @@ class SQLGenerator:
                 {where_clause}
             """,
             
-            # INSERT operation
+
             "insert": """
                 INSERT INTO {target_table} ({target_fields})
                 SELECT {source_fields}
@@ -49,14 +51,14 @@ class SQLGenerator:
                 {where_clause}
             """,
             
-            # UPDATE operation
+
             "update": """
                 UPDATE {target_table}
                 SET {set_clause}
                 {where_clause}
             """,
             
-            # CREATE VIEW operation
+
             "create_view": """
                 CREATE TEMPORARY VIEW IF NOT EXISTS {view_name} AS
                 SELECT {select_fields}
@@ -64,7 +66,7 @@ class SQLGenerator:
                 {where_clause}
             """,
             
-            # AGGREGATION operation
+
             "aggregation": """
                 SELECT {group_fields}{agg_separator}{agg_functions}
                 FROM {table}
@@ -84,22 +86,21 @@ class SQLGenerator:
         Tuple[str, Dict]: The generated SQL query and parameterized values
         """
         try:
-            # Log the information we're working with
+
             logger.info(f"Generating SQLite query for query: {planner_info.get('original_query', '')}")
             logger.info(f"Source tables: {planner_info.get('source_table_name', [])}")
-            logger.info(f"Insertion fields: {planner_info.get('insertion_fields', [])}")  # FIXED: Log insertion fields instead
+            logger.info(f"Insertion fields: {planner_info.get('insertion_fields', [])}")
             logger.info(f"Target table: {planner_info.get('target_table_name', [])}")
             logger.info(f"Target fields: {planner_info.get('target_sap_fields', [])}")
             logger.info(f"Filtering fields: {planner_info.get('filtering_fields', [])}")
             logger.info(f"Conditions: {planner_info.get('extracted_conditions', {})}")
             
-            # 1. Create a step-by-step SQLite generation plan using LLM
+
             
-            # 2. Generate initial SQLite query using LLM based on the plan
+
             initial_sql_query, initial_sql_params = self.generate_sql_with_llm(sql_plan, planner_info,template["query"])
             
-            # 3. Analyze and fix the generated query (new step)
-            from query_analyzer import SQLiteQueryAnalyzer
+
             query_analyzer = SQLiteQueryAnalyzer()
             fixed_sql_query, fixed_sql_params, is_valid = query_analyzer.analyze_and_fix_query(
                 initial_sql_query, initial_sql_params, planner_info
@@ -108,11 +109,11 @@ class SQLGenerator:
             if is_valid:
                 return fixed_sql_query, fixed_sql_params
             
-            # 4. If still not valid after fixes, fall back to rule-based method
+
             logger.warning(f"Could not generate valid SQLite query even after fixing attempts: {fixed_sql_query}")
             logger.info("Falling back to rule-based query generation")
                     
-            # Fallback to rule-based method as a safety measure
+
             query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
             
             if query_type == "SIMPLE_TRANSFORMATION":
@@ -132,7 +133,7 @@ class SQLGenerator:
             logger.error(f"Error in generate_sql: {e}")
             logger.error(traceback.format_exc())
             
-            # Fallback to rule-based method
+
             query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
             
             if query_type == "SIMPLE_TRANSFORMATION":
@@ -160,10 +161,10 @@ class SQLGenerator:
         Tuple[str, Dict[str, Any]]: The generated SQLite query and parameters
         """
         try:
-            # Extract key information for the prompt
+
             query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
             source_tables = planner_info.get("source_table_name", [])
-            insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields
+            insertion_fields = planner_info.get("insertion_fields", [])
             target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
             target_fields = planner_info.get("target_sap_fields", [])
             filtering_fields = planner_info.get("filtering_fields", [])
@@ -171,13 +172,13 @@ class SQLGenerator:
             original_query = planner_info.get("original_query", "")
             key_mapping = planner_info.get("key_mapping", [])
             
-            # Check if target table has data
+
             target_has_data = False
             target_data_samples = planner_info.get("target_data_samples", {})
             if isinstance(target_data_samples, pd.DataFrame) and not target_data_samples.empty:
                 target_has_data = True
             
-            # Create detailed SQLite generation prompt
+
             prompt = f"""
     You are an expert SQLite database engineer focusing on data transformation operations. I need you to generate 
     precise SQLite query for a data transformation task based on the following plan and information:
@@ -251,20 +252,19 @@ class SQLGenerator:
     FROM MARA
     """
         
-            # Call the LLM for SQLite generation
+
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
-                # model="gemini-2.5-pro-preview-05-06", 
                 model="gemini-2.5-flash-preview-04-17",
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.1)
             )
             
-            # Extract the SQLite query
+
             if response and hasattr(response, "text"):
                 sql_query = response.text.strip()
                 
-                # Remove markdown code blocks if present
+
                 import re
                 sql_match = re.search(r"```(?:sqlite|sql)\s*(.*?)\s*```", sql_query, re.DOTALL)
                 if sql_match:
@@ -274,25 +274,25 @@ class SQLGenerator:
                     if sql_match:
                         sql_query = sql_match.group(1)
                 
-                # Build parameter dict (empty for now as we're using literal values)
+
                 params = {}
                 
                 return sql_query.strip(), params
             else:
                 logger.warning("Invalid response from LLM in generate_sql_with_llm")
                 
-                # Generate fallback query using insertion fields
+
                 if target_has_data and query_type != "VALIDATION_OPERATION":
-                    # UPDATE operation - SQLite specific syntax
+
                     if insertion_fields and target_fields:
                         fallback = f"UPDATE {target_table} SET {target_fields[0]} = source.{insertion_fields[0]} FROM (SELECT {', '.join(insertion_fields)} FROM {source_tables[0]}) AS source WHERE {target_table}.{target_fields[0]} = source.{insertion_fields[0]}"
                     else:
                         fallback = f"UPDATE {target_table} SET field = 'value'"
                 elif query_type == "VALIDATION_OPERATION":
-                    # SELECT for validation
+
                     fallback = f"SELECT * FROM {source_tables[0]}"
                 else:
-                    # INSERT operation
+
                     if insertion_fields and target_fields:
                         fallback = f"INSERT INTO {target_table} ({', '.join(target_fields)}) SELECT {', '.join(insertion_fields)} FROM {source_tables[0]}"
                     else:
@@ -313,35 +313,35 @@ class SQLGenerator:
         Returns:
         Tuple[str, Dict]: The generated SQL query and parameterized values
         """
-        # Extract necessary information
+
         source_tables = planner_info.get("source_table_name", [])
-        insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields
+        insertion_fields = planner_info.get("insertion_fields", [])
         target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
         target_fields = planner_info.get("target_sap_fields", [])
         filtering_fields = planner_info.get("filtering_fields", [])
         conditions = planner_info.get("extracted_conditions", {})
         
-        # Handle missing or empty values
+
         if not source_tables or not insertion_fields or not target_table or not target_fields:
             logger.error("Missing essential information for SQL generation")
             logger.error(f"source_tables: {source_tables}, insertion_fields: {insertion_fields}, target_table: {target_table}, target_fields: {target_fields}")
             return "", {}
         
-        # Use the first source table if multiple are provided
+
         source_table = source_tables[0]
         
-        # Build parameterized values dict
+
         params = {}
         
-        # Determine if this is an INSERT or UPDATE operation
+
         operation_type = self._determine_operation_type(planner_info)
         
         if operation_type == "INSERT":
-            # Generate INSERT query using insertion_fields
+
             return self._build_insert_query(source_table, target_table, insertion_fields, target_fields, 
                                           filtering_fields, conditions)
         else:
-            # Generate UPDATE query using insertion_fields
+
             return self._build_update_query(source_table, target_table, insertion_fields, target_fields,
                                           filtering_fields, conditions)
     
@@ -354,31 +354,31 @@ class SQLGenerator:
         Returns:
         Tuple[str, Dict]: The generated SQL query and parameterized values
         """
-        # Extract necessary information
+
         source_tables = planner_info.get("source_table_name", [])
-        insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields
+        insertion_fields = planner_info.get("insertion_fields", [])
         target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
         target_fields = planner_info.get("target_sap_fields", [])
         join_conditions = planner_info.get("join_conditions", [])
         filtering_fields = planner_info.get("filtering_fields", [])
         conditions = planner_info.get("extracted_conditions", {})
         
-        # Handle missing or empty values
+
         if not source_tables or len(source_tables) < 2 or not target_table:
             logger.error("Missing essential information for JOIN operation")
             return "", {}
         
-        # Build tables and aliases
+
         main_table = source_tables[0]
         main_alias = f"t1"
         
-        # Build join clauses
+
         join_clauses = []
         
         for i, table in enumerate(source_tables[1:], 2):
             alias = f"t{i}"
             
-            # Find join condition for this table pair
+
             join_info = next((jc for jc in join_conditions if 
                              (jc.get("left_table") == main_table and jc.get("right_table") == table) or
                              (jc.get("right_table") == main_table and jc.get("left_table") == table)), 
@@ -387,11 +387,11 @@ class SQLGenerator:
             if join_info:
                 join_type = join_info.get("join_type", "INNER").upper()
                 
-                # Ensure join type is valid
+
                 if join_type not in ["INNER", "LEFT", "RIGHT", "FULL"]:
                     join_type = "INNER"
                 
-                # Get join fields
+
                 if join_info.get("left_table") == main_table:
                     left_field = join_info.get("left_field")
                     right_field = join_info.get("right_field")
@@ -401,35 +401,35 @@ class SQLGenerator:
                 
                 join_clauses.append(f"{join_type} JOIN {table} {alias} ON {main_alias}.{left_field} = {alias}.{right_field}")
             else:
-                # Default join on common field names if no explicit join condition
+
                 common_fields = self._find_common_fields(main_table, table)
                 if common_fields:
                     join_field = common_fields[0]
                     join_clauses.append(f"INNER JOIN {table} {alias} ON {main_alias}.{join_field} = {alias}.{join_field}")
                 else:
-                    # Fallback to CROSS JOIN if no common fields
+
                     join_clauses.append(f"CROSS JOIN {table} {alias}")
         
-        # Build field selection with appropriate table aliases - ONLY use insertion_fields
+
         select_fields = []
         field_mapping = {}
         
-        for field in insertion_fields:  # FIXED: Only iterate over insertion_fields
-            # Determine which table this field belongs to
+        for field in insertion_fields:
+
             for i, table in enumerate(source_tables):
                 alias = f"t{i+1}"
                 field_mapping[field] = f"{alias}.{field}"
                 select_fields.append(f"{alias}.{field} AS {field}")
                 break
         
-        # Build WHERE clause using filtering_fields only
+
         where_clause, params = self._build_where_clause(filtering_fields, conditions, field_mapping)
         
-        # Determine operation type
+
         operation_type = self._determine_operation_type(planner_info)
         
         if operation_type == "INSERT":
-            # Generate query to insert join results into target
+
             query = self.sql_templates["insert"].format(
                 target_table=target_table,
                 target_fields=", ".join(target_fields),
@@ -438,7 +438,7 @@ class SQLGenerator:
                 where_clause=where_clause
             )
         else:
-            # Generate a common table expression (CTE) for the join, then update target
+
             join_query = f"""
             WITH joined_data AS (
                 SELECT {', '.join(select_fields)}
@@ -448,14 +448,14 @@ class SQLGenerator:
             )
             """
             
-            # Determine key field for matching
-            key_field = self._get_key_field(planner_info, target_fields, insertion_fields)  # FIXED: Use insertion_fields
+
+            key_field = self._get_key_field(planner_info, target_fields, insertion_fields)
             
             if key_field:
-                # Build UPDATE query with CTE
+
                 set_clauses = []
                 for field in target_fields:
-                    if field != key_field and field in insertion_fields:  # FIXED: Check against insertion_fields
+                    if field != key_field and field in insertion_fields:
                         set_clauses.append(f"{field} = joined_data.{field}")
                 
                 if set_clauses:
@@ -467,7 +467,7 @@ class SQLGenerator:
                     WHERE {target_table}.{key_field} = joined_data.{key_field}
                     """
                 else:
-                    # If no fields to update, fallback to a simple SELECT
+
                     query = f"""
                     SELECT {', '.join(select_fields)}
                     FROM {main_table} {main_alias}
@@ -475,7 +475,7 @@ class SQLGenerator:
                     {where_clause}
                     """
             else:
-                # If no key field identified, fallback to a simple SELECT
+
                 query = f"""
                 SELECT {', '.join(select_fields)}
                 FROM {main_table} {main_alias}
@@ -494,21 +494,21 @@ class SQLGenerator:
         Returns:
         Tuple[str, Dict]: The generated SQL query and parameterized values
         """
-        # Extract necessary information
+
         source_tables = planner_info.get("source_table_name", [])
-        insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields
+        insertion_fields = planner_info.get("insertion_fields", [])
         target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
         target_fields = planner_info.get("target_sap_fields", [])
         segment_references = planner_info.get("segment_references", [])
         filtering_fields = planner_info.get("filtering_fields", [])
         conditions = planner_info.get("extracted_conditions", {})
         
-        # Handle missing or empty values
+
         if not source_tables or not target_table or not segment_references:
             logger.error("Missing essential information for CROSS_SEGMENT operation")
             return "", {}
         
-        # For cross-segment, we need to create views for the segment data
+
         view_queries = []
         
         for segment_ref in segment_references:
@@ -517,10 +517,10 @@ class SQLGenerator:
             table_name = segment_ref.get("table_name")
             
             if table_name:
-                # Create a view name from segment name
+
                 view_name = f"view_{segment_name.lower().replace(' ', '_')}"
                 
-                # Create view query
+
                 view_query = self.sql_templates["create_view"].format(
                     view_name=view_name,
                     select_fields="*",
@@ -530,8 +530,8 @@ class SQLGenerator:
                 
                 view_queries.append(view_query)
         
-        # Now create the main query as a JOIN operation
-        # Treat segment tables as source tables
+
+
         join_tables = [t for t in source_tables]
         for segment_ref in segment_references:
             segment_name = segment_ref.get("segment_name")
@@ -539,46 +539,46 @@ class SQLGenerator:
             if view_name not in join_tables:
                 join_tables.append(view_name)
         
-        # Create a join query similar to _generate_join_operation
+
         main_table = join_tables[0]
         main_alias = f"t1"
         
-        # Build join clauses
+
         join_clauses = []
         
         for i, table in enumerate(join_tables[1:], 2):
             alias = f"t{i}"
             
-            # Try to find common fields for join
+
             common_fields = self._find_common_fields(main_table, table)
             if common_fields:
                 join_field = common_fields[0]
                 join_clauses.append(f"LEFT JOIN {table} {alias} ON {main_alias}.{join_field} = {alias}.{join_field}")
             else:
-                # Fallback to CROSS JOIN if no common fields
+
                 join_clauses.append(f"CROSS JOIN {table} {alias}")
         
-        # Build field selection - ONLY use insertion_fields
+
         select_fields = []
         field_mapping = {}
         
-        for field in insertion_fields:  # FIXED: Only use insertion_fields
-            # Add all needed fields with table aliases
+        for field in insertion_fields:
+
             select_fields.append(f"{main_alias}.{field} AS {field}")
             field_mapping[field] = f"{main_alias}.{field}"
         
-        # Build WHERE clause using filtering_fields only
+
         where_clause, params = self._build_where_clause(filtering_fields, conditions, field_mapping)
         
-        # Determine operation type
+
         operation_type = self._determine_operation_type(planner_info)
         
-        # Combine view creation with main query
+
         if view_queries:
             views_sql = "\n".join(view_queries)
             
             if operation_type == "INSERT":
-                # Generate query to insert join results into target
+
                 query = f"""
                 {views_sql}
                 
@@ -589,7 +589,7 @@ class SQLGenerator:
                 {where_clause}
                 """
             else:
-                # Generate UPDATE query with CTE
+
                 query = f"""
                 {views_sql}
                 
@@ -601,14 +601,14 @@ class SQLGenerator:
                 )
                 """
                 
-                # Determine key field for matching
-                key_field = self._get_key_field(planner_info, target_fields, insertion_fields)  # FIXED: Use insertion_fields
+
+                key_field = self._get_key_field(planner_info, target_fields, insertion_fields)
                 
                 if key_field:
-                    # Build UPDATE query with CTE
+
                     set_clauses = []
                     for field in target_fields:
-                        if field != key_field and field in insertion_fields:  # FIXED: Check against insertion_fields
+                        if field != key_field and field in insertion_fields:
                             set_clauses.append(f"{field} = joined_data.{field}")
                     
                     if set_clauses:
@@ -619,7 +619,7 @@ class SQLGenerator:
                         WHERE {target_table}.{key_field} = joined_data.{key_field}
                         """
                     else:
-                        # If no fields to update, just return the joined data
+
                         query = f"""
                         {views_sql}
                         
@@ -629,7 +629,7 @@ class SQLGenerator:
                         {where_clause}
                         """
                 else:
-                    # If no key field identified, just return the joined data
+
                     query = f"""
                     {views_sql}
                     
@@ -639,7 +639,7 @@ class SQLGenerator:
                     {where_clause}
                     """
         else:
-            # No views needed, just build a regular query
+
             if operation_type == "INSERT":
                 query = self.sql_templates["insert"].format(
                     target_table=target_table,
@@ -649,7 +649,7 @@ class SQLGenerator:
                     where_clause=where_clause
                 )
             else:
-                # Fallback to SELECT query
+
                 query = f"""
                 SELECT {', '.join(select_fields)}
                 FROM {main_table} {main_alias}
@@ -668,22 +668,22 @@ class SQLGenerator:
         Returns:
         Tuple[str, Dict]: The generated SQL query and parameterized values
         """
-        # Extract necessary information
+
         source_tables = planner_info.get("source_table_name", [])
-        insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields (though for validation this might include all relevant fields)
+        insertion_fields = planner_info.get("insertion_fields", [])
         target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
         target_fields = planner_info.get("target_sap_fields", [])
         validation_rules = planner_info.get("validation_rules", [])
         
-        # Handle missing or empty values
+
         if not source_tables or not target_table or not validation_rules:
             logger.error("Missing essential information for VALIDATION operation")
             return "", {}
         
-        # Use the first source table if multiple are provided
+
         source_table = source_tables[0]
         
-        # Build CASE expressions for each validation rule
+
         case_expressions = []
         params = {}
         
@@ -699,22 +699,22 @@ class SQLGenerator:
             if case_expression:
                 case_expressions.append(case_expression)
         
-        # Create validation query
+
         select_fields = []
         
-        # Add validation result fields
+
         for i, case_expr in enumerate(case_expressions):
             select_fields.append(f"{case_expr} AS validation_result_{i+1}")
         
-        # Add original fields (use insertion_fields if available, otherwise fall back to available fields)
+
         if insertion_fields:
             select_fields.extend([f"{field}" for field in insertion_fields])
         else:
-            # For validation, we might need to show the fields being validated
+
             validation_fields = [rule.get("field") for rule in validation_rules if rule.get("field")]
             select_fields.extend([f"{field}" for field in validation_fields if field])
         
-        # Build the SQL query
+
         query = f"""
         SELECT {', '.join(select_fields)}
         FROM {source_table}
@@ -731,9 +731,9 @@ class SQLGenerator:
         Returns:
         Tuple[str, Dict]: The generated SQL query and parameterized values
         """
-        # Extract necessary information
+
         source_tables = planner_info.get("source_table_name", [])
-        insertion_fields = planner_info.get("insertion_fields", [])  # FIXED: Use insertion_fields
+        insertion_fields = planner_info.get("insertion_fields", [])
         target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
         target_fields = planner_info.get("target_sap_fields", [])
         group_by_fields = planner_info.get("group_by_fields", [])
@@ -741,15 +741,15 @@ class SQLGenerator:
         filtering_fields = planner_info.get("filtering_fields", [])
         conditions = planner_info.get("extracted_conditions", {})
         
-        # Handle missing or empty values
+
         if not source_tables or not aggregation_functions:
             logger.error("Missing essential information for AGGREGATION operation")
             return "", {}
         
-        # Use the first source table if multiple are provided
+
         source_table = source_tables[0]
         
-        # Build the aggregation functions
+
         agg_expressions = []
         
         for agg in aggregation_functions:
@@ -760,7 +760,7 @@ class SQLGenerator:
             if not field or not function:
                 continue
                 
-            # Map function name to SQL aggregation function
+
             if function == "sum":
                 agg_expr = f"SUM({field})"
             elif function == "count":
@@ -772,10 +772,10 @@ class SQLGenerator:
             elif function == "max":
                 agg_expr = f"MAX({field})"
             else:
-                # Unknown function, use as-is
+
                 agg_expr = f"{function}({field})"
             
-            # Add alias if provided
+
             if alias:
                 agg_expr += f" AS {alias}"
             else:
@@ -783,12 +783,12 @@ class SQLGenerator:
             
             agg_expressions.append(agg_expr)
         
-        # Build WHERE clause using filtering_fields only
+
         where_clause, params = self._build_where_clause(filtering_fields, conditions)
         
-        # Generate the SQL query
+
         if group_by_fields:
-            # With GROUP BY
+
             query = self.sql_templates["aggregation"].format(
                 group_fields=", ".join(group_by_fields),
                 agg_separator=", " if group_by_fields and agg_expressions else "",
@@ -797,7 +797,7 @@ class SQLGenerator:
                 where_clause=where_clause
             )
         else:
-            # Without GROUP BY (aggregate entire table)
+
             query = f"""
             SELECT {', '.join(agg_expressions)}
             FROM {source_table}
@@ -816,19 +816,19 @@ class SQLGenerator:
         Returns:
         str: "INSERT" or "UPDATE"
         """
-        # Check if target is empty or if this is a first-time operation
+
         target_data_samples = planner_info.get("target_data_samples", {})
         
         if isinstance(target_data_samples, pd.DataFrame) and target_data_samples.empty:
             return "INSERT"
         
-        # Check if the restructured query suggests an INSERT
+
         query_text = planner_info.get("restructured_query", "").lower()
         
         if any(term in query_text for term in ["insert", "add", "create", "new"]):
             return "INSERT"
         
-        # Default to UPDATE for existing data
+
         return "UPDATE"
     
     def _build_where_clause(self, 
@@ -859,7 +859,7 @@ class SQLGenerator:
                 
                 field_ref = field_mapping.get(field, field) if field_mapping else field
                 
-                # Handle different condition types
+
                 if isinstance(value, list):
                     placeholders = [f":param_{i}_{j}" for j in range(len(value))]
                     where_parts.append(f"{field_ref} IN ({', '.join(placeholders)})")
@@ -878,7 +878,7 @@ class SQLGenerator:
     def _build_insert_query(self, 
                            source_table: str, 
                            target_table: str,
-                           insertion_fields: List[str],  # FIXED: Parameter name changed
+                           insertion_fields: List[str],
                            target_fields: List[str],
                            filtering_fields: List[str],
                            conditions: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
@@ -896,20 +896,20 @@ class SQLGenerator:
         Returns:
         Tuple[str, Dict[str, Any]]: INSERT query and parameters
         """
-        # Build field mappings using ONLY insertion_fields
+
         field_mapping = {}
         select_fields = []
         
         for target_field in target_fields:
-            # Find corresponding insertion field
-            source_field = target_field  # Default to same name
+
+            source_field = target_field
             
-            # Try to find in insertion fields
+
             if target_field in insertion_fields:
                 field_mapping[target_field] = target_field
                 select_fields.append(target_field)
             else:
-                # Check if any insertion field might match
+
                 potential_matches = [f for f in insertion_fields if 
                                      f.lower() == target_field.lower() or
                                      target_field.lower() in f.lower() or
@@ -920,13 +920,13 @@ class SQLGenerator:
                     field_mapping[target_field] = source_field
                     select_fields.append(f"{source_field} AS {target_field}")
                 else:
-                    # Use NULL as placeholder
+
                     select_fields.append(f"NULL AS {target_field}")
         
-        # Build WHERE clause using filtering_fields ONLY
+
         where_clause, params = self._build_where_clause(filtering_fields, conditions)
         
-        # Build INSERT query
+
         query = self.sql_templates["insert"].format(
             target_table=target_table,
             target_fields=", ".join(target_fields),
@@ -940,7 +940,7 @@ class SQLGenerator:
     def _build_update_query(self, 
                            source_table: str, 
                            target_table: str,
-                           insertion_fields: List[str],  # FIXED: Parameter name changed
+                           insertion_fields: List[str],
                            target_fields: List[str],
                            filtering_fields: List[str],
                            conditions: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
@@ -958,10 +958,10 @@ class SQLGenerator:
         Returns:
         Tuple[str, Dict[str, Any]]: UPDATE query and parameters
         """
-        # Need to identify key field for joining source and target
+
         key_field = None
         
-        # Try to find key field from insertion_fields that might be in target_fields
+
         for field in insertion_fields:
             if field in target_fields:
                 key_field = field
@@ -975,7 +975,7 @@ class SQLGenerator:
             logger.error("Cannot build UPDATE query without key field")
             return "", {}
         
-        # Build the UPDATE with subquery approach using ONLY insertion_fields
+
         set_clauses = []
         for field in target_fields:
             if field != key_field and field in insertion_fields:
@@ -985,10 +985,10 @@ class SQLGenerator:
             logger.warning("No fields to update in UPDATE query")
             return "", {}
         
-        # Build WHERE clause for source table using filtering_fields ONLY
+
         where_clause, params = self._build_where_clause(filtering_fields, conditions)
         
-        # Build the UPDATE query using ONLY insertion_fields
+
         query = f"""
         UPDATE {target_table}
         SET {', '.join(set_clauses)}
@@ -1021,13 +1021,13 @@ class SQLGenerator:
         Returns:
         str: CASE expression for validation
         """
-        # Build a CASE expression based on rule type
+
         if rule_type == "not_null":
             return f"CASE WHEN {field} IS NULL THEN 'Invalid: Null value' ELSE 'Valid' END"
             
         elif rule_type == "unique":
-            # Uniqueness is hard to check in a single query
-            # Would need a correlated subquery or window function
+
+
             return f"CASE WHEN {field} IS NULL THEN 'Invalid: Null value' ELSE 'Valid (uniqueness to be verified)' END"
             
         elif rule_type == "range":
@@ -1058,11 +1058,11 @@ class SQLGenerator:
             
             if pattern:
                 params[pattern_param] = pattern
-                # Note: Regex syntax varies by database engine
+
                 if self.db_dialect == "sqlite":
                     return f"CASE WHEN {field} NOT REGEXP :{pattern_param} THEN 'Invalid: Pattern mismatch' ELSE 'Valid' END"
                 else:
-                    # Generic fallback
+
                     return f"CASE WHEN {field} NOT LIKE :{pattern_param} THEN 'Invalid: Pattern mismatch' ELSE 'Valid' END"
             else:
                 return f"'Valid'"
@@ -1072,7 +1072,7 @@ class SQLGenerator:
             ref_field = parameters.get("reference_field")
             
             if ref_table and ref_field:
-                # This uses a correlated subquery
+
                 return f"""CASE WHEN NOT EXISTS (
                     SELECT 1 FROM {ref_table} 
                     WHERE {ref_field} = {field}
@@ -1080,7 +1080,7 @@ class SQLGenerator:
             else:
                 return f"'Valid'"
         
-        # Default case for unknown rule type
+
         return f"'Unknown validation rule: {rule_type}'"
     
     def _find_common_fields(self, table1: str, table2: str) -> List[str]:
@@ -1094,21 +1094,21 @@ class SQLGenerator:
         Returns:
         List[str]: List of common fields
         """
-        # This is a placeholder implementation
-        # In a real implementation, this would query the database schema
+
+
         
-        # Common SAP key fields that might be used for joins
+
         common_key_fields = [
-            "MATNR",  # Material Number
-            "MANDT",  # Client
-            "KUNNR",  # Customer Number
-            "LIFNR",  # Vendor Number
-            "WERKS",  # Plant
-            "LGORT",  # Storage Location
-            "BUKRS",  # Company Code
+            "MATNR",
+            "MANDT",
+            "KUNNR",
+            "LIFNR",
+            "WERKS",
+            "LGORT",
+            "BUKRS",
         ]
         
-        # Return common fields based on SAP table naming conventions
+
         if table1 == "MARA" and table2 == "MAKT":
             return ["MATNR", "MANDT"]
         elif table1 == "MARA" and table2 == "MARC":
@@ -1118,10 +1118,10 @@ class SQLGenerator:
         elif table1 == "MARC" and table2 == "MARA":
             return ["MATNR", "MANDT"]
         
-        # Default to common SAP key fields
+
         return common_key_fields
     
-    def _get_key_field(self, planner_info: Dict[str, Any], target_fields: List[str], insertion_fields: List[str]) -> Optional[str]:  # FIXED: Parameter name
+    def _get_key_field(self, planner_info: Dict[str, Any], target_fields: List[str], insertion_fields: List[str]) -> Optional[str]:
         """
         Get the key field for the operation
         
@@ -1133,7 +1133,7 @@ class SQLGenerator:
         Returns:
         Optional[str]: Key field or None if not found
         """
-        # Try to get key field from mapping
+
         key_mapping = planner_info.get("key_mapping", [])
         if key_mapping and isinstance(key_mapping, list):
             for mapping in key_mapping:
@@ -1142,17 +1142,17 @@ class SQLGenerator:
                 elif isinstance(mapping, str):
                     return mapping
         
-        # Try to find a field that's in both target and insertion fields
+
         common_fields = [f for f in target_fields if f in insertion_fields]
         if common_fields:
-            # Priority to fields that are likely keys based on naming
+
             key_indicators = ["MATNR", "ID", "KEY", "NR", "CODE", "NUM"]
             for indicator in key_indicators:
                 for field in common_fields:
                     if indicator in field.upper():
                         return field
             
-            # If no priority field found, return the first common field
+
             return common_fields[0]
         
         return None
@@ -1171,21 +1171,21 @@ class SQLGenerator:
         tuple: (fixed_query, params, success_status)
         """
         try:
-            # If the query is already valid, return it
+
             if self._is_valid_sqlite_query(sql_query):
                 return sql_query, sql_params, True
                 
             
-            # First, analyze the query for issues
+
             analysis = self._analyze_sqlite_query(sql_query, planner_info)
             
             best_query = sql_query
             best_params = sql_params
             
-            # Make up to max_attempts to fix the query
+
             for attempt in range(max_attempts):
                 
-                # Generate fixed query based on analysis and previous attempts
+
                 fixed_query, fixed_params = self._fix_sqlite_query(
                     best_query, 
                     sql_params, 
@@ -1194,20 +1194,20 @@ class SQLGenerator:
                     attempt
                 )
                 
-                # If the fixed query is valid, return it
+
                 if self._is_valid_sqlite_query(fixed_query):
                     return fixed_query, fixed_params, True
                     
-                # Check if this fixed query is better than the previous best
+
                 if self._compare_query_quality(fixed_query, best_query, planner_info):
                     best_query = fixed_query
                     best_params = fixed_params
                     
-                # Update analysis for next attempt
+
                 if attempt < max_attempts - 1:
                     analysis = self._analyze_sqlite_query(fixed_query, planner_info)
                     
-            # Return the best query we found, even if it's not perfect
+
             logger.warning(f"Could not generate a perfectly valid query after {max_attempts} attempts")
             return best_query, best_params, False
                 
@@ -1227,7 +1227,7 @@ class SQLGenerator:
         str: Analysis of the query issues
         """
         try:
-            # Create comprehensive prompt for analysis
+
             prompt = f"""
     You are an expert SQLite database engineer. Analyze the following SQL query for SQLite compatibility issues and other problems.
 
@@ -1257,7 +1257,7 @@ class SQLGenerator:
     Your analysis should be in a structured format with clear categories of issues.
     """
 
-            # Call the LLM for analysis
+
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
                 model="gemini-2.5-flash-preview-04-17", 
@@ -1265,7 +1265,7 @@ class SQLGenerator:
                 config=types.GenerateContentConfig(temperature=0.1)
             )
             
-            # Extract and return the analysis
+
             if response and hasattr(response, "text"):
                 return response.text.strip()
             else:
@@ -1290,7 +1290,7 @@ class SQLGenerator:
         tuple: (fixed_query, fixed_params)
         """
         try:
-            # Create comprehensive prompt for fixing
+
             prompt = f"""
     You are an expert SQLite database engineer. Fix the following SQL query based on the analysis.
 
@@ -1346,7 +1346,7 @@ class SQLGenerator:
        - SQLite has no BOOLEAN type (use INTEGER 0/1)
     """
 
-            # Call the LLM for fixing
+
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
                 model="gemini-2.5-flash-preview-04-17", 
@@ -1354,11 +1354,11 @@ class SQLGenerator:
                 config=types.GenerateContentConfig(temperature=0.2)
             )
             
-            # Extract the fixed query
+
             if response and hasattr(response, "text"):
                 fixed_query = response.text.strip()
                 
-                # Remove markdown code blocks if present
+
                 import re
                 sql_match = re.search(r"```(?:sqlite|sql)\s*(.*?)\s*```", fixed_query, re.DOTALL)
                 if sql_match:
@@ -1387,11 +1387,11 @@ class SQLGenerator:
         bool: True if valid, False otherwise
         """
         try:
-            # Perform basic validation
+
             if not sql_query or len(sql_query) < 10:
                 return False
                 
-            # Check for basic SQL keywords
+
             sql_upper = sql_query.upper()
             has_select = "SELECT" in sql_upper
             has_insert = "INSERT" in sql_upper
@@ -1401,14 +1401,14 @@ class SQLGenerator:
             if not (has_select or has_insert or has_update or has_create):
                 return False
                 
-            # Check for obvious SQLite incompatible syntax
+
             if "RIGHT JOIN" in sql_upper or "FULL JOIN" in sql_upper:
                 return False
                 
-            if "ISNULL" in sql_upper:  # Should be IFNULL in SQLite
+            if "ISNULL" in sql_upper:
                 return False
                 
-            # More advanced checks could be added
+
             
             return True
         except Exception as e:
@@ -1428,18 +1428,18 @@ class SQLGenerator:
         bool: True if new query is better, False otherwise
         """
         try:
-            # Basic validation
+
             if not new_query:
                 return False
             
             if not old_query:
                 return True
                 
-            # If old query isn't valid but new one is
+
             if not self._is_valid_sqlite_query(old_query) and self._is_valid_sqlite_query(new_query):
                 return True
                 
-            # Check for improvement in including required fields
+
             insertion_fields = planner_info.get("insertion_fields", [])
             target_fields = planner_info.get("target_sap_fields", [])
             filtering_fields = planner_info.get("filtering_fields", [])
@@ -1450,8 +1450,8 @@ class SQLGenerator:
             new_target_count = sum(1 for field in target_fields if field in new_query)
             old_target_count = sum(1 for field in target_fields if field in old_query)
             
-            # Check if filtering fields are incorrectly included in INSERT/UPDATE lists
-            # This is bad and should be penalized
+
+
             new_has_filter_in_insert = any(
                 f"INSERT INTO" in new_query.upper() and field in new_query 
                 for field in filtering_fields
@@ -1470,19 +1470,19 @@ class SQLGenerator:
                 for field in filtering_fields
             )
             
-            # If new query doesn't have filtering fields in INSERT/UPDATE but old one does
+
             if not (new_has_filter_in_insert or new_has_filter_in_update) and (old_has_filter_in_insert or old_has_filter_in_update):
                 return True
                 
-            # If new query includes more insertion fields
+
             if new_insertion_count > old_insertion_count:
                 return True
                 
-            # If new query includes more target fields
+
             if new_target_count > old_target_count:
                 return True
                 
-            # Check for specific SQLite patterns
+
             sqlite_patterns = ["IFNULL", "CASE WHEN", "COALESCE", "GROUP BY", "LEFT JOIN"]
             sqlite_score_new = sum(1 for pattern in sqlite_patterns if pattern.upper() in new_query.upper())
             sqlite_score_old = sum(1 for pattern in sqlite_patterns if pattern.upper() in old_query.upper())
@@ -1490,7 +1490,7 @@ class SQLGenerator:
             if sqlite_score_new > sqlite_score_old:
                 return True
                 
-            # Default to keeping the old query
+
             return False
         except Exception as e:
             logger.error(f"Error in _compare_query_quality: {e}")
