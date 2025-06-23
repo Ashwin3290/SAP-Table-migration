@@ -362,6 +362,10 @@ def is_phone(phone: str) -> bool:
     except Exception:
         return False
 
+#yyyymmdd
+def to_date(date_str : str):
+    return date_str[0:4] + '-' + date_str[4:6] + '-' + date_str[6:8]
+
 def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
     """
     Add all custom utility functions to a SQLite connection
@@ -425,7 +429,10 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
         conn.create_function("is_numeric", 1, is_numeric)
         conn.create_function("is_email", 1, is_email)
         conn.create_function("is_phone", 1, is_phone)
-        functions_added += 3        
+        functions_added += 3     
+        
+        conn.create_function("to_date", 1, to_date)
+        functions_added += 1
         return True
         
     except Exception as e:

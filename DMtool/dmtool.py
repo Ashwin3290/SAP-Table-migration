@@ -102,6 +102,7 @@ class QueryTemplateRepository:
 
     INSTRUCTIONS:
     Analyze the user query and determine which template pattern best matches the intent and structure.
+    Properly understand what the template is performing for and how it relates to the query.
 
     Consider:
     - Query operations (bring, add, delete, update, check, join, etc.)
@@ -111,6 +112,7 @@ class QueryTemplateRepository:
     - Transformations (date formatting, string operations, etc.)
 
     Respond with ONLY the template ID (nothing else).
+
 
     Examples:
     - "Bring Material Number from MARA where Material Type = ROH" → simple_filter_transformation
@@ -427,7 +429,7 @@ class DMTool:
                 target_has_data = True
             
 
-            
+            print(source_fields)
 
             prompt = f"""
     You are an expert SQLite database engineer focused on data transformation. I need you to create a step-by-step plan to generate 
@@ -448,6 +450,8 @@ class DMTool:
 
     Use this Template for the SQLite generation plan:
     {template["plan"]}
+
+    Properly understand how data is given in the source table and given the data how to transform it.
 
     Note:
     Tables with t_[number] like t_24 are target tables , these can act as both source and target tables.
@@ -568,6 +572,7 @@ class DMTool:
             
 
             template = self.query_template_repo.find_matching_template(query)
+            logger.info(f"Found template: {template.get('id', 'None')} for query '{query}'")
             if not template:
                 logger.error("No matching template found for query")
 
@@ -657,8 +662,7 @@ class DMTool:
                         except Exception as e:
                             logger.warning(f"Could not save transformation record for multi-query: {e}")
                     
-                    return multi_result
-
+                    return multi_result[0], session_id
 
                 if "target_table_name" in resolved_data:
                     target_table = resolved_data["target_table_name"]
