@@ -1,9 +1,10 @@
-from dmtool import DMTool
+from DMtool.dmtool import DMTool
 
 dm_tool = DMTool()
 
 query = """
-Add a new column into the target table with column name "LIQDT_Day" and find the Day(Monday , Tuesday , ......) of the date present in the LIQDT field of target table and update in LIQDT_Day field
+
+Add a new column into the target table with column name "LIQDT_Day" and find the Day of the week (Monday , Tuesday , ......) of the date present in the LIQDT field of target table and update in LIQDT_Day field
 """
 result, session_id = dm_tool.process_sequential_query(
     query,

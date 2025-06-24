@@ -16,7 +16,6 @@ from DMtool.planner import (
     validate_sql_identifier,
     APIError)
 from DMtool.planner import ContextualSessionManager
-# Import the new SQLite modules
 from DMtool.generator import SQLGenerator
 from DMtool.executor import SQLExecutor
 from DMtool.logging_config import setup_logging
@@ -34,14 +33,6 @@ class CodeGenerationError(Exception):
 class ExecutionError(Exception):
     """Exception raised for code execution errors."""
     pass
-
-import os
-import json
-import logging
-import spacy
-import re
-from typing import Dict, List, Any, Optional
-
 
 class QueryTemplateRepository:
     """Repository of query templates for common transformation patterns"""
@@ -91,17 +82,17 @@ class QueryTemplateRepository:
         dict: The best matching template or None if no good match
         """
         try:
-            # Check if we have templates and LLM client
+
             if not self.templates:
                 logger.warning("No templates available")
                 return None
             
-            # Extract template prompts for LLM matching
+
             template_options = []
             for i, template in enumerate(self.templates):
                 template_options.append(f"{i+1}. ID: {template['id']}\n   Pattern: {template['prompt']}")
             
-            # Create LLM prompt for template matching
+
             llm_prompt = f"""You are an expert at matching user queries to data transformation templates.
 
     USER QUERY: "{query}"
@@ -111,6 +102,7 @@ class QueryTemplateRepository:
 
     INSTRUCTIONS:
     Analyze the user query and determine which template pattern best matches the intent and structure.
+    Properly understand what the template is performing for and how it relates to the query.
 
     Consider:
     - Query operations (bring, add, delete, update, check, join, etc.)
@@ -121,6 +113,7 @@ class QueryTemplateRepository:
 
     Respond with ONLY the template ID (nothing else).
 
+
     Examples:
     - "Bring Material Number from MARA where Material Type = ROH" → simple_filter_transformation
     - "If Plant is 1000 then 'Domestic' else 'International'" → conditional_value_assignment  
@@ -130,7 +123,7 @@ class QueryTemplateRepository:
     Template ID:"""
 
             try:
-                # Call LLM (assuming Gemini client is available as self.client)
+
                 from google.genai import types
                 
                 response = self.client.models.generate_content(
@@ -140,10 +133,10 @@ class QueryTemplateRepository:
                 )
                 
                 if response and hasattr(response, "text"):
-                    # Extract template ID from response
+
                     template_id = response.text.strip().strip('"').strip("'").lower()
                     
-                    # Find the matching template
+
                     best_match = None
                     for template in self.templates:
                         if template['id'].lower() == template_id:
@@ -154,7 +147,7 @@ class QueryTemplateRepository:
                         return best_match
                     else:
                         logger.warning(f"Template ID '{template_id}' not found in available templates")
-                        # Try partial matching as fallback
+
                         for template in self.templates:
                             if template_id in template['id'].lower() or template['id'].lower() in template_id:
                                 return template
@@ -172,13 +165,112 @@ class QueryTemplateRepository:
             logger.error(f"Error finding matching template: {e}")
             return None    
 
+class ErrorRecoveryManager:
+    """Manages error analysis and targeted retry logic"""
+    
+    def __init__(self):
+        self.max_retries = 2
+        self.retry_history = {}
+    
+    def analyze_error_stage(self, error_result: Dict[str, Any], sql_query: str = None) -> str:
+        """
+        Analyze where the error occurred and determine retry stage
+        
+        Returns:
+        - "PLANNER" - Retry from query classification/planning
+        - "GENERATOR" - Retry from SQL generation only  
+        - "EXECUTOR" - Retry execution with fixes
+        - "FATAL" - Cannot recover
+        """
+        
+        if not isinstance(error_result, dict) or "error_type" not in error_result:
+            return "FATAL"
+        
+        error_type = error_result.get("error_type", "")
+        error_message = error_result.get("error_message", "").lower()
+        
+        # Database/Table/Column issues - retry from PLANNER (re-analyze query)
+        if any(indicator in error_message for indicator in [
+            "no such table", "table does not exist", "no such column", 
+            "column not found", "invalid table", "table not found"
+        ]):
+            return "PLANNER"
+        
+        # SQL Syntax issues - retry from GENERATOR (regenerate SQL)
+        if any(indicator in error_message for indicator in [
+            "syntax error", "near", "unexpected token", "sql error",
+            "invalid sql", "parse error", "malformed"
+        ]):
+            return "GENERATOR"
+        
+        # Execution/Runtime issues - retry EXECUTOR with fixes
+        if any(indicator in error_message for indicator in [
+            "connection", "timeout", "lock", "busy", "constraint"
+        ]):
+            return "EXECUTOR"
+        
+        # Variable/Code issues - retry from GENERATOR
+        if any(indicator in error_message for indicator in [
+            "nonetype", "not iterable", "attribute error", "key error"
+        ]):
+            return "GENERATOR"
+        
+        return "FATAL"
+    
+    def create_retry_prompt_addition(self, stage: str, error_result: Dict[str, Any], 
+                                   attempt_number: int) -> str:
+        """Create additional prompt context for retry attempts"""
+        
+        error_msg = error_result.get("error_message", "")
+        
+        if stage == "PLANNER":
+            return f"""
+RETRY ATTEMPT #{attempt_number} - QUERY ANALYSIS CORRECTION:
+Previous attempt failed with error: {error_msg}
+
+SPECIFIC INSTRUCTIONS FOR THIS RETRY:
+- Double-check all table names exist in the database schema
+- Verify all mentioned columns are available in their respective tables  
+- Use only validated table and column names from the enhanced matching results
+- If tables/columns don't exist, suggest alternatives or indicate data unavailability
+- Pay extra attention to table name formatting (no spaces, correct suffixes)
+"""
+        
+        elif stage == "GENERATOR":
+            return f"""
+RETRY ATTEMPT #{attempt_number} - SQL GENERATION CORRECTION:
+Previous SQL generation failed with error: {error_msg}
+
+SPECIFIC INSTRUCTIONS FOR THIS RETRY:
+- Generate simpler, more conservative SQL syntax
+- Avoid complex joins if column validation shows issues
+- Use proper SQLite syntax (no RIGHT JOIN, use IFNULL not ISNULL)
+- Quote table names with spaces using double quotes
+- For DDL operations (ALTER/DROP), don't try to fetch results
+- Validate column existence before including in SELECT/UPDATE clauses
+"""
+        
+        elif stage == "EXECUTOR":
+            return f"""
+RETRY ATTEMPT #{attempt_number} - EXECUTION OPTIMIZATION:
+Previous execution failed with error: {error_msg}
+
+SPECIFIC INSTRUCTIONS FOR THIS RETRY:
+- Generate more robust SQL with better error handling
+- Add NULL checks and COALESCE where appropriate
+- Use simpler table aliases and join conditions
+- Avoid operations on non-existent or empty tables
+"""
+        
+        return ""
+
 class DMTool:
     """SQLite-based DMTool for optimized data transformations using direct SQLite queries"""
 
     def __init__(self, DB_PATH=os.environ.get('DB_PATH')):
         """Initialize the DMToolSQL instance"""
         try:
-            # Configure Gemini
+
             api_key = os.environ.get("GEMINI_API_KEY")
             if not api_key:
                 logger.error("GEMINI_API_KEY not found in environment variables")
@@ -186,12 +278,12 @@ class DMTool:
 
             self.client = genai.Client(api_key=api_key)
  
-            # Initialize SQLite components
+
             self.sql_generator = SQLGenerator()
             self.sql_executor = SQLExecutor()
             self.query_template_repo = QueryTemplateRepository()
 
-            # Current session context
+
             self.current_context = None
 
             logger.info("DMToolSQL initialized successfully")
@@ -202,8 +294,8 @@ class DMTool:
     def __del__(self):
         """Cleanup resources"""
         try:
-            # Nothing specific to close with SQLite executor as it creates/closes
-            # connections per request, not maintaining persistent connections
+
+
             logger.info(f"DMToolSQL cleanup complete")
         except Exception as e:
             logger.error(f"Error during DMToolSQL cleanup: {e}")
@@ -214,32 +306,32 @@ class DMTool:
         to make it easily accessible in SQLite generation
         """
         try:
-            # Validate input
+
             if not resolved_data:
                 logger.error("No resolved data provided to _extract_planner_info")
                 raise ValueError("No resolved data provided")
 
-            # Create a comprehensive context object
+
             planner_info = {
-                # Table information
+
                 "source_table_name": resolved_data.get("source_table_name", []),
                 "target_table_name": resolved_data.get("target_table_name", []),
-                # Field information
+
                 "source_field_names": resolved_data.get("source_field_names", []),
                 "target_sap_fields": resolved_data.get("target_sap_fields", []),
                 "filtering_fields": resolved_data.get("filtering_fields", []),
                 "insertion_fields": resolved_data.get("insertion_fields", []),
-                # Query understanding
+
                 "original_query": resolved_data.get("original_query", ""),
                 "restructured_query": resolved_data.get("Resolved_query", ""),
-                # Session information
+
                 "session_id": resolved_data.get("session_id", ""),
                 "key_mapping": resolved_data.get("key_mapping", []),
-                # Query type
+
                 "query_type": resolved_data.get("query_type", "SIMPLE_TRANSFORMATION"),
             }
             
-            # Additional information for different query types
+
             if planner_info["query_type"] == "JOIN_OPERATION":
                 planner_info["join_conditions"] = resolved_data.get("join_conditions", [])
             elif planner_info["query_type"] == "CROSS_SEGMENT":
@@ -251,41 +343,41 @@ class DMTool:
                 planner_info["aggregation_functions"] = resolved_data.get("aggregation_functions", [])
                 planner_info["group_by_fields"] = resolved_data.get("group_by_fields", [])
 
-            # Extract specific filtering conditions from the restructured query
+
             query_text = planner_info["restructured_query"]
             conditions = {}
 
-            # Only attempt to extract conditions if we have a query
+
             if query_text:
-                # Look for common filter patterns
+
                 for field in planner_info["filtering_fields"]:
-                    # Equality check
+
                     pattern = f"{field}\\s*=\\s*['\"](.*?)['\"]"
                     matches = re.findall(pattern, query_text)
                     if matches:
                         conditions[field] = matches[0]
                     
-                    # Check for IN conditions
+
                     pattern = f"{field}\\s+in\\s+\\(([^)]+)\\)"
                     matches = re.findall(pattern, query_text, re.IGNORECASE)
                     if matches:
-                        # Parse the values in the parentheses
+
                         values_str = matches[0]
                         values = [v.strip().strip("'\"") for v in values_str.split(",")]
                         conditions[field] = values
 
-            # Add specific conditions
+
             planner_info["extracted_conditions"] = conditions
             
-            # Add data samples for target table validation
+
             planner_info["target_data_samples"] = resolved_data.get("target_data_samples", {})
 
-            # Store context for use in SQLite generation
+
             self.current_context = planner_info
             return planner_info
         except Exception as e:
             logger.error(f"Error in _extract_planner_info: {e}")
-            # Return a minimal valid context to prevent further errors
+
             minimal_context = {
                 "source_table_name": (
                     resolved_data.get("source_table_name", []) if resolved_data else []
@@ -320,7 +412,7 @@ class DMTool:
         str: Step-by-step SQLite generation plan
         """
         try:
-            # Extract key information for the prompt
+
             query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
             source_tables = planner_info.get("source_table_name", [])
             source_fields = planner_info.get("source_field_names", [])
@@ -330,15 +422,15 @@ class DMTool:
             conditions = planner_info.get("extracted_conditions", {})
             key_mapping = planner_info.get("key_mapping", [])
             
-            # Check if target table has data (for UPDATE vs INSERT decision)
+
             target_has_data = False
             target_data_samples = planner_info.get("target_data_samples", {})
             if isinstance(target_data_samples, pd.DataFrame) and not target_data_samples.isnull().all().all():
                 target_has_data = True
             
-            # Get information about segment references
-            
-            # Create a comprehensive prompt for the LLM
+
+            print(source_fields)
+
             prompt = f"""
     You are an expert SQLite database engineer focused on data transformation. I need you to create a step-by-step plan to generate 
     SQLite for the following natural language query:
@@ -358,6 +450,8 @@ class DMTool:
 
     Use this Template for the SQLite generation plan:
     {template["plan"]}
+
+    Properly understand how data is given in the source table and given the data how to transform it.
 
     Note:
     Tables with t_[number] like t_24 are target tables , these can act as both source and target tables.
@@ -390,12 +484,13 @@ class DMTool:
     11. DO NOT use Table alias.
     12. When the query refers to a previous segment or transformation, 
         we need to use the target table from that segment as a source table for this query
-
+    13. DO not DROP or CREATE any tables, just use the existing target table
+    14. When needing to delete a column, use ALTER TABLE to drop the column
     Format your response as a numbered list only, with no explanations or additional text.
     Each step should be clear, concise, and directly actionable for SQLite generation.
     """
             
-            # Call the LLM for planning
+
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
                 model="gemini-2.5-flash-preview-04-17", 
@@ -403,7 +498,7 @@ class DMTool:
                 config=types.GenerateContentConfig(temperature=0.2)
             )
             
-            # Extract and return the plan
+
             if response and hasattr(response, "text"):
                 logger.info(f"response text {response.text.strip()}")
                 return response.text.strip()
@@ -442,66 +537,67 @@ class DMTool:
         """
         conn = None
         try:
-            # Validate inputs
+
             if not query or not isinstance(query, str):
                 logger.error(f"Invalid query type: {type(query)}")
-                return None, "Query must be a non-empty string", session_id
+                return "Query must be a non-empty string", session_id
 
-            # Validate object/segment/project IDs
+
             if not all(isinstance(x, int) for x in [object_id, segment_id, project_id]):
                 logger.error(
                     f"Invalid ID types: object_id={type(object_id)}, segment_id={type(segment_id)}, project_id={type(project_id)}"
                 )
-                return None, "Invalid ID types - must be integers", session_id
+                return "Invalid ID types - must be integers", session_id
             
             context_manager = ContextualSessionManager()
 
-            # Create or get session ID
+
             if not session_id:
                 session_id = context_manager.create_session()
                 logger.info(f"Created new session: {session_id}")
                 
-            # Add source tables from referenced segments
+
             additional_source_tables = []
 
-            # 1. Process query with the planner - this stays the same
+
             logger.info(f"Processing query: {query}")
             resolved_data = process_query(
                 object_id, segment_id, project_id, query, session_id=session_id
             )
             
-            # FIX: Check if resolved_data is None before proceeding
+
             if not resolved_data:
                 logger.error("Failed to resolve query with planner")
-                return None, "Failed to resolve query", session_id
+                return "Failed to resolve query", session_id
             
-            # Find matching template
+
             template = self.query_template_repo.find_matching_template(query)
+            logger.info(f"Found template: {template.get('id', 'None')} for query '{query}'")
             if not template:
                 logger.error("No matching template found for query")
-                # Create a basic fallback template
+
                 template = {
                     "id": "fallback",
                     "prompt": "Basic transformation",
                     "query": "SELECT {field} FROM {table} WHERE {filter_field} = '{filter_value}'",
                     "plan": ["1. Identify source and target", "2. Generate basic SQL query"]
                 }
-            # Get query type from resolved data
+
             query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")
-            # Get session ID from the results
+
             session_id = resolved_data.get("session_id")
 
-            # Connect to database for sample data gathering
+
             try:
                 conn = sqlite3.connect(os.environ.get('DB_PATH'))
             except sqlite3.Error as e:
                 logger.error(f"Failed to connect to database: {e}")
-                return None, f"Database connection error: {e}", session_id
+                return f"Database connection error: {e}", session_id
 
             try:
                 resolved_data["original_query"] = query
                 
-                # Get target data samples for validation
+
                 try:
                     if "target_table_name" in resolved_data:
                         target_table = resolved_data["target_table_name"]
@@ -513,31 +609,31 @@ class DMTool:
                     logger.warning(f"Error getting target data samples: {e}")
                     resolved_data["target_data_samples"] = pd.DataFrame()
 
-                # Add additional source tables from segment references
+
                 if additional_source_tables:
                     source_tables = resolved_data.get("source_table_name", [])
                     if isinstance(source_tables, list):
-                        # Add only unique tables not already in the list
+
                         for table in additional_source_tables:
                             if table not in source_tables:
                                 source_tables.append(table)
                         resolved_data["source_table_name"] = source_tables
 
-                # Extract and organize planner information
+
                 planner_info = self._extract_planner_info(resolved_data)
                 
-                # Create detailed operational plan using LLM
+
                 sql_plan = self._create_operation_plan(query, planner_info, template)
                 
-                # 3. Generate SQLite query instead of Python code
+
                 sql_query, sql_params = self.sql_generator.generate_sql(sql_plan, planner_info, template)
-                
+                logger.info(f"Generated SQL query: {sql_query}")
                 result = self._execute_sql_query(sql_query, sql_params, planner_info)
 
-                # 5. Process the results
+
                 if isinstance(result, dict) and "error_type" in result:
                     logger.error(f"SQLite execution error: {result}")
-                    return None, f"SQLite execution failed: {result.get('error_message', 'Unknown error')}", session_id
+                    return f"SQLite execution failed: {result.get('error_message', 'Unknown error')}", session_id
 
                 if isinstance(result, dict) and result.get("multi_query_result"):
                     logger.info(f"Processing multi-query result: {result.get('completed_statements', 0)} statements completed")
@@ -566,9 +662,8 @@ class DMTool:
                         except Exception as e:
                             logger.warning(f"Could not save transformation record for multi-query: {e}")
                     
-                    return multi_result
+                    return multi_result[0], session_id
 
-                # 6. Register the target table for this segment
                 if "target_table_name" in resolved_data:
                     target_table = resolved_data["target_table_name"]
                     if isinstance(target_table, list) and len(target_table) > 0:
@@ -584,7 +679,7 @@ class DMTool:
                 try:
                     context_manager = ContextualSessionManager()
                     
-                    # Prepare transformation data
+
                     transformation_data = {
                         "original_query": query,
                         "generated_sql": sql_query,
@@ -609,16 +704,16 @@ class DMTool:
 
                 if target_table and query_type in ["SIMPLE_TRANSFORMATION", "JOIN_OPERATION", "CROSS_SEGMENT", "AGGREGATION_OPERATION"]:
                     try:
-                        # Get the full target table data to show actual results
+
                         select_query = f"SELECT * FROM {validate_sql_identifier(target_table)}"
                         target_data = self.sql_executor.execute_and_fetch_df(select_query)
                         
                         if isinstance(target_data, pd.DataFrame) and not target_data.empty:
-                            # Return the actual target table data
+
                             rows_affected = len(target_data)
                             non_null_columns = target_data.dropna(axis=1, how='all').columns.tolist()
                             
-                            # Add metadata to the DataFrame
+
                             target_data.attrs['transformation_summary'] = {
                                 'rows': rows_affected,
                                 'populated_fields': non_null_columns,
@@ -628,13 +723,13 @@ class DMTool:
                             
                             return  target_data, session_id
                         else:
-                            # Target table exists but is empty
+
                             empty_df = pd.DataFrame()
                             empty_df.attrs['message'] = f"Target table '{target_table}' is empty after transformation"
                             return  empty_df, session_id
                             
                     except Exception as e:
-                        # Fallback to execution result if can't fetch target data
+
                         return  result, session_id
                         
             except Exception as e:
@@ -642,7 +737,7 @@ class DMTool:
                 logger.error(traceback.format_exc())
                 if conn:
                     conn.close()
-                return None, f"An error occurred during processing: {e}", session_id
+                return f"An error occurred during processing: {e}", session_id
                         
 
         except Exception as e:
@@ -653,7 +748,7 @@ class DMTool:
                     conn.close()
                 except:
                     pass
-            return None, f"An error occurred: {e}", session_id
+            return f"An error occurred: {e}", session_id
 
     def _is_multi_statement_query(self, sql_query):
         """Detect if SQL contains multiple statements"""
@@ -675,54 +770,65 @@ class DMTool:
         Union[pd.DataFrame, dict]: Results or error information
         """
         
-        # NEW: Check if this is a multi-statement query
+
         if self._is_multi_statement_query(sql_query):
             logger.info("Detected multi-statement query, using multi-query executor")
             return self.sql_executor.execute_multi_statement_query(
-                sql_query, sql_params, planner_info.get("session_id"),context_manager=ContextualSessionManager()
+                sql_query, sql_params, context_manager=ContextualSessionManager(),session_id=planner_info.get("session_id")
             )
         
-        # Existing single statement logic
+
         query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
-        
+        operation_type = None
         if query_type == "SIMPLE_TRANSFORMATION":
-            # Determine if this is an INSERT or UPDATE operation
-            operation_type = sql_query.strip().upper().split()[0]
+
+            operation_type = None
+            try:
+                operation_type = sql_query.strip().upper().split()[0]
+            except:
+                if "AlTER TABLE" in sql_query.upper():
+                    operation_type = "ALTER"
+                elif sql_query.upper() in ["Drop","Delete"]:
+                    operation_type = "DELETE"
+                
             
             if operation_type == "INSERT":
-                # For inserts, we want to execute and not fetch results
                 return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
             elif operation_type == "UPDATE":
-                # For updates, execute and don't fetch results
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+            elif operation_type == "DELETE":
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+            elif operation_type == "ALTER":
                 return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
             elif operation_type == "WITH":
-                # This is likely a WITH clause followed by INSERT or UPDATE
                 if "INSERT INTO" in sql_query.upper():
                     return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
                 elif "UPDATE" in sql_query.upper():
                     return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
                 else:
-                    # Default to fetching results as DataFrame
+
                     return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
             else:
-                # Default to fetching results as DataFrame for SELECT statements
+
                 return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
+        elif not operation_type :
+            return self.sql_executor.execute_query(sql_query, sql_params,fetch_results=False)
         elif query_type in ["JOIN_OPERATION", "CROSS_SEGMENT"]:
-            # For join operations, we want the result as a DataFrame
+
             if "INSERT INTO" in sql_query.upper() or "UPDATE" in sql_query.upper():
-                # If this is a direct update/insert, execute without fetching
+
                 return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
             else:
-                # Otherwise, fetch as DataFrame
+
                 return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
         elif query_type == "VALIDATION_OPERATION":
-            # For validation operations, we want the results as a DataFrame
+
             return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
         elif query_type == "AGGREGATION_OPERATION":
-            # For aggregation operations, we want the results as a DataFrame
+
             return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
         else:
-            # Default to executing query and fetching results
+
             return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
             
     def _insert_dataframe_to_table(self, df, table_name):
@@ -737,16 +843,16 @@ class DMTool:
         bool: Success status
         """
         try:
-            # Sanitize table_name
+
             table_name = validate_sql_identifier(table_name)
             
-            # Connect directly to the database
+
             conn = sqlite3.connect(os.environ.get('DB_PATH'))
             
-            # Write the DataFrame to the table
+
             df.to_sql(table_name, conn, if_exists="replace", index=False)
             
-            # Close the connection
+
             conn.close()
             
             return True
@@ -758,17 +864,17 @@ class DMTool:
         """Handle results from multi-statement query execution"""
         
         if result.get("success"):
-            # All statements completed successfully
+
             target_table = planner_info["target_table_name"][0] if planner_info.get("target_table_name") else None
             
             if target_table:
-                # Get final state of target table
+
                 try:
                     select_query = f"SELECT * FROM {validate_sql_identifier(target_table)}"
                     target_data = self.sql_executor.execute_and_fetch_df(select_query)
                     
                     if isinstance(target_data, pd.DataFrame) and not target_data.empty:
-                        # Add metadata about the multi-step operation
+
                         target_data.attrs['transformation_summary'] = {
                             'rows': len(target_data),
                             'target_table': target_table,
@@ -778,25 +884,25 @@ class DMTool:
                         }
                         return target_data, session_id
                     else:
-                        # Target table exists but is empty
+
                         empty_df = pd.DataFrame()
                         empty_df.attrs['message'] = f"Multi-step operation completed. Target table '{target_table}' is empty after transformation"
                         return empty_df, session_id
                         
                 except Exception as e:
                     logger.warning(f"Could not fetch final target data after multi-query: {e}")
-                    # Return success indicator even if we can't fetch final data
+
                     success_df = pd.DataFrame({'status': ['Multi-step operation completed successfully']})
                     return success_df, session_id
             else:
-                # No target table specified, return success indicator
+
                 success_df = pd.DataFrame({'status': ['Multi-step operation completed successfully']})
                 return success_df, session_id
         
         else:
-            # Partial failure - return informative error message
+
             completed = result.get("completed_statements", 0)
-            total_statements = completed + 1  # At least one more failed
+            total_statements = completed + 1
             failed_statement = result.get("failed_statement", "")
             error_info = result.get("error", {})
             

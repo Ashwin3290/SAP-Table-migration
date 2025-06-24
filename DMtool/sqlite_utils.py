@@ -11,7 +11,7 @@ Usage:
     conn = sqlite3.connect('your_database.db')
     add_sqlite_functions(conn)
     
-    # Now you can use all custom functions in your queries
+
     cursor = conn.execute("SELECT regexp_replace(column, '[^a-zA-Z0-9 ]', '', 'g') FROM table")
 """
 
@@ -25,9 +25,9 @@ from typing import Optional, Union, Any
 
 logger = logging.getLogger(__name__)
 
-# =============================================================================
-# REGEX FUNCTIONS
-# =============================================================================
+
+
+
 
 def regexp_replace(string: str, pattern: str, replacement: str, flags: Optional[str] = None) -> str:
     """SQLite regexp_replace function implementation"""
@@ -111,9 +111,9 @@ def regexp_extract(pattern: str, string: str, group: int = 0, flags: Optional[st
         logger.warning(f"Error in regexp_extract: {e}")
         return None
 
-# =============================================================================
-# STRING FUNCTIONS
-# =============================================================================
+
+
+
 
 def split_string(string: str, delimiter: str = ',', index: Optional[int] = None) -> str:
     """Split string by delimiter and return specific index or all parts"""
@@ -186,9 +186,9 @@ def right_pad(string: str, length: int, pad_char: str = ' ') -> str:
         logger.warning(f"Error in right_pad: {e}")
         return str(string) if string is not None else ""
 
-# =============================================================================
-# MATHEMATICAL FUNCTIONS
-# =============================================================================
+
+
+
 
 def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
     """Safe division that returns default value for division by zero"""
@@ -231,9 +231,9 @@ def power_of(base: float, exponent: float) -> float:
         logger.warning(f"Error in power_of: {e}")
         return 0.0
 
-# =============================================================================
-# DATE/TIME FUNCTIONS
-# =============================================================================
+
+
+
 
 def date_add_days(date_str: str, days: int, format_str: str = '%Y-%m-%d') -> str:
     """Add days to a date string"""
@@ -286,9 +286,9 @@ def format_date(date_str: str, input_format: str = '%Y%m%d', output_format: str 
         logger.warning(f"Error in format_date: {e}")
         return str(date_str) if date_str is not None else ""
 
-# =============================================================================
-# JSON FUNCTIONS
-# =============================================================================
+
+
+
 
 def json_extract_value(json_str: str, key: str) -> str:
     """Extract value from JSON string by key"""
@@ -317,9 +317,9 @@ def is_valid_json(json_str: str) -> bool:
     except Exception:
         return False
 
-# =============================================================================
-# VALIDATION FUNCTIONS
-# =============================================================================
+
+
+
 
 def is_numeric(value: str) -> bool:
     """Check if string represents a numeric value"""
@@ -355,17 +355,16 @@ def is_phone(phone: str) -> bool:
             return False
         
         phone = str(phone).strip()
-        # Remove common separators
+
         clean_phone = re.sub(r'[^\d]', '', phone)
         
-        # Check if it's between 7 and 15 digits
         return 7 <= len(clean_phone) <= 15
     except Exception:
         return False
 
-# =============================================================================
-# MAIN FUNCTION TO REGISTER ALL UTILITIES
-# =============================================================================
+#yyyymmdd
+def to_date(date_str : str):
+    return date_str[0:4] + '-' + date_str[4:6] + '-' + date_str[6:8]
 
 def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
     """
@@ -380,7 +379,7 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
     try:
         functions_added = 0
         
-        # REGEX FUNCTIONS
+
         conn.create_function("regexp_replace", 3, lambda p, r, s: regexp_replace(p, r, s))
         conn.create_function("regexp_replace", 4, regexp_replace)
         conn.create_function("regexp", 2, lambda p, s: regexp_match(p, s))
@@ -392,7 +391,7 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
         conn.create_function("regexp_extract", 4, regexp_extract)
         functions_added += 9
         
-        # STRING FUNCTIONS
+
         conn.create_function("split_string", 2, lambda s, d: split_string(s, d))
         conn.create_function("split_string", 3, split_string)
         conn.create_function("proper_case", 1, proper_case)
@@ -403,7 +402,7 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
         conn.create_function("right_pad", 3, right_pad)
         functions_added += 7
         
-        # MATHEMATICAL FUNCTIONS
+
         conn.create_function("safe_divide", 2, lambda n, d: safe_divide(n, d))
         conn.create_function("safe_divide", 3, safe_divide)
         conn.create_function("percentage", 2, lambda p, w: percentage(p, w))
@@ -411,7 +410,7 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
         conn.create_function("power_of", 2, power_of)
         functions_added += 5
         
-        # DATE/TIME FUNCTIONS
+
         conn.create_function("date_add_days", 2, lambda d, n: date_add_days(d, n))
         conn.create_function("date_add_days", 3, date_add_days)
         conn.create_function("date_diff_days", 2, lambda d1, d2: date_diff_days(d1, d2))
@@ -421,20 +420,23 @@ def add_sqlite_functions(conn: sqlite3.Connection) -> bool:
         conn.create_function("format_date", 3, format_date)
         functions_added += 7
         
-        # JSON FUNCTIONS
+
         conn.create_function("json_extract_value", 2, json_extract_value)
         conn.create_function("is_valid_json", 1, is_valid_json)
         functions_added += 2
         
-        # VALIDATION FUNCTIONS
+
         conn.create_function("is_numeric", 1, is_numeric)
         conn.create_function("is_email", 1, is_email)
         conn.create_function("is_phone", 1, is_phone)
-        functions_added += 3        
+        functions_added += 3     
+        
+        conn.create_function("to_date", 1, to_date)
+        functions_added += 1
         return True
         
     except Exception as e:
-        logger.error(f"❌ Error adding custom functions to SQLite connection: {e}")
+        logger.error(f"Error adding custom functions to SQLite connection: {e}")
         return False
 
 def get_connection_with_functions(db_path: str) -> sqlite3.Connection:
@@ -451,112 +453,12 @@ def get_connection_with_functions(db_path: str) -> sqlite3.Connection:
         conn = sqlite3.connect(db_path)
         
         if add_sqlite_functions(conn):
-            logger.info(f"✅ Created SQLite connection with custom functions for: {db_path}")
+            logger.info(f"Created SQLite connection with custom functions for: {db_path}")
             return conn
         else:
-            logger.warning(f"⚠️ Created SQLite connection but failed to add custom functions for: {db_path}")
+            logger.warning(f"Created SQLite connection but failed to add custom functions for: {db_path}")
             return conn
             
     except Exception as e:
-        logger.error(f"❌ Error creating SQLite connection: {e}")
+        logger.error(f"Error creating SQLite connection: {e}")
         raise
-
-def test_functions(conn: sqlite3.Connection) -> bool:
-    """
-    Test if custom functions are working correctly
-    
-    Args:
-        conn (sqlite3.Connection): SQLite connection to test
-    
-    Returns:
-        bool: True if all tests pass, False otherwise
-    """
-    try:
-        cursor = conn.cursor()
-        tests_passed = 0
-        total_tests = 0
-        
-        # Test regex functions
-        total_tests += 1
-        test_result = cursor.execute(
-            "SELECT regexp_replace('Hello @World!', '[^a-zA-Z0-9 ]', '')"
-        ).fetchone()[0]
-        if test_result == "Hello World":
-            tests_passed += 1
-            logger.info("✅ regexp_replace test passed")
-        else:
-            logger.error(f"❌ regexp_replace test failed. Expected: 'Hello World', Got: '{test_result}'")
-        
-        # Test string functions
-        total_tests += 1
-        test_result = cursor.execute(
-            "SELECT proper_case('hello world')"
-        ).fetchone()[0]
-        if test_result == "Hello World":
-            tests_passed += 1
-            logger.info("✅ proper_case test passed")
-        else:
-            logger.error(f"❌ proper_case test failed. Expected: 'Hello World', Got: '{test_result}'")
-        
-        # Test math functions
-        total_tests += 1
-        test_result = cursor.execute(
-            "SELECT safe_divide(10, 0, -1)"
-        ).fetchone()[0]
-        if test_result == -1.0:
-            tests_passed += 1
-            logger.info("✅ safe_divide test passed")
-        else:
-            logger.error(f"❌ safe_divide test failed. Expected: -1.0, Got: '{test_result}'")
-        
-        # Test validation functions
-        total_tests += 1
-        test_result = cursor.execute(
-            "SELECT is_email('test@example.com')"
-        ).fetchone()[0]
-        if test_result == 1:  # SQLite boolean true
-            tests_passed += 1
-            logger.info("✅ is_email test passed")
-        else:
-            logger.error(f"❌ is_email test failed. Expected: 1, Got: '{test_result}'")
-        
-        success_rate = tests_passed / total_tests * 100
-        logger.info(f"🔍 Test Results: {tests_passed}/{total_tests} tests passed ({success_rate:.1f}%)")
-        
-        return tests_passed == total_tests
-        
-    except Exception as e:
-        logger.error(f"❌ Error testing custom functions: {e}")
-        return False
-
-# For backwards compatibility
-add_regex_functions = add_sqlite_functions
-
-if __name__ == "__main__":
-    # Example usage and testing
-    import tempfile
-    import os
-    
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp_file:
-        test_db = tmp_file.name
-    
-    try:
-        print("🧪 Testing SQLite custom functions...")
-        
-        conn = sqlite3.connect(test_db)
-        add_sqlite_functions(conn)
-        
-        if test_functions(conn):
-            print("✅ All tests passed! Custom functions are working correctly.")
-        else:
-            print("❌ Some tests failed.")
-            
-        conn.close()
-        
-        print("\n🎉 SQLite custom functions are ready to use!")
-        
-    finally:
-        try:
-            os.unlink(test_db)
-        except:
-            pass

@@ -12,7 +12,7 @@ from DMtool.sqlite_utils import add_sqlite_functions
 
 load_dotenv()
 
-# Set up logging
+
 logger = logging.getLogger(__name__)
 
 class SQLExecutor:
@@ -46,38 +46,37 @@ class SQLExecutor:
         """
         conn = None
         try:
-            # Connect to the database
+
             conn = sqlite3.connect(self.db_path)
-            print(query)
             add_sqlite_functions(conn)
             
-            # Configure connection to return rows as dictionaries
+
             conn.row_factory = sqlite3.Row
             
             cursor = conn.cursor()
             
-            # Execute the query with parameters if provided
+
             if params:
                 cursor.execute(query, params)
             else:
                 cursor.execute(query)
                 
-            # Commit changes if requested
+
             if commit:
                 conn.commit()
             
-            # Fetch results if requested
+
             if fetch_results:
-                # Convert rows to dictionaries
+
                 rows = cursor.fetchall()
                 result = [dict(row) for row in rows]
                 return result
             else:
-                # Return row count for operations that don't return results
+
                 return {"rowcount": cursor.rowcount}
                 
         except sqlite3.Error as e:
-            # Handle SQLite errors
+
             if conn and commit:
                 conn.rollback()
                 
@@ -88,7 +87,7 @@ class SQLExecutor:
                 "query": query
             }
         except Exception as e:
-            # Handle other exceptions
+
             if conn and commit:
                 conn.rollback()
                 
@@ -99,7 +98,7 @@ class SQLExecutor:
                 "query": query
             }
         finally:
-            # Close the connection
+
             if conn:
                 conn.close()
     
@@ -117,10 +116,10 @@ class SQLExecutor:
         """
         conn = None
         try:
-            # Connect to the database
+
             conn = sqlite3.connect(self.db_path)
             
-            # Execute the query and load results directly into a DataFrame
+
             if params:
                 df = pd.read_sql_query(query, conn, params=params)
             else:
@@ -129,7 +128,7 @@ class SQLExecutor:
             return df
                 
         except sqlite3.Error as e:
-            # Handle SQLite errors
+
             logger.error(f"SQLite error in execute_and_fetch_df: {e}")
             return {
                 "error_type": "SQLiteError", 
@@ -137,7 +136,7 @@ class SQLExecutor:
                 "query": query
             }
         except Exception as e:
-            # Handle other exceptions
+
             logger.error(f"Error in execute_and_fetch_df: {e}")
             return {
                 "error_type": "ExecutionError", 
@@ -145,7 +144,7 @@ class SQLExecutor:
                 "query": query
             }
         finally:
-            # Close the connection
+
             if conn:
                 conn.close()
     
@@ -210,7 +209,7 @@ class SQLExecutor:
         Returns:
         Tuple[bool, str]: Success status and backup table name
         """
-        # Generate a unique backup table name
+
         backup_name = f"{table_name}_backup_{uuid.uuid4().hex[:8]}"
         
         query = f"CREATE TABLE {backup_name} AS SELECT * FROM {table_name}"
@@ -224,17 +223,17 @@ class SQLExecutor:
     
     def execute_multi_statement_query(self, multi_sql, sql_params,context_manager=None, session_id=None):
         """Execute multiple SQL statements with recovery support"""
-        try:
-            # Split into individual statements
+        try:            
+
             statements = self.split_sql_statements(multi_sql)
             
-            # Check if we have a previous execution state to resume from
+
             if session_id:
                 execution_state = context_manager.load_multi_query_state(session_id)
                 if execution_state:
                     return self.resume_execution(execution_state, statements, sql_params, context_manager, session_id)
             
-            # Fresh execution
+
             return self.execute_with_recovery(statements, sql_params, session_id, context_manager)
             
         except Exception as e:
@@ -246,45 +245,45 @@ class SQLExecutor:
         try:
             logger.info(f"Resuming multi-query execution from session {session_id}")
             
-            # Get the current execution state
+
             completed_count = execution_state.get("completed_count", 0)
             failed_count = execution_state.get("failed_count", 0)
             previous_statements = execution_state.get("statements", [])
             
-            # Validate that we have matching statements
+
             if len(statements) != len(previous_statements):
                 logger.warning("Statement count mismatch during resume, starting fresh execution")
                 return self.execute_with_recovery(statements, sql_params, session_id, context_manager)
             
-            # Start from where we left off
+
             results = []
             
-            # Add results from previously completed statements
+
             for prev_statement in previous_statements:
                 if prev_statement.get("status") == "completed":
                     results.append(prev_statement.get("result", {}))
             
-            # Find the index to resume from (first failed or first incomplete statement)
+
             resume_index = completed_count
             
-            # Update execution state for resume
+
             execution_state["resumed_at"] = datetime.now().isoformat() if 'datetime' in globals() else "resumed"
             execution_state["resume_attempt"] = execution_state.get("resume_attempt", 0) + 1
             
             logger.info(f"Resuming from statement {resume_index + 1}/{len(statements)}")
             
-            # Execute remaining statements
+
             for i in range(resume_index, len(statements)):
                 statement = statements[i]
                 
                 try:
                     logger.info(f"Executing statement {i+1}/{len(statements)} (resumed): {statement[:100]}...")
                     
-                    # Execute individual statement
+
                     result = self.execute_query(statement, sql_params, fetch_results=False)
                     
                     if isinstance(result, dict) and "error_type" in result:
-                        # Statement failed again
+
                         statement_result = {
                             "statement": statement,
                             "index": i,
@@ -295,16 +294,16 @@ class SQLExecutor:
                         }
                         execution_state["failed_count"] += 1
                         
-                        # Update the failed statement in execution state
+
                         if i < len(execution_state["statements"]):
                             execution_state["statements"][i] = statement_result
                         else:
                             execution_state["statements"].append(statement_result)
                         
-                        # Save updated state
+
                         context_manager.save_multi_query_state(session_id, execution_state)
                         
-                        # Return failure info
+
                         return {
                             "multi_query_result": True,
                             "completed_statements": execution_state["completed_count"],
@@ -318,7 +317,7 @@ class SQLExecutor:
                             "resume_attempt": execution_state.get("resume_attempt", 1)
                         }
                     else:
-                        # Statement succeeded
+
                         statement_result = {
                             "statement": statement,
                             "index": i,
@@ -329,19 +328,19 @@ class SQLExecutor:
                         execution_state["completed_count"] += 1
                         results.append(result)
                         
-                        # Update the statement in execution state
+
                         if i < len(execution_state["statements"]):
                             execution_state["statements"][i] = statement_result
                         else:
                             execution_state["statements"].append(statement_result)
                         
-                        # Reduce failed count if this was previously failed
+
                         prev_statement = next((s for s in previous_statements if s.get("index") == i), None)
                         if prev_statement and prev_statement.get("status") == "failed":
                             execution_state["failed_count"] = max(0, execution_state["failed_count"] - 1)
                     
                 except Exception as e:
-                    # Unexpected error during resume
+
                     logger.error(f"Unexpected error during resume at statement {i}: {e}")
                     return {
                         "error_type": "ResumeExecutionError",
@@ -352,7 +351,7 @@ class SQLExecutor:
                         "is_resumed_execution": True
                     }
             
-            # All remaining statements completed successfully
+
             context_manager.cleanup_multi_query_state(session_id)
             
             logger.info(f"Multi-query execution resumed and completed successfully. Total statements: {len(statements)}")
@@ -373,7 +372,6 @@ class SQLExecutor:
                 "error_message": f"Failed to resume execution: {str(e)}",
                 "session_id": session_id
             }
-
 
     def split_sql_statements(self, multi_sql):
         """Split multi-SQL into individual statements, handling edge cases"""
@@ -397,7 +395,7 @@ class SQLExecutor:
             
             current_statement += char
         
-        # Add final statement if exists
+
         if current_statement.strip():
             statements.append(current_statement.strip())
         
@@ -418,11 +416,11 @@ class SQLExecutor:
             try:
                 logger.info(f"Executing statement {i+1}/{len(statements)}: {statement[:100]}...")
                 
-                # Execute individual statement
+
                 result = self.execute_query(statement, sql_params, fetch_results=False)
                 
                 if isinstance(result, dict) and "error_type" in result:
-                    # Statement failed
+
                     statement_result = {
                         "statement": statement,
                         "index": i,
@@ -433,11 +431,11 @@ class SQLExecutor:
                     execution_state["failed_count"] += 1
                     execution_state["statements"].append(statement_result)
                     
-                    # Save state and return partial results
+
                     if session_id:
                         context_manager.save_multi_query_state(session_id, execution_state)
                     
-                    # Return partial success with failure info
+
                     return {
                         "multi_query_result": True,
                         "completed_statements": execution_state["completed_count"],
@@ -449,7 +447,7 @@ class SQLExecutor:
                         "all_results": results
                     }
                 else:
-                    # Statement succeeded
+
                     statement_result = {
                         "statement": statement,
                         "index": i,
@@ -462,7 +460,7 @@ class SQLExecutor:
                 execution_state["statements"].append(statement_result)
                 
             except Exception as e:
-                # Unexpected error
+
                 logger.error(f"Unexpected error executing statement {i}: {e}")
                 return {
                     "error_type": "StatementExecutionError",
@@ -471,7 +469,7 @@ class SQLExecutor:
                     "failed_statement": statement
                 }
         
-        # All statements completed successfully
+
         if session_id:
             context_manager.cleanup_multi_query_state(session_id)
         
@@ -486,13 +484,13 @@ class SQLExecutor:
         """Determine if a failed statement can be safely retried"""
         error_msg = error.get("error_message", "").lower()
         
-        # DDL statements that might fail because resource already exists
+
         if "alter table" in statement.lower() and "add column" in statement.lower():
             if "already exists" in error_msg or "duplicate column" in error_msg:
-                return False  # Column already exists, no need to retry
+                return False
         
-        # UPDATE/INSERT statements can usually be retried
+
         if any(keyword in statement.lower() for keyword in ["update", "insert", "select"]):
             return True
             
-        return True  # Default: allow retry
+        return True
