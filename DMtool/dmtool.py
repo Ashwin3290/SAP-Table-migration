@@ -676,32 +676,6 @@ class DMTool:
                         planner_info["target_table_name"],
                     )
 
-                try:
-                    context_manager = ContextualSessionManager()
-                    
-
-                    transformation_data = {
-                        "original_query": query,
-                        "generated_sql": sql_query,
-                        "query_type": query_type,
-                        "source_tables": planner_info.get("source_table_name", []),
-                        "target_table": target_table,
-                        "fields_affected": planner_info.get("target_sap_fields", []),
-                        "execution_result": {
-                            "success": True,
-                            "rows_affected": len(target_data) if isinstance(target_data, pd.DataFrame) else 0,
-                            "is_multi_step": isinstance(result, dict) and result.get("multi_query_result", False),
-                            "steps_completed": result.get("completed_statements", 1) if isinstance(result, dict) else 1
-                        },
-                        "is_multi_step": isinstance(result, dict) and result.get("multi_query_result", False),
-                        "steps_completed": result.get("completed_statements", 1) if isinstance(result, dict) else 1
-                    }
-                    
-                    context_manager.add_transformation_record(session_id, transformation_data)
-                    
-                except Exception as e:
-                    logger.warning(f"Could not save transformation record: {e}")
-
                 if target_table and query_type in ["SIMPLE_TRANSFORMATION", "JOIN_OPERATION", "CROSS_SEGMENT", "AGGREGATION_OPERATION"]:
                     try:
 
@@ -713,20 +687,42 @@ class DMTool:
                             rows_affected = len(target_data)
                             non_null_columns = target_data.dropna(axis=1, how='all').columns.tolist()
                             
-
                             target_data.attrs['transformation_summary'] = {
                                 'rows': rows_affected,
                                 'populated_fields': non_null_columns,
                                 'target_table': target_table,
                                 'query_type': query_type
                             }
-                            
-                            return  target_data, session_id
+                            try:
+                                context_manager = ContextualSessionManager()
+                                transformation_data = {
+                                    "original_query": query,
+                                    "generated_sql": sql_query,
+                                    "query_type": query_type,
+                                    "source_tables": planner_info.get("source_table_name", []),
+                                    "target_table": target_table,
+                                    "fields_affected": planner_info.get("target_sap_fields", []),
+                                    "execution_result": {
+                                        "success": True,
+                                        "rows_affected": len(target_data) if isinstance(target_data, pd.DataFrame) else 0,
+                                        "is_multi_step": isinstance(result, dict) and result.get("multi_query_result", False),
+                                        "steps_completed": result.get("completed_statements", 1) if isinstance(result, dict) else 1
+                                    },
+                                    "is_multi_step": isinstance(result, dict) and result.get("multi_query_result", False),
+                                    "steps_completed": result.get("completed_statements", 1) if isinstance(result, dict) else 1
+                                }
+                                
+                                context_manager.add_transformation_record(session_id, transformation_data)
+                                
+                            except Exception as e:
+                                logger.warning(f"Could not save transformation record: {e}")
+
+                            return target_data, session_id
                         else:
 
                             empty_df = pd.DataFrame()
                             empty_df.attrs['message'] = f"Target table '{target_table}' is empty after transformation"
-                            return  empty_df, session_id
+                            return empty_df, session_id
                             
                     except Exception as e:
 
