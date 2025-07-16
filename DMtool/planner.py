@@ -3,8 +3,7 @@ import uuid
 import os
 import pandas as pd
 import re
-import sqlite3
-from io import StringIO
+import pyodbc
 from datetime import datetime
 import logging
 from google import genai
@@ -115,7 +114,7 @@ class ClassificationEnhancer:
     Enhances LLM classification details with fuzzy matching for tables, columns, and segments
     """
     
-    def __init__(self, db_path=None, segments_csv_path="segments.csv"):
+    def __init__(self, connection_string=None, segments_csv_path="segments.csv"):
         """
         Initialize the ClassificationEnhancer
         
@@ -123,67 +122,63 @@ class ClassificationEnhancer:
             db_path (str): Path to the SQLite database
             segments_csv_path (str): Path to the segments CSV file
         """
-        self.db_path = db_path or os.environ.get('DB_PATH')
+        self.connection_string = connection_string or self._build_connection_string()                
         self.segments_csv_path = segments_csv_path
         self._available_tables = None
         self._table_columns = {}
         self._segments_df = None
+    
+    def _build_connection_string(self):
+        """Build Azure SQL Server connection string from environment variables"""
+        connection_string = os.environ.get('AZURE_SQL_CONNECTION_STRING')
+        if connection_string:
+            return connection_string
         
-    def _get_available_tables(self) -> List[str]:
-        """
-        Get list of available tables from the database
+        server = os.environ.get('AZURE_SQL_SERVER')
+        database = os.environ.get('AZURE_SQL_DATABASE')
+        username = os.environ.get('AZURE_SQL_USERNAME')
+        password = os.environ.get('AZURE_SQL_PASSWORD')
+        driver = os.environ.get('AZURE_SQL_DRIVER', '{ODBC Driver 18 for SQL Server}')
         
-        Returns:
-            List[str]: List of table names
-        """
-        if self._available_tables is not None:
-            return self._available_tables
-            
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
+        if not all([server, database, username, password]):
+            raise ValueError("Missing required Azure SQL connection parameters")
+        
+        return f"Driver={driver};Server={server};Database={database};Uid={username};Pwd={password};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
 
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    def _get_available_tables(self) -> List[str]:
+        try:
+            conn = pyodbc.connect(self.connection_string)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT TABLE_NAME 
+                FROM INFORMATION_SCHEMA.TABLES 
+                WHERE TABLE_TYPE = 'BASE TABLE'
+            """)
             tables = [row[0] for row in cursor.fetchall()]
-            
             conn.close()
             self._available_tables = tables
             return tables
-            
         except Exception as e:
-            logger.error(f"Error getting available tables: {e}")
+            logger.error(f"Error fetching tables: {e}")
             return []
     
     def _get_table_columns(self, table_name: str) -> List[str]:
-        """
-        Get columns for a specific table
-        
-        Args:
-            table_name (str): Name of the table
-            
-        Returns:
-            List[str]: List of column names
-        """
-        if table_name in self._table_columns:
-            return self._table_columns[table_name]
-            
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = pyodbc.connect(self.connection_string)
             cursor = conn.cursor()
-            
-
-            cursor.execute(f"PRAGMA table_info({table_name})")
-            columns = [row[1] for row in cursor.fetchall()]
-            
-            conn.close()
-            self._table_columns[table_name] = columns
-            return columns
-            
+            cursor.execute("""
+                SELECT COLUMN_NAME 
+                FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_NAME = ?
+                ORDER BY ORDINAL_POSITION
+            """, (table_name,))
+            columns = [row[0] for row in cursor.fetchall()]
         except Exception as e:
-            logger.error(f"Error getting columns for table {table_name}: {e}")
+            logger.error(f"Error fetching columns for table {table_name}: {e}")
             return []
-    
+        return columns
+
+
     def _get_all_table_columns(self, table_names: List[str]) -> Dict[str, List[str]]:
         """
         Get columns for multiple tables
@@ -210,7 +205,7 @@ class ClassificationEnhancer:
             return self._segments_df
             
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = pyodbc.connect(self.connection_string)
             self._segments_df = pd.read_sql("SELECT * FROM connection_segments", conn)
             conn.close()
             return self._segments_df
@@ -229,7 +224,7 @@ class ClassificationEnhancer:
             Optional[str]: The t_[number] pattern or None
         """
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = pyodbc.connect(self.connection_string)
             cursor = conn.cursor()
             
 
@@ -491,8 +486,9 @@ class ClassificationEnhancer:
 
 def enhance_classification_before_processing(classification_details: Dict[str, Any], 
                                            current_segment_id: int,
-                                           db_path: str = None,
+                                           connection_string: str = None,
                                            segments_csv_path: str = "segments.csv") -> Dict[str, Any]:
+
     """
     Convenience function to enhance classification details
     
@@ -505,7 +501,7 @@ def enhance_classification_before_processing(classification_details: Dict[str, A
     Returns:
         Dict[str, Any]: Enhanced classification details
     """
-    enhancer = ClassificationEnhancer(db_path, segments_csv_path)
+    enhancer = ClassificationEnhancer(connection_string, segments_csv_path)
     return enhancer.enhance_classification_details(classification_details, current_segment_id)
 
 def classify_query_with_llm(query, target_table):
@@ -991,8 +987,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         visited_segments = previous_context.get("segments_visited", {}) if previous_context else {}
         
 
-        conn = sqlite3.connect(os.environ.get('DB_PATH'))
-        
+        conn = pyodbc.connect(os.environ.get("AZURE_SQL_CONNECTION_STRING", ""))
 
         try:
             cursor = conn.cursor()
@@ -1041,7 +1036,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
 
         query_type, classification_details = classify_query_with_llm(query,target_table)
         enhanced_classification = enhance_classification_before_processing(
-            classification_details, segment_id, db_path=os.environ.get('DB_PATH')
+            classification_details, segment_id, connection_string=None
         )
         classification_details = enhanced_classification
         logger.info(f"Query type: {query_type}")
@@ -1998,9 +1993,8 @@ def fetch_data_by_ids(object_id, segment_id, project_id, conn):
                 f"No data found for object_id={object_id}, segment_id={segment_id}, project_id={project_id}"
             )
         return joined_df
-    except sqlite3.Error as e:
-        logger.error(f"SQLite error in fetch_data_by_ids: {e}")
-        raise
+    except pyodbc.Error as e:
+        logger.error(f"Azure SQL error in fetch_data_by_ids: {e}")
     except Exception as e:
         logger.error(f"Error in fetch_data_by_ids: {e}")
         raise
@@ -2160,8 +2154,9 @@ def get_or_create_session_target_df(session_id, target_table, conn):
                 target_df = pd.read_sql_query(query, conn)
                 
             return target_df
-        except sqlite3.Error as e:
-            logger.error(f"SQLite error in get_or_create_session_target_df: {e}")
+        
+        except pyodbc.Error as e:
+            logger.error(f"Azure SQL error in get_or_create_session_target_df: {e}")
             return pd.DataFrame()
         except Exception as e:
             logger.error(f"Error in get_or_create_session_target_df: {e}")

@@ -4,7 +4,7 @@ import json
 import pandas as pd
 import numpy as np
 import re
-import sqlite3
+import pyodbc
 import traceback
 from dotenv import load_dotenv
 from google import genai
@@ -191,7 +191,7 @@ class ErrorRecoveryManager:
         
         # Database/Table/Column issues - retry from PLANNER (re-analyze query)
         if any(indicator in error_message for indicator in [
-            "no such table", "table does not exist", "no such column", 
+            "invalid object name", "table does not exist", "invalid column name", 
             "column not found", "invalid table", "table not found"
         ]):
             return "PLANNER"
@@ -199,7 +199,7 @@ class ErrorRecoveryManager:
         # SQL Syntax issues - retry from GENERATOR (regenerate SQL)
         if any(indicator in error_message for indicator in [
             "syntax error", "near", "unexpected token", "sql error",
-            "invalid sql", "parse error", "malformed"
+            "invalid sql", "parse error", "malformed", "incorrect syntax"
         ]):
             return "GENERATOR"
         
@@ -244,8 +244,8 @@ Previous SQL generation failed with error: {error_msg}
 SPECIFIC INSTRUCTIONS FOR THIS RETRY:
 - Generate simpler, more conservative SQL syntax
 - Avoid complex joins if column validation shows issues
-- Use proper SQLite syntax (no RIGHT JOIN, use IFNULL not ISNULL)
-- Quote table names with spaces using double quotes
+- Use proper T-SQL syntax (no SQLite-specific functions)
+- Quote table names with spaces using square brackets [table name]
 - For DDL operations (ALTER/DROP), don't try to fetch results
 - Validate column existence before including in SELECT/UPDATE clauses
 """
@@ -265,9 +265,9 @@ SPECIFIC INSTRUCTIONS FOR THIS RETRY:
         return ""
 
 class DMTool:
-    """SQLite-based DMTool for optimized data transformations using direct SQLite queries"""
+    """Azure SQL Server-based DMTool for optimized data transformations using direct SQL queries"""
 
-    def __init__(self, DB_PATH=os.environ.get('DB_PATH')):
+    def __init__(self, DB_PATH=None):
         """Initialize the DMToolSQL instance"""
         try:
 
@@ -303,7 +303,7 @@ class DMTool:
     def _extract_planner_info(self, resolved_data):
         """
         Extract and organize all relevant information from planner's resolved data
-        to make it easily accessible in SQLite generation
+        to make it easily accessible in SQL generation
         """
         try:
 
@@ -402,14 +402,14 @@ class DMTool:
 
     def _create_operation_plan(self, query, planner_info: Dict[str, Any],template: Dict[str, Any]) -> str:
         """
-        Use LLM to create a detailed plan for SQLite query generation
+        Use LLM to create a detailed plan for SQL query generation
         
         Parameters:
         query (str): Original natural language query
         planner_info (Dict): Information extracted by the planner
         
         Returns:
-        str: Step-by-step SQLite generation plan
+        str: Step-by-step SQL generation plan
         """
         try:
 
@@ -432,8 +432,8 @@ class DMTool:
             print(source_fields)
 
             prompt = f"""
-    You are an expert SQLite database engineer focused on data transformation. I need you to create a step-by-step plan to generate 
-    SQLite for the following natural language query:
+    You are an expert Azure SQL Server/T-SQL database engineer focused on data transformation. I need you to create a step-by-step plan to generate 
+    T-SQL for the following natural language query:
 
     ORIGINAL QUERY: "{query}"
 
@@ -448,7 +448,7 @@ class DMTool:
     - Key Mapping: {json.dumps(key_mapping, indent=2)}
     - Target Data Samples: {target_data_samples}
 
-    Use this Template for the SQLite generation plan:
+    Use this Template for the T-SQL generation plan:
     {template["plan"]}
 
     Properly understand how data is given in the source table and given the data how to transform it.
@@ -460,14 +460,14 @@ class DMTool:
     for example, if source table has MATNR and target table has Product, then if key mapping mentions then use them for matching in where clauses.
 
     Requirements:
-    - Generate a step-by-step SQLite generation plan
-    - Give 10-20 steps to generate the SQLite query
+    - Generate a step-by-step T-SQL generation plan
+    - Give 10-20 steps to generate the T-SQL query
     - Use the following format for each step:
         1. Step description
-        2. SQLite operation (e.g., SELECT, INSERT, UPDATE)
-        3. SQLite query template with placeholders for parameters
+        2. T-SQL operation (e.g., SELECT, INSERT, UPDATE)
+        3. T-SQL query template with placeholders for parameters
         4. Any additional notes or considerations
-    - Make sure to include any filtering conditions in the SQLite query
+    - Make sure to include any filtering conditions in the T-SQL query
     - If the query references segments or previous transformations, make sure to use the appropriate source tables
     - Pay special attention to the segment references - these indicate using data from previous segments
 
@@ -487,7 +487,7 @@ class DMTool:
     13. DO not DROP or CREATE any tables, just use the existing target table
     14. When needing to delete a column, use ALTER TABLE to drop the column
     Format your response as a numbered list only, with no explanations or additional text.
-    Each step should be clear, concise, and directly actionable for SQLite generation.
+    Each step should be clear, concise, and directly actionable for T-SQL generation.
     """
             
 
@@ -504,13 +504,13 @@ class DMTool:
                 return response.text.strip()
             else:
                 logger.warning("Invalid response from LLM in create_sql_plan")
-                return "1. Generate basic SQLite query based on query type\n2. Return query"
+                return "1. Generate basic T-SQL query based on query type\n2. Return query"
                 
         except Exception as e:
             logger.error(f"Error in create_sql_plan: {e}")
-            return "1. Generate basic SQLite query based on query type\n2. Return query"
+            return "1. Generate basic T-SQL query based on query type\n2. Return query"
         
-    def _get_segment_name(self, segment_id,conn):
+    def _get_segment_name(self, segment_id, conn):
         cursor = conn.cursor()
         cursor.execute("SELECT segement_name FROM connection_segments WHERE segment_id = ?", (segment_id,))
         result = cursor.fetchone()
@@ -522,7 +522,7 @@ class DMTool:
 
     def process_sequential_query(self, query, object_id, segment_id, project_id, session_id=None):
         """
-        Process a query as part of a sequential transformation using SQLite generation
+        Process a query as part of a sequential transformation using SQL generation
         instead of Python code generation
         
         Parameters:
@@ -589,8 +589,8 @@ class DMTool:
 
 
             try:
-                conn = sqlite3.connect(os.environ.get('DB_PATH'))
-            except sqlite3.Error as e:
+                conn = pyodbc.connect(self.sql_executor.connection_string)
+            except pyodbc.Error as e:
                 logger.error(f"Failed to connect to database: {e}")
                 return f"Database connection error: {e}", session_id
 
@@ -632,8 +632,8 @@ class DMTool:
 
 
                 if isinstance(result, dict) and "error_type" in result:
-                    logger.error(f"SQLite execution error: {result}")
-                    return f"SQLite execution failed: {result.get('error_message', 'Unknown error')}", session_id
+                    logger.error(f"SQL execution error: {result}")
+                    return f"SQL execution failed: {result.get('error_message', 'Unknown error')}", session_id
 
                 if isinstance(result, dict) and result.get("multi_query_result"):
                     logger.info(f"Processing multi-query result: {result.get('completed_statements', 0)} statements completed")
@@ -679,7 +679,7 @@ class DMTool:
                 if target_table and query_type in ["SIMPLE_TRANSFORMATION", "JOIN_OPERATION", "CROSS_SEGMENT", "AGGREGATION_OPERATION"]:
                     try:
 
-                        select_query = f"SELECT * FROM {validate_sql_identifier(target_table)}"
+                        select_query = f"SELECT * FROM [{validate_sql_identifier(target_table)}]"
                         target_data = self.sql_executor.execute_and_fetch_df(select_query)
                         
                         if isinstance(target_data, pd.DataFrame) and not target_data.empty:
@@ -755,10 +755,10 @@ class DMTool:
 
     def _execute_sql_query(self, sql_query, sql_params, planner_info):
         """
-        Execute SQLite query using the SQLExecutor with multi-statement support
+        Execute SQL query using the SQLExecutor with multi-statement support
         
         Parameters:
-        sql_query (str): The SQLite query to execute
+        sql_query (str): The SQL query to execute
         sql_params (dict): The parameters for the query
         planner_info (dict): Planner information for context
         
@@ -782,7 +782,7 @@ class DMTool:
             try:
                 operation_type = sql_query.strip().upper().split()[0]
             except:
-                if "AlTER TABLE" in sql_query.upper():
+                if "ALTER TABLE" in sql_query.upper():
                     operation_type = "ALTER"
                 elif sql_query.upper() in ["Drop","Delete"]:
                     operation_type = "DELETE"
@@ -843,7 +843,7 @@ class DMTool:
             table_name = validate_sql_identifier(table_name)
             
 
-            conn = sqlite3.connect(os.environ.get('DB_PATH'))
+            conn = pyodbc.connect(self.sql_executor.connection_string)
             
 
             df.to_sql(table_name, conn, if_exists="replace", index=False)
@@ -866,7 +866,7 @@ class DMTool:
             if target_table:
 
                 try:
-                    select_query = f"SELECT * FROM {validate_sql_identifier(target_table)}"
+                    select_query = f"SELECT * FROM [{validate_sql_identifier(target_table)}]"
                     target_data = self.sql_executor.execute_and_fetch_df(select_query)
                     
                     if isinstance(target_data, pd.DataFrame) and not target_data.empty:

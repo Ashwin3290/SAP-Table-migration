@@ -1,6 +1,5 @@
 import logging
-import sqlite3
-import re
+import pyodbc
 import pandas as pd
 import uuid
 import os
@@ -8,23 +7,39 @@ from dotenv import load_dotenv
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Union, Tuple
 
-from DMtool.sqlite_utils import add_sqlite_functions
-
 load_dotenv()
-
 
 logger = logging.getLogger(__name__)
 
 class SQLExecutor:
     """Executes SQL queries against the database"""
     
-    def __init__(self, db_path=os.environ.get('DB_PATH')):
+    def __init__(self):
         """Initialize the SQL executor
-        
-        Parameters:
-        db_path (str): Path to the SQLite database
         """
-        self.db_path = db_path
+        self.connection_string = self._build_connection_string()
+    
+    def _build_connection_string(self):
+        """Build Azure SQL Server connection string from environment variables"""
+        connection_string = os.environ.get('AZURE_SQL_CONNECTION_STRING')
+        if connection_string:
+            return connection_string
+        
+        # Build from individual components
+        server = os.environ.get('AZURE_SQL_SERVER')
+        database = os.environ.get('AZURE_SQL_DATABASE')
+        username = os.environ.get('AZURE_SQL_USERNAME')
+        password = os.environ.get('AZURE_SQL_PASSWORD')
+        driver = os.environ.get('AZURE_SQL_DRIVER', '{ODBC Driver 18 for SQL Server}')
+        
+        if not all([server, database, username, password]):
+            raise ValueError("Missing required Azure SQL connection parameters")
+        
+        return f"Driver={driver};Server={server};Database={database};Uid={username};Pwd={password};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
+    
+    def _get_connection(self):
+        """Get a new database connection"""
+        return pyodbc.connect(self.connection_string)
     
     def execute_query(self, 
                      query: str, 
@@ -46,48 +61,44 @@ class SQLExecutor:
         """
         conn = None
         try:
-
-            conn = sqlite3.connect(self.db_path)
-            add_sqlite_functions(conn)
-            
-
-            conn.row_factory = sqlite3.Row
-            
+            conn = self._get_connection()
             cursor = conn.cursor()
             
-
+            # Convert named parameters to positional if needed
             if params:
-                cursor.execute(query, params)
+                # Convert dict params to tuple for pyodbc
+                param_values = tuple(params.values())
+                # Replace named placeholders with ? for pyodbc
+                formatted_query = query
+                for key in params.keys():
+                    formatted_query = formatted_query.replace(f":{key}", "?")
+                cursor.execute(formatted_query, param_values)
             else:
                 cursor.execute(query)
                 
-
             if commit:
                 conn.commit()
             
-
             if fetch_results:
-
+                # Fetch all rows and convert to list of dictionaries
+                columns = [column[0] for column in cursor.description] if cursor.description else []
                 rows = cursor.fetchall()
-                result = [dict(row) for row in rows]
+                result = [dict(zip(columns, row)) for row in rows]
                 return result
             else:
-
                 return {"rowcount": cursor.rowcount}
                 
-        except sqlite3.Error as e:
-
+        except pyodbc.Error as e:
             if conn and commit:
                 conn.rollback()
                 
-            logger.error(f"SQLite error: {e}")
+            logger.error(f"Azure SQL error: {e}")
             return {
-                "error_type": "SQLiteError", 
+                "error_type": "SQLError", 
                 "error_message": str(e),
                 "query": query
             }
         except Exception as e:
-
             if conn and commit:
                 conn.rollback()
                 
@@ -98,11 +109,9 @@ class SQLExecutor:
                 "query": query
             }
         finally:
-
             if conn:
                 conn.close()
     
-
     def execute_and_fetch_df(self, query: str, params: Optional[Dict[str, Any]] = None) -> Union[pd.DataFrame, Dict[str, Any]]:
         """
         Execute a query and return results as a pandas DataFrame
@@ -116,27 +125,29 @@ class SQLExecutor:
         """
         conn = None
         try:
-
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             
-
             if params:
-                df = pd.read_sql_query(query, conn, params=params)
+                # Convert dict params to tuple for pandas
+                param_values = tuple(params.values())
+                # Replace named placeholders with ? for pyodbc
+                formatted_query = query
+                for key in params.keys():
+                    formatted_query = formatted_query.replace(f":{key}", "?")
+                df = pd.read_sql_query(formatted_query, conn, params=param_values)
             else:
                 df = pd.read_sql_query(query, conn)
                 
             return df
                 
-        except sqlite3.Error as e:
-
-            logger.error(f"SQLite error in execute_and_fetch_df: {e}")
+        except pyodbc.Error as e:
+            logger.error(f"Azure SQL error in execute_and_fetch_df: {e}")
             return {
-                "error_type": "SQLiteError", 
+                "error_type": "SQLError", 
                 "error_message": str(e),
                 "query": query
             }
         except Exception as e:
-
             logger.error(f"Error in execute_and_fetch_df: {e}")
             return {
                 "error_type": "ExecutionError", 
@@ -144,7 +155,6 @@ class SQLExecutor:
                 "query": query
             }
         finally:
-
             if conn:
                 conn.close()
     
@@ -159,8 +169,10 @@ class SQLExecutor:
         bool: True if the table exists, False otherwise
         """
         query = """
-        SELECT name FROM sqlite_master 
-        WHERE type='table' AND name=? Limit 1
+        SELECT TABLE_NAME 
+        FROM INFORMATION_SCHEMA.TABLES 
+        WHERE TABLE_TYPE = 'BASE TABLE' 
+        AND TABLE_NAME = ?
         """
         
         result = self.execute_query(query, {"table_name": table_name})
@@ -180,9 +192,19 @@ class SQLExecutor:
         Returns:
         Union[List[Dict[str, Any]], Dict[str, Any]]: Schema information or error
         """
-        query = f"PRAGMA table_info({table_name})"
+        query = """
+        SELECT 
+            COLUMN_NAME as name,
+            DATA_TYPE as type,
+            IS_NULLABLE as nullable,
+            COLUMN_DEFAULT as default_value,
+            CHARACTER_MAXIMUM_LENGTH as max_length
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME = ?
+        ORDER BY ORDINAL_POSITION
+        """
         
-        return self.execute_query(query)
+        return self.execute_query(query, {"table_name": table_name})
     
     def get_table_sample(self, table_name: str, limit: int = 5) -> Union[pd.DataFrame, Dict[str, Any]]:
         """
@@ -195,7 +217,7 @@ class SQLExecutor:
         Returns:
         Union[pd.DataFrame, Dict[str, Any]]: DataFrame with sample rows or error
         """
-        query = f"SELECT * FROM {table_name} LIMIT {limit}"
+        query = f"SELECT TOP ({limit}) * FROM [{table_name}]"
         
         return self.execute_and_fetch_df(query)
     
@@ -209,10 +231,9 @@ class SQLExecutor:
         Returns:
         Tuple[bool, str]: Success status and backup table name
         """
-
         backup_name = f"{table_name}_backup_{uuid.uuid4().hex[:8]}"
         
-        query = f"CREATE TABLE {backup_name} AS SELECT * FROM {table_name}"
+        query = f"SELECT * INTO [{backup_name}] FROM [{table_name}]"
         
         result = self.execute_query(query, fetch_results=False)
         
@@ -221,19 +242,16 @@ class SQLExecutor:
         
         return True, backup_name
     
-    def execute_multi_statement_query(self, multi_sql, sql_params,context_manager=None, session_id=None):
+    def execute_multi_statement_query(self, multi_sql, sql_params, context_manager=None, session_id=None):
         """Execute multiple SQL statements with recovery support"""
         try:            
-
             statements = self.split_sql_statements(multi_sql)
             
-
             if session_id:
                 execution_state = context_manager.load_multi_query_state(session_id)
                 if execution_state:
                     return self.resume_execution(execution_state, statements, sql_params, context_manager, session_id)
             
-
             return self.execute_with_recovery(statements, sql_params, session_id, context_manager)
             
         except Exception as e:
@@ -245,45 +263,36 @@ class SQLExecutor:
         try:
             logger.info(f"Resuming multi-query execution from session {session_id}")
             
-
             completed_count = execution_state.get("completed_count", 0)
             failed_count = execution_state.get("failed_count", 0)
             previous_statements = execution_state.get("statements", [])
             
-
             if len(statements) != len(previous_statements):
                 logger.warning("Statement count mismatch during resume, starting fresh execution")
                 return self.execute_with_recovery(statements, sql_params, session_id, context_manager)
             
-
             results = []
             
-
             for prev_statement in previous_statements:
                 if prev_statement.get("status") == "completed":
                     results.append(prev_statement.get("result", {}))
             
-
             resume_index = completed_count
             
-
             execution_state["resumed_at"] = datetime.now().isoformat() if 'datetime' in globals() else "resumed"
             execution_state["resume_attempt"] = execution_state.get("resume_attempt", 0) + 1
             
             logger.info(f"Resuming from statement {resume_index + 1}/{len(statements)}")
             
-
             for i in range(resume_index, len(statements)):
                 statement = statements[i]
                 
                 try:
                     logger.info(f"Executing statement {i+1}/{len(statements)} (resumed): {statement[:100]}...")
                     
-
                     result = self.execute_query(statement, sql_params, fetch_results=False)
                     
                     if isinstance(result, dict) and "error_type" in result:
-
                         statement_result = {
                             "statement": statement,
                             "index": i,
@@ -294,16 +303,13 @@ class SQLExecutor:
                         }
                         execution_state["failed_count"] += 1
                         
-
                         if i < len(execution_state["statements"]):
                             execution_state["statements"][i] = statement_result
                         else:
                             execution_state["statements"].append(statement_result)
                         
-
                         context_manager.save_multi_query_state(session_id, execution_state)
                         
-
                         return {
                             "multi_query_result": True,
                             "completed_statements": execution_state["completed_count"],
@@ -317,7 +323,6 @@ class SQLExecutor:
                             "resume_attempt": execution_state.get("resume_attempt", 1)
                         }
                     else:
-
                         statement_result = {
                             "statement": statement,
                             "index": i,
@@ -328,19 +333,16 @@ class SQLExecutor:
                         execution_state["completed_count"] += 1
                         results.append(result)
                         
-
                         if i < len(execution_state["statements"]):
                             execution_state["statements"][i] = statement_result
                         else:
                             execution_state["statements"].append(statement_result)
                         
-
                         prev_statement = next((s for s in previous_statements if s.get("index") == i), None)
                         if prev_statement and prev_statement.get("status") == "failed":
                             execution_state["failed_count"] = max(0, execution_state["failed_count"] - 1)
                     
                 except Exception as e:
-
                     logger.error(f"Unexpected error during resume at statement {i}: {e}")
                     return {
                         "error_type": "ResumeExecutionError",
@@ -351,7 +353,6 @@ class SQLExecutor:
                         "is_resumed_execution": True
                     }
             
-
             context_manager.cleanup_multi_query_state(session_id)
             
             logger.info(f"Multi-query execution resumed and completed successfully. Total statements: {len(statements)}")
@@ -395,7 +396,6 @@ class SQLExecutor:
             
             current_statement += char
         
-
         if current_statement.strip():
             statements.append(current_statement.strip())
         
@@ -416,11 +416,9 @@ class SQLExecutor:
             try:
                 logger.info(f"Executing statement {i+1}/{len(statements)}: {statement[:100]}...")
                 
-
                 result = self.execute_query(statement, sql_params, fetch_results=False)
                 
                 if isinstance(result, dict) and "error_type" in result:
-
                     statement_result = {
                         "statement": statement,
                         "index": i,
@@ -431,11 +429,9 @@ class SQLExecutor:
                     execution_state["failed_count"] += 1
                     execution_state["statements"].append(statement_result)
                     
-
                     if session_id:
                         context_manager.save_multi_query_state(session_id, execution_state)
                     
-
                     return {
                         "multi_query_result": True,
                         "completed_statements": execution_state["completed_count"],
@@ -447,7 +443,6 @@ class SQLExecutor:
                         "all_results": results
                     }
                 else:
-
                     statement_result = {
                         "statement": statement,
                         "index": i,
@@ -460,7 +455,6 @@ class SQLExecutor:
                 execution_state["statements"].append(statement_result)
                 
             except Exception as e:
-
                 logger.error(f"Unexpected error executing statement {i}: {e}")
                 return {
                     "error_type": "StatementExecutionError",
@@ -469,7 +463,6 @@ class SQLExecutor:
                     "failed_statement": statement
                 }
         
-
         if session_id:
             context_manager.cleanup_multi_query_state(session_id)
         
@@ -484,12 +477,10 @@ class SQLExecutor:
         """Determine if a failed statement can be safely retried"""
         error_msg = error.get("error_message", "").lower()
         
-
-        if "alter table" in statement.lower() and "add column" in statement.lower():
+        if "alter table" in statement.lower() and "add" in statement.lower():
             if "already exists" in error_msg or "duplicate column" in error_msg:
                 return False
         
-
         if any(keyword in statement.lower() for keyword in ["update", "insert", "select"]):
             return True
             
