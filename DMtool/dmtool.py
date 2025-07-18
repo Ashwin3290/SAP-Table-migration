@@ -20,7 +20,7 @@ from DMtool.generator import SQLGenerator
 from DMtool.executor import SQLExecutor
 from DMtool.logging_config import setup_logging
 
-setup_logging(log_to_file=True, log_to_console=False)
+setup_logging(log_to_file=True, log_to_console=True)
 
 logger = logging.getLogger(__name__)
 

@@ -986,8 +986,12 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         previous_context = context_manager.get_context(session_id) if session_id else None
         visited_segments = previous_context.get("segments_visited", {}) if previous_context else {}
         
-
-        conn = pyodbc.connect(os.environ.get("AZURE_SQL_CONNECTION_STRING", ""))
+        server = os.environ.get('AZURE_SQL_SERVER')
+        database = os.environ.get('AZURE_SQL_DATABASE')
+        username = os.environ.get('AZURE_SQL_USERNAME')
+        password = os.environ.get('AZURE_SQL_PASSWORD')
+        driver = os.environ.get('AZURE_SQL_DRIVER', 'ODBC Driver 18 for SQL Server')
+        conn = pyodbc.connect(f"Driver={driver};Server={server};Database={database};Uid={username};Pwd={password};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;")
 
         try:
             cursor = conn.cursor()

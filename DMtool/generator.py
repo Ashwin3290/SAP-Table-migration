@@ -16,11 +16,11 @@ logger = logging.getLogger(__name__)
 class SQLGenerator:
     """Generates SQL queries based on planner output"""
     
-    def __init__(self, db_dialect="sqlite"):
+    def __init__(self, db_dialect="Azure SQL"):
         """Initialize the SQL generator
         
         Parameters:
-        db_dialect (str): Database dialect to use ('sqlite' by default)
+        db_dialect (str): Database dialect to use ('Azure SQL' by default)
         """
         self.db_dialect = db_dialect
         self.sql_templates = self._initialize_templates()
@@ -87,7 +87,7 @@ class SQLGenerator:
         """
         try:
 
-            logger.info(f"Generating SQLite query for query: {planner_info.get('original_query', '')}")
+            logger.info(f"Generating Azure SQL query for query: {planner_info.get('original_query', '')}")
             logger.info(f"Source tables: {planner_info.get('source_table_name', [])}")
             logger.info(f"Insertion fields: {planner_info.get('insertion_fields', [])}")
             logger.info(f"Target table: {planner_info.get('target_table_name', [])}")
@@ -110,7 +110,7 @@ class SQLGenerator:
                 return fixed_sql_query, fixed_sql_params
             
 
-            logger.warning(f"Could not generate valid SQLite query even after fixing attempts: {fixed_sql_query}")
+            logger.warning(f"Could not generate valid Azure SQL query even after fixing attempts: {fixed_sql_query}")
             logger.info("Falling back to rule-based query generation")
                     
 
@@ -151,14 +151,14 @@ class SQLGenerator:
 
     def generate_sql_with_llm(self, plan: str, planner_info: Dict[str, Any],template: str=None) -> Tuple[str, Dict[str, Any]]:
         """
-        Generate SQLite query using LLM based on the plan
+        Generate Azure SQL query using LLM based on the plan
         
         Parameters:
-        plan (str): Step-by-step plan for SQLite generation
+        plan (str): Step-by-step plan for Azure SQL generation
         planner_info (Dict): Information extracted by the planner
         
         Returns:
-        Tuple[str, Dict[str, Any]]: The generated SQLite query and parameters
+        Tuple[str, Dict[str, Any]]: The generated Azure SQL query and parameters
         """
         try:
 
@@ -180,15 +180,15 @@ class SQLGenerator:
             
 
             prompt = f"""
-    You are an expert SQLite database engineer focusing on data transformation operations. I need you to generate 
-    precise SQLite query for a data transformation task based on the following plan and information:
+    You are an expert Azure SQL database engineer focusing on data transformation operations. I need you to generate 
+    precise Azure SQL query for a data transformation task based on the following plan and information:
 
     ORIGINAL QUERY: "{original_query}"
 
-    SQLite GENERATION PLAN:
+    Azure SQL GENERATION PLAN:
     {plan}
 
-    Use the given template to generate the SQLite Query:
+    Use the given template to generate the Azure SQL Query:
     {template}
 
     CONTEXT INFORMATION:
@@ -215,7 +215,7 @@ class SQLGenerator:
     4. If a field appears in both lists, use it according to the operation context
 
     IMPORTANT REQUIREMENTS:
-    1. Generate ONLY standard SQLite SQL syntax (not MS SQL, MySQL, PostgreSQL, etc.)
+    1. Generate ONLY standard Azure SQL SQL syntax (not MS SQL, MySQL, PostgreSQL, etc.)
     2. For all queries except validations, use DML operations (INSERT, UPDATE, etc.)
     3. If Target Table Has Data = True, use UPDATE operations with proper key matching
     4. If Target Table Has Data = False, use INSERT operations
@@ -225,11 +225,11 @@ class SQLGenerator:
     8. Properly handle key fields for matching records in UPDATE operations
     9. Return ONLY the final SQL query with no explanations or markdown formatting
 
-    CRITICAL SQLite-SPECIFIC SYNTAX:
-    - SQLite does not support RIGHT JOIN or FULL JOIN (use LEFT JOIN with table order swapped instead)
-    - SQLite uses IFNULL instead of ISNULL for handling nulls
-    - SQLite UPDATE with JOIN requires FROM clause (different from standard SQL)
-    - SQLite has no BOOLEAN type (use INTEGER 0/1)
+    CRITICAL Azure SQL-SPECIFIC SYNTAX:
+    - Azure SQL does not support RIGHT JOIN or FULL JOIN (use LEFT JOIN with table order swapped instead)
+    - Azure SQL uses IFNULL instead of ISNULL for handling nulls
+    - Azure SQL UPDATE with JOIN requires FROM clause (different from standard SQL)
+    - Azure SQL has no BOOLEAN type (use INTEGER 0/1)
     - For UPDATE with data from another table, use: UPDATE target SET col = subquery.col FROM (SELECT...) AS subquery WHERE target.key = subquery.key
 
     EXAMPLES:
@@ -266,7 +266,7 @@ class SQLGenerator:
                 
 
                 import re
-                sql_match = re.search(r"```(?:sqlite|sql)\s*(.*?)\s*```", sql_query, re.DOTALL)
+                sql_match = re.search(r"```(?:Azure SQL|sql)\s*(.*?)\s*```", sql_query, re.DOTALL)
                 if sql_match:
                     sql_query = sql_match.group(1)
                 else:
@@ -1059,7 +1059,7 @@ class SQLGenerator:
             if pattern:
                 params[pattern_param] = pattern
 
-                if self.db_dialect == "sqlite":
+                if self.db_dialect == "Azure SQL":
                     return f"CASE WHEN {field} NOT REGEXP :{pattern_param} THEN 'Invalid: Pattern mismatch' ELSE 'Valid' END"
                 else:
 
@@ -1159,7 +1159,7 @@ class SQLGenerator:
 
     def analyze_and_fix_query(self, sql_query, sql_params, planner_info, max_attempts=3):
         """
-        Analyze a SQL query for SQLite compatibility issues and make multiple attempts to fix it
+        Analyze a SQL query for Azure SQL compatibility issues and make multiple attempts to fix it
         
         Parameters:
         sql_query (str): The initially generated SQL query
@@ -1217,7 +1217,7 @@ class SQLGenerator:
             
     def _analyze_sqlite_query(self, sql_query, planner_info):
         """
-        Analyze a SQL query for SQLite compatibility issues
+        Analyze a SQL query for Azure SQL compatibility issues
         
         Parameters:
         sql_query (str): The SQL query to analyze
@@ -1229,7 +1229,7 @@ class SQLGenerator:
         try:
 
             prompt = f"""
-    You are an expert SQLite database engineer. Analyze the following SQL query for SQLite compatibility issues and other problems.
+    You are an expert Azure SQL database engineer. Analyze the following SQL query for Azure SQL compatibility issues and other problems.
 
     SQL QUERY:
     {sql_query}
@@ -1243,7 +1243,7 @@ class SQLGenerator:
     - Filtering Fields: {planner_info.get("filtering_fields", [])}
 
     INSTRUCTIONS:
-    1. Analyze for SQLite compatibility issues
+    1. Analyze for Azure SQL compatibility issues
     2. Check for syntax errors
     3. Check for logical errors
     4. Check for potential performance issues
@@ -1292,7 +1292,7 @@ class SQLGenerator:
         try:
 
             prompt = f"""
-    You are an expert SQLite database engineer. Fix the following SQL query based on the analysis.
+    You are an expert Azure SQL database engineer. Fix the following SQL query based on the analysis.
 
     ORIGINAL SQL QUERY:
     {sql_query}
@@ -1323,27 +1323,27 @@ class SQLGenerator:
     3. NEVER include filtering fields in INSERT/UPDATE target field lists
 
     INSTRUCTIONS:
-    1. IMPORTANT: Only generate standard SQLite SQL syntax
+    1. IMPORTANT: Only generate standard Azure SQL SQL syntax
     2. Fix all identified issues in the analysis
     3. Maintain the original query intent
     4. Ensure proper table and column references
     5. Ensure proper join syntax if needed
     6. Ensure proper handling of parameters
-    7. Pay special attention to SQLite-specific syntax (different from other SQL dialects)
+    7. Pay special attention to Azure SQL-specific syntax (different from other SQL dialects)
     8. Target Table Has Data: {isinstance(planner_info.get("target_data_samples", {}), pd.DataFrame) and not planner_info.get("target_data_samples", {}).empty}
     9. Ensure filtering fields are not included in INSERT/UPDATE operations
 
     REQUIREMENTS:
     1. Return ONLY the fixed SQL query, with no explanations or markdown
-    2. Ensure the query is valid SQLite syntax
+    2. Ensure the query is valid Azure SQL syntax
     3. If a parameter should be used, keep the same parameter format
     4. Ensure the generated SQL meets the requirements of the query type
-    5. Be especially careful with SQLite-specific features:
-       - SQLite uses IFNULL not ISNULL
-       - SQLite does not support RIGHT JOIN or FULL JOIN
-       - SQLite has limited support for common table expressions
-       - SQLite UPDATE with JOIN requires a specific syntax
-       - SQLite has no BOOLEAN type (use INTEGER 0/1)
+    5. Be especially careful with Azure SQL-specific features:
+       - Azure SQL uses IFNULL not ISNULL
+       - Azure SQL does not support RIGHT JOIN or FULL JOIN
+       - Azure SQL has limited support for common table expressions
+       - Azure SQL UPDATE with JOIN requires a specific syntax
+       - Azure SQL has no BOOLEAN type (use INTEGER 0/1)
     """
 
 
@@ -1360,7 +1360,7 @@ class SQLGenerator:
                 
 
                 import re
-                sql_match = re.search(r"```(?:sqlite|sql)\s*(.*?)\s*```", fixed_query, re.DOTALL)
+                sql_match = re.search(r"```(?:Azure SQL|sql)\s*(.*?)\s*```", fixed_query, re.DOTALL)
                 if sql_match:
                     fixed_query = sql_match.group(1)
                 else:
@@ -1378,7 +1378,7 @@ class SQLGenerator:
             
     def _is_valid_sqlite_query(self, sql_query):
         """
-        Check if a SQL query is valid SQLite syntax
+        Check if a SQL query is valid Azure SQL syntax
         
         Parameters:
         sql_query (str): The SQL query to check
