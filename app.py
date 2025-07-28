@@ -317,7 +317,7 @@ def main():
                 st.session_state.last_query = query
                 
                 # Call the DMTool
-                result, session_id = st.session_state.dm_tool.process_sequential_query(
+                result, session_id,sql_query = st.session_state.dm_tool.process_sequential_query(
                     query=query,
                     object_id=object_id,
                     segment_id=segment_id,
@@ -331,6 +331,7 @@ def main():
                 # Store results
                 st.session_state.query_results = result
                 st.session_state.current_session_id = session_id
+                st.session_state.generated_sql = sql_query
                 
                 # Extract metadata if result is a DataFrame with attrs
                 if isinstance(result, pd.DataFrame) and hasattr(result, 'attrs'):

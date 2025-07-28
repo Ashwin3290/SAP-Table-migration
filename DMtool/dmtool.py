@@ -629,7 +629,7 @@ class DMTool:
                 sql_query, sql_params = self.sql_generator.generate_sql(sql_plan, planner_info, template)
                 logger.info(f"Generated SQL query: {sql_query}")
                 result = self._execute_sql_query(sql_query, sql_params, planner_info)
-
+                print(result)
 
                 if isinstance(result, dict) and "error_type" in result:
                     logger.error(f"SQLite execution error: {result}")
@@ -717,16 +717,16 @@ class DMTool:
                             except Exception as e:
                                 logger.warning(f"Could not save transformation record: {e}")
 
-                            return target_data, session_id
+                            return target_data, session_id , sql_query
                         else:
 
                             empty_df = pd.DataFrame()
                             empty_df.attrs['message'] = f"Target table '{target_table}' is empty after transformation"
-                            return empty_df, session_id
+                            return empty_df, session_id, sql_query
                             
                     except Exception as e:
 
-                        return  result, session_id
+                        return  result, session_id , sql_query
                         
             except Exception as e:
                 logger.error(f"Error in process_sequential_query: {e}")
@@ -789,18 +789,18 @@ class DMTool:
                 
             
             if operation_type == "INSERT":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=True)
             elif operation_type == "UPDATE":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=True)
             elif operation_type == "DELETE":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=True)
             elif operation_type == "ALTER":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=True)
             elif operation_type == "WITH":
                 if "INSERT INTO" in sql_query.upper():
-                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=True)
                 elif "UPDATE" in sql_query.upper():
-                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=True)
                 else:
 
                     return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
