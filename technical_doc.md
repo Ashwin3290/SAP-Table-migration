@@ -572,7 +572,7 @@ The system integrates with Google's Gemini API for natural language processing a
 ```python
 client = genai.Client(api_key=api_key)
 response = client.models.generate_content(
-    model="gemini-2.5-flash-preview-04-17-thinking-exp-01-21", 
+    model="gemini-2.5-flash-thinking-exp-01-21", 
     contents=prompt,
     config=types.GenerateContentConfig(temperature=0.2)
 )
