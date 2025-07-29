@@ -1,7 +1,5 @@
 import logging
 import json
-import re
-import sqlite3
 import pandas as pd
 from google import genai
 from google.genai import types
@@ -9,7 +7,7 @@ import traceback
 import os
 from typing import Dict, List, Any, Optional, Union, Tuple
 
-from DMtool.query_analyzer import SQLiteQueryAnalyzer
+from DMtool.query_analyzer import SQLQueryAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +99,7 @@ class SQLGenerator:
             initial_sql_query, initial_sql_params = self.generate_sql_with_llm(sql_plan, planner_info,template["query"])
             
 
-            query_analyzer = SQLiteQueryAnalyzer()
+            query_analyzer = SQLQueryAnalyzer()
             fixed_sql_query, fixed_sql_params, is_valid = query_analyzer.analyze_and_fix_query(
                 initial_sql_query, initial_sql_params, planner_info
             )
@@ -225,9 +223,13 @@ class SQLGenerator:
     8. Properly handle key fields for matching records in UPDATE operations
     9. Return ONLY the final SQL query with no explanations or markdown formatting
 
-    CRITICAL Azure SQL-SPECIFIC SYNTAX:
-    - Azure SQL does not support RIGHT JOIN or FULL JOIN (use LEFT JOIN with table order swapped instead)
-    - Azure SQL uses IFNULL instead of ISNULL for handling nulls
+    CRITICAL AZURE SQL SERVER SYNTAX:
+    - Use ISNULL(column, default_value) for null handling
+    - Use GETDATE() for current date, not date('now')
+    - Use DATEPART(part, date) for date parts, not strftime()
+    - Use square brackets [table_name] for identifiers with spaces
+    - Use NVARCHAR instead of TEXT for string columns
+    - Parameter format: @param_name or ? for positional
     - Azure SQL UPDATE with JOIN requires FROM clause (different from standard SQL)
     - Azure SQL has no BOOLEAN type (use INTEGER 0/1)
     - For UPDATE with data from another table, use: UPDATE target SET col = subquery.col FROM (SELECT...) AS subquery WHERE target.key = subquery.key
@@ -861,15 +863,15 @@ class SQLGenerator:
                 
 
                 if isinstance(value, list):
-                    placeholders = [f":param_{i}_{j}" for j in range(len(value))]
+                    placeholders = ["?" for j in range(len(value))]
                     where_parts.append(f"{field_ref} IN ({', '.join(placeholders)})")
                     
                     for j, val in enumerate(value):
                         params[f"param_{i}_{j}"] = val
                 else:
-                    where_parts.append(f"{field_ref} = :{param_name}")
+                    where_parts.append(f"{field_ref} = ?")
                     params[param_name] = value
-        
+                            
         if where_parts:
             return f"WHERE {' AND '.join(where_parts)}", params
         else:
@@ -1172,12 +1174,12 @@ class SQLGenerator:
         """
         try:
 
-            if self._is_valid_sqlite_query(sql_query):
+            if self._is_valid_sql_query(sql_query):
                 return sql_query, sql_params, True
                 
             
 
-            analysis = self._analyze_sqlite_query(sql_query, planner_info)
+            analysis = self._analyze_sql_query(sql_query, planner_info)
             
             best_query = sql_query
             best_params = sql_params
@@ -1186,7 +1188,7 @@ class SQLGenerator:
             for attempt in range(max_attempts):
                 
 
-                fixed_query, fixed_params = self._fix_sqlite_query(
+                fixed_query, fixed_params = self._fix_sql_query(
                     best_query, 
                     sql_params, 
                     planner_info, 
@@ -1195,7 +1197,7 @@ class SQLGenerator:
                 )
                 
 
-                if self._is_valid_sqlite_query(fixed_query):
+                if self._is_valid_sql_query(fixed_query):
                     return fixed_query, fixed_params, True
                     
 
@@ -1205,7 +1207,7 @@ class SQLGenerator:
                     
 
                 if attempt < max_attempts - 1:
-                    analysis = self._analyze_sqlite_query(fixed_query, planner_info)
+                    analysis = self._analyze_sql_query(fixed_query, planner_info)
                     
 
             logger.warning(f"Could not generate a perfectly valid query after {max_attempts} attempts")
@@ -1215,7 +1217,7 @@ class SQLGenerator:
             logger.error(f"Error in analyze_and_fix_query: {e}")
             return sql_query, sql_params, False
             
-    def _analyze_sqlite_query(self, sql_query, planner_info):
+    def _analyze_sql_query(self, sql_query, planner_info):
         """
         Analyze a SQL query for Azure SQL compatibility issues
         
@@ -1272,10 +1274,10 @@ class SQLGenerator:
                 return "Failed to analyze query"
                 
         except Exception as e:
-            logger.error(f"Error in _analyze_sqlite_query: {e}")
+            logger.error(f"Error in _analyze_sql_query: {e}")
             return f"Error analyzing query: {e}"
             
-    def _fix_sqlite_query(self, sql_query, sql_params, planner_info, analysis, attempt_number):
+    def _fix_sql_query(self, sql_query, sql_params, planner_info, analysis, attempt_number):
         """
         Fix a SQL query based on analysis
         
@@ -1339,11 +1341,10 @@ class SQLGenerator:
     3. If a parameter should be used, keep the same parameter format
     4. Ensure the generated SQL meets the requirements of the query type
     5. Be especially careful with Azure SQL-specific features:
-       - Azure SQL uses IFNULL not ISNULL
-       - Azure SQL does not support RIGHT JOIN or FULL JOIN
-       - Azure SQL has limited support for common table expressions
-       - Azure SQL UPDATE with JOIN requires a specific syntax
-       - Azure SQL has no BOOLEAN type (use INTEGER 0/1)
+        - Azure SQL Server uses ISNULL not IFNULL
+        - Use GETDATE() for current date
+        - Use NVARCHAR for string columns
+        - Use proper date functions like DATEPART, FORMAT
     """
 
 
@@ -1373,10 +1374,10 @@ class SQLGenerator:
                 return sql_query, sql_params
                 
         except Exception as e:
-            logger.error(f"Error in _fix_sqlite_query: {e}")
+            logger.error(f"Error in _fix_sql_query: {e}")
             return sql_query, sql_params
             
-    def _is_valid_sqlite_query(self, sql_query):
+    def _is_valid_sql_query(self, sql_query):
         """
         Check if a SQL query is valid Azure SQL syntax
         
@@ -1412,7 +1413,7 @@ class SQLGenerator:
             
             return True
         except Exception as e:
-            logger.error(f"Error in _is_valid_sqlite_query: {e}")
+            logger.error(f"Error in _is_valid_sql_query: {e}")
             return False
             
     def _compare_query_quality(self, new_query, old_query, planner_info):
@@ -1436,7 +1437,7 @@ class SQLGenerator:
                 return True
                 
 
-            if not self._is_valid_sqlite_query(old_query) and self._is_valid_sqlite_query(new_query):
+            if not self._is_valid_sql_query(old_query) and self._is_valid_sql_query(new_query):
                 return True
                 
 
@@ -1483,11 +1484,11 @@ class SQLGenerator:
                 return True
                 
 
-            sqlite_patterns = ["IFNULL", "CASE WHEN", "COALESCE", "GROUP BY", "LEFT JOIN"]
-            sqlite_score_new = sum(1 for pattern in sqlite_patterns if pattern.upper() in new_query.upper())
-            sqlite_score_old = sum(1 for pattern in sqlite_patterns if pattern.upper() in old_query.upper())
+            sql_patterns = ["IFNULL", "CASE WHEN", "COALESCE", "GROUP BY", "LEFT JOIN"]
+            sql_score_new = sum(1 for pattern in sql_patterns if pattern.upper() in new_query.upper())
+            sql_score_old = sum(1 for pattern in sql_patterns if pattern.upper() in old_query.upper())
             
-            if sqlite_score_new > sqlite_score_old:
+            if sql_score_new > sql_score_old:
                 return True
                 
 

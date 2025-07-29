@@ -64,21 +64,11 @@ class SQLExecutor:
             conn = self._get_connection()
             cursor = conn.cursor()
             
-            # Convert named parameters to positional if needed
             if params:
-                # Convert dict params to tuple for pyodbc
-                param_values = tuple(params.values())
-                # Replace named placeholders with ? for pyodbc
-                formatted_query = query
-                for key in params.keys():
-                    formatted_query = formatted_query.replace(f":{key}", "?")
-                cursor.execute(formatted_query, param_values)
+                cursor.execute(query, params)
             else:
                 cursor.execute(query)
                 
-            if commit:
-                conn.commit()
-            
             if fetch_results:
                 # Fetch all rows and convert to list of dictionaries
                 columns = [column[0] for column in cursor.description] if cursor.description else []
@@ -128,13 +118,7 @@ class SQLExecutor:
             conn = self._get_connection()
             
             if params:
-                # Convert dict params to tuple for pandas
-                param_values = tuple(params.values())
-                # Replace named placeholders with ? for pyodbc
-                formatted_query = query
-                for key in params.keys():
-                    formatted_query = formatted_query.replace(f":{key}", "?")
-                df = pd.read_sql_query(formatted_query, conn, params=param_values)
+                df = pd.read_sql_query(query, conn, params=params)
             else:
                 df = pd.read_sql_query(query, conn)
                 

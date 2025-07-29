@@ -1,7 +1,5 @@
 import logging
 import json
-import re
-import sqlite3
 from typing import Dict, List, Any, Optional, Union, Tuple
 from google import genai
 from google.genai import types
@@ -11,12 +9,12 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-class SQLiteQueryAnalyzer:
-    """Analyzes and fixes SQLite queries to ensure compatibility and correctness"""
+class SQLQueryAnalyzer:
+    """Analyzes and fixes sql queries to ensure compatibility and correctness"""
     
     def analyze_and_fix_query(self, sql_query, sql_params, planner_info, max_attempts=3):
         """
-        Analyze a SQL query for SQLite compatibility issues and make multiple attempts to fix it
+        Analyze a SQL query for sql compatibility issues and make multiple attempts to fix it
         
         Parameters:
         sql_query (str): The initially generated SQL query
@@ -29,12 +27,12 @@ class SQLiteQueryAnalyzer:
         """
         try:
 
-            if self._is_valid_sqlite_query(sql_query):
+            if self._is_valid_sql_query(sql_query):
                 return sql_query, sql_params, True
                 
             
 
-            analysis = self._analyze_sqlite_query(sql_query, planner_info)
+            analysis = self._analyze_sql_query(sql_query, planner_info)
             
             best_query = sql_query
             best_params = sql_params
@@ -43,7 +41,7 @@ class SQLiteQueryAnalyzer:
             for attempt in range(max_attempts):
                 
 
-                fixed_query, fixed_params = self._fix_sqlite_query(
+                fixed_query, fixed_params = self._fix_sql_query(
                     best_query, 
                     sql_params, 
                     planner_info, 
@@ -52,7 +50,7 @@ class SQLiteQueryAnalyzer:
                 )
                 
 
-                if self._is_valid_sqlite_query(fixed_query):
+                if self._is_valid_sql_query(fixed_query):
                     return fixed_query, fixed_params, True
                     
 
@@ -62,7 +60,7 @@ class SQLiteQueryAnalyzer:
                     
 
                 if attempt < max_attempts - 1:
-                    analysis = self._analyze_sqlite_query(fixed_query, planner_info)
+                    analysis = self._analyze_sql_query(fixed_query, planner_info)
                     
 
             logger.warning(f"Could not generate a perfectly valid query after {max_attempts} attempts")
@@ -72,9 +70,9 @@ class SQLiteQueryAnalyzer:
             logger.error(f"Error in analyze_and_fix_query: {e}")
             return sql_query, sql_params, False
             
-    def _analyze_sqlite_query(self, sql_query, planner_info):
+    def _analyze_sql_query(self, sql_query, planner_info):
         """
-        Analyze a SQL query for SQLite compatibility issues
+        Analyze a SQL query for sql compatibility issues
         
         Parameters:
         sql_query (str): The SQL query to analyze
@@ -86,8 +84,7 @@ class SQLiteQueryAnalyzer:
         try:
 
             prompt = f"""
-You are an expert SQLite database engineer. Analyze the following SQL query for SQLite compatibility issues and other problems.
-
+You are an expert Azure SQL Server database engineer. Analyze the following SQL query for Azure SQL Server compatibility issues and other problems.
 SQL QUERY:
 {sql_query}
 
@@ -99,7 +96,7 @@ CONTEXT INFORMATION:
 - Target Fields: {planner_info.get("target_sap_fields", [])}
 
 INSTRUCTIONS:
-1. Analyze for SQLite compatibility issues
+1. Analyze for sql compatibility issues
 2. Check for syntax errors
 3. Check for logical errors
 4. Check for potential performance issues
@@ -126,10 +123,10 @@ Your analysis should be in a structured format with clear categories of issues.
                 return "Failed to analyze query"
                 
         except Exception as e:
-            logger.error(f"Error in _analyze_sqlite_query: {e}")
+            logger.error(f"Error in _analyze_sql_query: {e}")
             return f"Error analyzing query: {e}"
             
-    def _fix_sqlite_query(self, sql_query, sql_params, planner_info, analysis, attempt_number):
+    def _fix_sql_query(self, sql_query, sql_params, planner_info, analysis, attempt_number):
         """
         Fix a SQL query based on analysis
         
@@ -146,7 +143,7 @@ Your analysis should be in a structured format with clear categories of issues.
         try:
 
             prompt = f"""
-You are an expert SQLite database engineer. Fix the following SQL query based on the analysis.
+You are an expert sql database engineer. Fix the following SQL query based on the analysis.
 
 ORIGINAL SQL QUERY:
 {sql_query}
@@ -166,26 +163,26 @@ CONTEXT INFORMATION:
 - Filtering Conditions: {json.dumps(planner_info.get("extracted_conditions", {}), indent=2)}
 
 INSTRUCTIONS:
-1. IMPORTANT: Only generate standard SQLite SQL syntax
+1. IMPORTANT: Only generate standard sql SQL syntax
 2. Fix all identified issues in the analysis
 3. Maintain the original query intent
 4. Ensure proper table and column references
 5. Ensure proper join syntax if needed
 6. Ensure proper handling of parameters
-7. Pay special attention to SQLite-specific syntax (different from other SQL dialects)
+7. Pay special attention to sql-specific syntax (different from other SQL dialects)
 8. Target Table Has Data: {isinstance(planner_info.get("target_data_samples", {}), pd.DataFrame) and not planner_info.get("target_data_samples", {}).empty}
 
 REQUIREMENTS:
 1. Return ONLY the fixed SQL query, with no explanations or markdown
-2. Ensure the query is valid SQLite syntax
+2. Ensure the query is valid sql syntax
 3. If a parameter should be used, keep the same parameter format
 4. Ensure the generated SQL meets the requirements of the query type
-5. Be especially careful with SQLite-specific features:
-   - SQLite uses IFNULL not ISNULL
-   - SQLite does not support RIGHT JOIN or FULL JOIN
-   - SQLite has limited support for common table expressions
-   - SQLite UPDATE with JOIN requires a specific syntax
-   - SQLite has no BOOLEAN type (use INTEGER 0/1)
+5. Be especially careful with sql-specific features:
+   - Azure sql uses 
+   - sql does not support RIGHT JOIN or FULL JOIN
+   - sql has limited support for common table expressions
+   - sql UPDATE with JOIN requires a specific syntax
+   - sql has no BOOLEAN type (use INTEGER 0/1)
 """
 
 
@@ -202,7 +199,7 @@ REQUIREMENTS:
                 
 
                 import re
-                sql_match = re.search(r"```(?:sqlite|sql)\s*(.*?)\s*```", fixed_query, re.DOTALL)
+                sql_match = re.search(r"```(?:sql|sql)\s*(.*?)\s*```", fixed_query, re.DOTALL)
                 if sql_match:
                     fixed_query = sql_match.group(1)
                 else:
@@ -215,12 +212,12 @@ REQUIREMENTS:
                 return sql_query, sql_params
                 
         except Exception as e:
-            logger.error(f"Error in _fix_sqlite_query: {e}")
+            logger.error(f"Error in _fix_sql_query: {e}")
             return sql_query, sql_params
             
-    def _is_valid_sqlite_query(self, sql_query):
+    def _is_valid_sql_query(self, sql_query):
         """
-        Check if a SQL query is valid SQLite syntax
+        Check if a SQL query is valid sql syntax
         
         Parameters:
         sql_query (str): The SQL query to check
@@ -245,18 +242,12 @@ REQUIREMENTS:
             if not (has_select or has_insert or has_update or has_create, has_drop or has_alter):
                 return False
                 
-
-            if "RIGHT JOIN" in sql_upper or "FULL JOIN" in sql_upper:
+            if "IFNULL" in sql_upper:
                 return False
                 
-            if "ISNULL" in sql_upper:
-                return False
-                
-
-            
             return True
         except Exception as e:
-            logger.error(f"Error in _is_valid_sqlite_query: {e}")
+            logger.error(f"Error in _is_valid_sql_query: {e}")
             return False
             
     def _compare_query_quality(self, new_query, old_query, planner_info):
@@ -280,7 +271,7 @@ REQUIREMENTS:
                 return True
                 
 
-            if not self._is_valid_sqlite_query(old_query) and self._is_valid_sqlite_query(new_query):
+            if not self._is_valid_sql_query(old_query) and self._is_valid_sql_query(new_query):
                 return True
                 
 
@@ -302,11 +293,11 @@ REQUIREMENTS:
                 return True
                 
 
-            sqlite_patterns = ["IFNULL", "CASE WHEN", "COALESCE", "GROUP BY", "LEFT JOIN"]
-            sqlite_score_new = sum(1 for pattern in sqlite_patterns if pattern.upper() in new_query.upper())
-            sqlite_score_old = sum(1 for pattern in sqlite_patterns if pattern.upper() in old_query.upper())
+            sql_patterns = ["IFNULL", "CASE WHEN", "COALESCE", "GROUP BY", "LEFT JOIN"]
+            sql_score_new = sum(1 for pattern in sql_patterns if pattern.upper() in new_query.upper())
+            sql_score_old = sum(1 for pattern in sql_patterns if pattern.upper() in old_query.upper())
             
-            if sqlite_score_new > sqlite_score_old:
+            if sql_score_new > sql_score_old:
                 return True
                 
 

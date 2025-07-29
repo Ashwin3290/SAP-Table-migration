@@ -92,7 +92,7 @@
   {
     "id": "date_extraction",
     "prompt": "Add a new column named {new_column} to the target table and extract {date_part} from {date_field}",
-    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = substr({date_field}, {start_pos}, {length})",
+    "query": "ALTER TABLE {target_table} ADD {new_column} NVARCHAR(255); UPDATE {target_table} SET {new_column} = substr({date_field}, {start_pos}, {length})",
     "plan": [
       "1. Identify the target table to modify",
       "2. Identify the new column name to add",
@@ -117,7 +117,7 @@
   {
     "id": "date_calculation",
     "prompt": "Add a new column for {calculation_type} based on {date_field}",
-    "query": "ALTER TABLE {target_table} ADD COLUMN {target_field} TEXT; UPDATE {target_table} SET {target_field} = CASE WHEN '{calculation_type}' = 'last_month_end' THEN substr({date_field}, 1, 4) || '-' || substr({date_field}, 5, 2) || '-01', '-1 day') WHEN '{calculation_type}' = 'system_date' THEN date('now') END",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {target_field} TEXT; UPDATE {target_table} SET {target_field} = CASE WHEN '{calculation_type}' = 'last_month_end' THEN substr({date_field}, 1, 4) || '-' || substr({date_field}, 5, 2) || '-01', '-1 day') WHEN '{calculation_type}' = 'system_date' THEN GETDATE() END",
     "plan": [
       "1. Identify the calculation type (last_month_end, system_date, etc.)",
       "2. Add a new column to store the calculated date",
@@ -128,7 +128,7 @@
   {
     "id": "get_current_date",
     "prompt": "Add a new column with system date",
-    "query": "ALTER TABLE {target_table} ADD COLUMN {target_field} TEXT; UPDATE {target_table} SET {target_field} = date('now')",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {target_field} TEXT; UPDATE {target_table} SET {target_field} = GETDATE()",
     "plan": [
       "1. Identify the target table",
       "2. Add a new column to store the system date",
@@ -193,7 +193,7 @@
   {
     "id": "string_length_calculation",
     "prompt": "Calculate the length of {field1} and put it in {field2} and add a new column {new_column} if length > {threshold} set '{value1}' else '{value2}'",
-    "query": "UPDATE {target_table} SET {field2} = length({field1}); ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = CASE WHEN length({field1}) > {threshold} THEN '{value1}' ELSE '{value2}' END",
+    "query": "UPDATE {target_table} SET {field2} = length({field1}); ALTER TABLE {target_table} ADD {new_column} NVARCHAR(255); UPDATE {target_table} SET {new_column} = CASE WHEN length({field1}) > {threshold} THEN '{value1}' ELSE '{value2}' END",
     "plan": [
       "1. Identify the source field to calculate length on",
       "2. Identify the target field to store the length",
@@ -283,7 +283,7 @@
     {
     "id": "extract_day_from_yyyymmdd_field",
     "prompt": "Add a new column named {new_column} to the target table. For each record, extract only the day part from the {source_field} field (for example, from \"20231208\" extract \"08\") and store it in the {new_column} column.",
-    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = substr(CAST({source_field} AS TEXT), 7, 2)",
+    "query": "ALTER TABLE {target_table} ADD {new_column} NVARCHAR(255); UPDATE {target_table} SET {new_column} = substr(CAST({source_field} AS TEXT), 7, 2)",
     "plan": [
       "1. Add a new column to the target table for storing the extracted day",
       "2. Cast the source field to TEXT to ensure string operations work correctly",
@@ -294,7 +294,7 @@
   {
     "id": "extract_year_from_yyyymmdd_field", 
     "prompt": "Add a new column named {new_column} to the target table. For each record, extract only the year part from the {source_field} field (for example, from \"20231208\" extract \"2023\") and store it in the {new_column} column.",
-    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = substr(CAST({source_field} AS TEXT), 1, 4)",
+    "query": "ALTER TABLE {target_table} ADD {new_column} NVARCHAR(255); UPDATE {target_table} SET {new_column} = substr(CAST({source_field} AS TEXT), 1, 4)",
     "plan": [
       "1. Add a new column to the target table for storing the extracted year",
       "2. Cast the source field to TEXT to ensure string operations work correctly", 
@@ -305,7 +305,7 @@
   {
     "id": "extract_month_from_yyyymmdd_field",
     "prompt": "Add a new column named {new_column} to the target table. For each record, extract only the month part from the {source_field} field (for example, from \"20231208\" extract \"12\") and store it in the {new_column} column.",
-    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = substr(CAST({source_field} AS TEXT), 5, 2)",
+    "query": "ALTER TABLE {target_table} ADD {new_column} NVARCHAR(255); UPDATE {target_table} SET {new_column} = substr(CAST({source_field} AS TEXT), 5, 2)",
     "plan": [
       "1. Add a new column to the target table for storing the extracted month",
       "2. Cast the source field to TEXT to ensure string operations work correctly",
@@ -316,7 +316,7 @@
   {
     "id": "extract_quarter_from_yyyymmdd_field",
     "prompt": "Add a new column named {new_column} to the target table. For each record, determine the quarter (Q1, Q2, Q3, or Q4) of the date in the {source_field} field and store this value in the {new_column} column.",
-    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = CASE WHEN substr({source_field}, 5, 2) AS INTEGER) BETWEEN 1 AND 3 THEN 'Q1' WHEN substr({source_field}, 5, 2) AS INTEGER) BETWEEN 4 AND 6 THEN 'Q2' WHEN substr({source_field} 5, 2) AS INTEGER) BETWEEN 7 AND 9 THEN 'Q3' ELSE 'Q4' END",
+    "query": "ALTER TABLE {target_table} ADD {new_column} NVARCHAR(255); UPDATE {target_table} SET {new_column} = CASE WHEN substr({source_field}, 5, 2) AS INTEGER) BETWEEN 1 AND 3 THEN 'Q1' WHEN substr({source_field}, 5, 2) AS INTEGER) BETWEEN 4 AND 6 THEN 'Q2' WHEN substr({source_field} 5, 2) AS INTEGER) BETWEEN 7 AND 9 THEN 'Q3' ELSE 'Q4' END",
     "plan": [
       "1. Add a new column to the target table for storing the quarter",
       "2. Extract the month part from YYYYMMDD format using substr()",
@@ -328,7 +328,7 @@
   {
     "id": "calculate_last_date_previous_month",
     "prompt": "Add a new column named {new_column} to the target table. For each record, calculate the last date of the previous month based on the value in the {source_field} field, and store this date in the {new_column} column.",
-    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = substr(CAST({source_field} AS TEXT), 1, 4) || '-' || substr(CAST({source_field} AS TEXT), 5, 2) || '-01', '-1 day')",
+    "query": "ALTER TABLE {target_table} ADD {new_column} NVARCHAR(255); UPDATE {target_table} SET {new_column} = EOMONTH(DATEFROMPARTS(LEFT({source_field}, 4), SUBSTRING({source_field}, 5, 2), 1), -1)",
     "plan": [
       "1. Add a new column to the target table for storing the last date of previous month",
       "2. Convert YYYYMMDD to YYYY-MM-01 format (first day of the month)",
@@ -339,17 +339,17 @@
   {
     "id": "add_system_date_column",
     "prompt": "Add a new column to the target table named {new_column}. Populate this column with the system date (i.e., the current date) for all material records in the target table.",
-    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = date('now')",
+    "query": "ALTER TABLE {target_table} ADD {new_column} NVARCHAR(255); UPDATE {target_table} SET {new_column} = GETDATE()",
     "plan": [
       "1. Add a new column to the target table for storing the system date",
-      "2. Use SQLite's date('now') function to get the current date",
+      "2. Use SQLite's GETDATE() function to get the current date",
       "3. Update all records with the current system date"
     ]
   },
   {
     "id": "extract_weekday_number_from_yyyymmdd",
     "prompt": "Add a new column named {new_column} to the target table. For each record, extract the day of the week as a number (0=Sunday, 1=Monday, etc.) from the {source_field} field and store it in the {new_column} column.",
-    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = strftime('%w', to_date({source_fields}))",
+    "query": "ALTER TABLE {target_table} ADD {new_column} NVARCHAR(255); UPDATE {target_table} SET {new_column} = DATEPART(weekday, CONVERT(DATE, STUFF(STUFF({source_field}, 5, 0, '-'), 8, 0, '-')))",
     "plan": [
       "1. Add a new column to the target table for storing the weekday number",
       "2. Convert YYYYMMDD format to SQLite date format (YYYY-MM-DD)", 
@@ -360,7 +360,7 @@
   {
     "id": "format_date_yyyymmdd_to_readable",
     "prompt": "Add a new column named {new_column} to the target table. For each record, convert the date in {source_field} field from YYYYMMDD format to a readable format like 'December 08, 2023' and store it in the {new_column} column.",
-    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} TEXT; UPDATE {target_table} SET {new_column} = strftime('%B %d, %Y', to_date({source_fields}))",
+    "query": "ALTER TABLE {target_table} ADD {new_column} NVARCHAR(255); UPDATE {target_table} SET {new_column} = FORMAT(CONVERT(DATE, STUFF(STUFF({source_field}, 5, 0, '-'), 8, 0, '-')), 'MMMM dd, yyyy')",
     "plan": [
       "1. Add a new column to the target table for storing the formatted date",
       "2. Convert YYYYMMDD format to SQLite date format (YYYY-MM-DD)",
