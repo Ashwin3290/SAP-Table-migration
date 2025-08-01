@@ -717,16 +717,16 @@ class DMTool:
                             except Exception as e:
                                 logger.warning(f"Could not save transformation record: {e}")
 
-                            return target_data, session_id , sql_query
+                            return target_data, session_id 
                         else:
 
                             empty_df = pd.DataFrame()
                             empty_df.attrs['message'] = f"Target table '{target_table}' is empty after transformation"
-                            return empty_df, session_id, sql_query
+                            return empty_df, session_id
                             
                     except Exception as e:
 
-                        return  result, session_id , sql_query
+                        return  result, session_id 
                         
             except Exception as e:
                 logger.error(f"Error in process_sequential_query: {e}")
