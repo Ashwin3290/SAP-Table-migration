@@ -477,9 +477,9 @@ class ClassificationEnhancer:
 
             for mentioned_segment in segments_mentioned:
 
-                match_result = find_closest_match(mentioned_segment, available_segments, threshold=0.5)
+                match_result = find_closest_match(mentioned_segment, available_segments, threshold=0.3)
 
-                if match_result['match'] and match_result['score'] >= 0.5:
+                if match_result['match'] and match_result['score'] >= 0.3:
                     matched_segment = match_result['match']
                     matched_segments.append(matched_segment)
 
@@ -881,9 +881,8 @@ CLASSIFICATION CRITERIA:
 
 **CROSS_SEGMENT indicators:**
 - References to previous segments: "basic segment", "marc segment", "makt segment"
-- Temporal references: "previous", "prior", "last", "earlier" segment/transformation
 - Segment keywords: "BASIC", "PLANT", "SALES", "PURCHASING", "CLASSIFICATION", "MRP", "WAREHOUSE"
-- Phrases like: "from segment", "use segment", "based on segment", "transformation X"
+- Phrases like: "from segment", "use segment", "based on segment"
 
 **VALIDATION_OPERATION indicators:**
 - Words like: "validate", "verify", "ensure", "check", "confirm"
@@ -1468,6 +1467,9 @@ FUZZY MATCHING RESULTS:
 Column Glossary Matching:
 - Columns Matched: {classification_details.get('enhanced_matching', {}).get('column_glossary_matching', {}).get('matched_columns', []) or 'None'}
 - Column Hints: {classification_details.get('enhanced_matching', {}).get('column_glossary_matching', {}).get('column_hints', {}) or 'None'}
+
+Key Mapping:
+- Key Mappings: {key_mapping if classification_details.get('key_mapping') else 'No key mappings available'}
 
 {"""SEGMENT AND COLUMN MAPPING DETAILS:
 {segment_prompt}
