@@ -52,44 +52,87 @@ def find_closest_match(query, word_list, threshold=0.6):
     if not query or not word_list:
         return {"match": None, "score": 0.0, "all_matches": []}
     
-
     clean_query = re.sub(r'\s+', ' ', query.strip().lower())
     
     matches = []
     for word in word_list:
         clean_word = word.lower()
         
-
-
-        overall_sim = SequenceMatcher(None, clean_query, clean_word).ratio()
-        
-
-        substring_bonus = 0
-        if clean_query in clean_word or clean_word in clean_query:
-            substring_bonus = 0.2
-        
-
-        query_words = clean_query.split()
-        word_words = clean_word.split()
-        word_level_sim = 0
-        
-        if len(query_words) > 1 or len(word_words) > 1:
-
-            word_matches = 0
-            total_words = max(len(query_words), len(word_words))
+        if clean_query == clean_word:
+            final_score = 1.0
+        else:
             
-            for q_word in query_words:
-                best_word_match = 0
-                for w_word in word_words:
-                    word_sim = SequenceMatcher(None, q_word, w_word).ratio()
-                    best_word_match = max(best_word_match, word_sim)
-                word_matches += best_word_match
+            char_similarity = SequenceMatcher(None, clean_query, clean_word).ratio()
             
-            word_level_sim = word_matches / total_words if total_words > 0 else 0
-        
+            substring_score = 0
+            if clean_query in clean_word:
 
-        final_score = (overall_sim * 0.4) + (substring_bonus) + (word_level_sim * 0.5)
-        final_score = min(final_score, 1.0)
+                substring_score = len(clean_query) / len(clean_word)
+            elif clean_word in clean_query:
+                substring_score = len(clean_word) / len(clean_query)
+            
+            query_words = clean_query.split()
+            word_words = clean_word.split()
+            
+            word_level_score = 0
+            if len(query_words) == 1 and len(word_words) == 1:
+                word_level_score = char_similarity
+            else:
+                exact_word_matches = 0
+                for q_word in query_words:
+                    if q_word in word_words:
+                        exact_word_matches += 1
+                
+                fuzzy_matches = 0
+                total_comparisons = max(len(query_words), len(word_words))
+                
+                for q_word in query_words:
+                    best_match_score = 0
+                    for w_word in word_words:
+                        if q_word == w_word:
+                            best_match_score = 1.0
+                            break
+                        else:
+                            word_sim = SequenceMatcher(None, q_word, w_word).ratio()
+                            best_match_score = max(best_match_score, word_sim)
+                    fuzzy_matches += best_match_score
+                
+                word_level_score = fuzzy_matches / total_comparisons if total_comparisons > 0 else 0
+            
+            prefix_score = 0
+            min_len = min(len(clean_query), len(clean_word))
+            if min_len >= 3:
+                common_prefix_len = 0
+                for i in range(min_len):
+                    if clean_query[i] == clean_word[i]:
+                        common_prefix_len += 1
+                    else:
+                        break
+                if common_prefix_len >= 3:
+                    prefix_score = common_prefix_len / max(len(clean_query), len(clean_word))
+            
+
+            case_insensitive_exact = query.strip() == word.strip()
+            case_bonus = 0.1 if case_insensitive_exact and not (clean_query == clean_word) else 0
+            
+            # Calculate final score with weighted components
+            if len(query_words) == 1 and len(word_words) == 1:
+                final_score = (
+                    char_similarity * 0.7 +      # Heavy weight on character similarity
+                    substring_score * 0.2 +       # Some weight on substring matches
+                    prefix_score * 0.1 +          # Small weight on prefix matches
+                    case_bonus                    # Bonus for case-only differences
+                )
+            else:
+                final_score = (
+                    word_level_score * 0.5 +      # Word-level matching
+                    char_similarity * 0.3 +       # Character-level similarity
+                    substring_score * 0.15 +      # Substring matches
+                    prefix_score * 0.05 +         # Prefix matches
+                    case_bonus                    # Case bonus
+                )
+            
+            final_score = min(final_score, 1.0)
         
         if final_score >= threshold:
             matches.append({
@@ -98,10 +141,8 @@ def find_closest_match(query, word_list, threshold=0.6):
                 'original_word': word
             })
     
-
     matches.sort(key=lambda x: x['score'], reverse=True)
     
-
     result = {
         'match': matches[0]['word'] if matches else None,
         'score': matches[0]['score'] if matches else 0.0,
@@ -109,6 +150,163 @@ def find_closest_match(query, word_list, threshold=0.6):
     }
     
     return result
+
+def check_column_exists_in_table(column_name: str, table_name: str, db_path: str = None) -> bool:
+    """
+    Check if a specific column exists in a specific table
+    """
+    try:
+        if not db_path:
+            db_path = os.environ.get('DB_PATH')
+        
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        columns = [row[1] for row in cursor.fetchall()]
+        conn.close()
+        
+        return column_name in columns
+        
+    except Exception as e:
+        logger.error(f"Error checking column {column_name} in table {table_name}: {e}")
+        return False
+
+def generate_table_specific_column_mapping(segment_glossary: Dict[str, List[str]], 
+                                         key_mapping: List[Dict[str, str]], 
+                                         source_tables_from_classification: List[str],
+                                         db_path: str = None) -> Dict[str, Dict[str, str]]:
+    """
+    Generate table-specific column mapping for both target tables used as source and regular source tables
+    """
+    table_column_instructions = {}
+    
+    # Get all target tables from segment glossary
+    target_tables_used_as_source = []
+    for segment_name, tables in segment_glossary.items():
+        target_tables_used_as_source.extend(tables)
+    
+    # For target tables used as source - check which target_col from key_mapping exists
+    for table in target_tables_used_as_source:
+        table_column_instructions[table] = {
+            "table_type": "target_table_used_as_source",
+            "segment_name": None,
+            "column_mappings": {}
+        }
+        
+        # Find which segment this table belongs to
+        for segment_name, tables in segment_glossary.items():
+            if table in tables:
+                table_column_instructions[table]["segment_name"] = segment_name
+                break
+        
+        # Check key mappings for this table
+        for mapping in key_mapping:
+            if isinstance(mapping, dict):
+                source_col = mapping.get('source_col')
+                target_col = mapping.get('target_col')
+                
+                if source_col and target_col:
+                    # Check if target_col exists in this target table
+                    if check_column_exists_in_table(target_col, table, db_path):
+                        table_column_instructions[table]["column_mappings"][source_col] = target_col
+                        logger.info(f"Table {table}: Use '{target_col}' instead of '{source_col}'")
+    
+    # For regular source tables - check which source columns actually exist
+    for table in source_tables_from_classification:
+        if table not in target_tables_used_as_source:  # Don't duplicate target tables
+            table_column_instructions[table] = {
+                "table_type": "regular_source_table",
+                "column_mappings": {}
+            }
+            
+            # For regular source tables, verify the original column names exist
+            for mapping in key_mapping:
+                if isinstance(mapping, dict):
+                    source_col = mapping.get('source_col')
+                    
+                    if source_col:
+                        # Check if source_col exists in this regular source table
+                        if check_column_exists_in_table(source_col, table, db_path):
+                            table_column_instructions[table]["column_mappings"][source_col] = source_col
+                            logger.info(f"Table {table}: Use original column '{source_col}'")
+    
+    return table_column_instructions
+
+def create_enhanced_segment_column_prompt(segment_glossary: Dict[str, List[str]], 
+                                        key_mapping: List[Dict[str, str]], 
+                                        source_tables_from_classification: List[str],
+                                        query_type: str) -> str:
+    """
+    Create enhanced prompt for segment column mapping
+    """
+    if query_type not in ["CROSS_SEGMENT", "JOIN_OPERATION"]:
+        return ""
+    
+    if not segment_glossary and not key_mapping:
+        return ""
+    
+    # Generate table-specific column mappings
+    table_instructions = generate_table_specific_column_mapping(
+        segment_glossary, key_mapping, source_tables_from_classification
+    )
+    
+    if not table_instructions:
+        return ""
+    
+    prompt = """
+CRITICAL COLUMN NAMING INSTRUCTIONS:
+
+"""
+    
+    # Instructions for target tables used as source
+    target_table_instructions = []
+    for table, info in table_instructions.items():
+        if info["table_type"] == "target_table_used_as_source":
+            if info["column_mappings"]:
+                segment_info = f" (from {info['segment_name']} segment)" if info["segment_name"] else ""
+                target_table_instructions.append(f"""
+For table '{table}'{segment_info}:
+  - This is a PREVIOUSLY POPULATED TARGET TABLE now being used as SOURCE
+  - Column name changes:""")
+                
+                for original_name, current_name in info["column_mappings"].items():
+                    target_table_instructions.append(f"    * DO NOT use '{original_name}' → USE '{current_name}' instead")
+    
+    if target_table_instructions:
+        prompt += "TARGET TABLES USED AS SOURCE:\n"
+        prompt += "\n".join(target_table_instructions)
+        prompt += "\n"
+    
+    # Instructions for regular source tables
+    source_table_instructions = []
+    for table, info in table_instructions.items():
+        if info["table_type"] == "regular_source_table":
+            if info["column_mappings"]:
+                source_table_instructions.append(f"""
+For table '{table}':
+  - This is a REGULAR SOURCE TABLE
+  - Use these verified column names:""")
+                
+                for col_name, verified_name in info["column_mappings"].items():
+                    source_table_instructions.append(f"    * Use '{verified_name}'")
+    
+    if source_table_instructions:
+        prompt += "\nREGULAR SOURCE TABLES:\n"
+        prompt += "\n".join(source_table_instructions)
+        prompt += "\n"
+    
+    prompt += """
+IMPORTANT REMINDERS:
+1. Target tables (t_[number]) have DIFFERENT column names than original source tables
+2. When joining target tables with regular source tables, use the CORRECT column names for each table
+3. Example: If joining t_24_Product_Basic_Data_mandatory_Ext with MARC, use:
+   - t_24_Product_Basic_Data_mandatory_Ext.PRODUCT (not MATNR)
+   - MARC.MATNR (not PRODUCT)
+4. Always verify column names match the actual table schema
+
+"""
+    
+    return prompt
 
 class ClassificationEnhancer:
     """
@@ -279,9 +477,9 @@ class ClassificationEnhancer:
 
             for mentioned_segment in segments_mentioned:
 
-                match_result = find_closest_match(mentioned_segment, available_segments, threshold=0.3)
+                match_result = find_closest_match(mentioned_segment, available_segments, threshold=0.5)
 
-                if match_result['match']:
+                if match_result['match'] and match_result['score'] >= 0.5:
                     matched_segment = match_result['match']
                     matched_segments.append(matched_segment)
 
@@ -425,9 +623,140 @@ class ClassificationEnhancer:
             "matched_columns": matched_columns,
             "columns_in_mentioned_table": columns_in_mentioned_table
         }
+        
+    def _match_columns_with_glossary(self, columns_mentioned: List[str], 
+                                    joined_df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Enhanced column matching that includes glossary term matching from joined_df
+        
+        Args:
+            columns_mentioned (List[str]): List of column names mentioned in query
+            joined_df (pd.DataFrame): DataFrame containing description and target_sap_field mappings
+            
+        Returns:
+            Dict[str, Any]: Enhanced column matching results with glossary mappings
+        """
+        try:
+            if joined_df.empty or not columns_mentioned:
+                return {"glossary_matches": {}, "column_hints": {}}
+            
+            # Get available actual column names from database tables
+            available_tables = self._get_available_tables()
+            all_db_columns = {}
+            for table in available_tables:
+                table_columns = self._get_table_columns(table)
+                all_db_columns[table] = table_columns
+            
+            # Extract glossary mappings from joined_df
+            glossary_mappings = {}
+            if 'description' in joined_df.columns and 'target_sap_field' in joined_df.columns:
+                for _, row in joined_df.iterrows():
+                    description = str(row.get('description', '')).strip()
+                    target_field = str(row.get('target_sap_field', '')).strip()
+                    if description and target_field and description != 'nan' and target_field != 'nan':
+                        glossary_mappings[description.lower()] = target_field
+            
+            glossary_matches = {}
+            column_hints = {}
+            
+            for mentioned_column in columns_mentioned:
+                mentioned_lower = mentioned_column.lower().strip()
+                
+                # First, check if this column exists directly in any database table
+                found_in_db = False
+                for table, columns in all_db_columns.items():
+                    if mentioned_column in columns:
+                        found_in_db = True
+                        break
+                
+                # If not found in DB, try glossary matching
+                if not found_in_db:
+                    # Direct glossary lookup first
+                    if mentioned_lower in glossary_mappings:
+                        actual_column = glossary_mappings[mentioned_lower]
+                        glossary_matches[mentioned_column] = {
+                            'actual_column': actual_column,
+                            'match_type': 'direct_glossary',
+                            'confidence': 1.0
+                        }
+                    else:
+                        # Fuzzy matching against glossary terms
+                        glossary_terms = list(glossary_mappings.keys())
+                        fuzzy_result = find_closest_match(mentioned_lower, glossary_terms, threshold=0.7)
+                        
+                        if fuzzy_result['match']:
+                            matched_glossary = fuzzy_result['match']
+                            actual_column = glossary_mappings[matched_glossary]
+                            confidence = fuzzy_result['score']
+                            
+                            glossary_matches[mentioned_column] = {
+                                'actual_column': actual_column,
+                                'matched_glossary_term': matched_glossary,
+                                'match_type': 'fuzzy_glossary',
+                                'confidence': confidence
+                            }
+                            
+                            # Add as hint for the LLM
+                            column_hints[mentioned_column] = f"User likely meant '{actual_column}' (matched via glossary term '{matched_glossary}' with {confidence:.2%} confidence)"
+            
+            return {
+                "glossary_matches": glossary_matches,
+                "column_hints": column_hints,
+                "total_glossary_mappings": len(glossary_mappings)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in _match_columns_with_glossary: {e}")
+            return {"glossary_matches": {}, "column_hints": {}}
+
+    def _enhance_column_matching_with_glossary(self, original_column_result: Dict[str, Any],
+                                            columns_mentioned: List[str],
+                                            joined_df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Enhance existing column matching results with glossary term matching
+        
+        Args:
+            original_column_result (Dict): Original column matching results
+            columns_mentioned (List[str]): Columns mentioned in query
+            joined_df (pd.DataFrame): DataFrame with glossary mappings
+            
+        Returns:
+            Dict[str, Any]: Enhanced column matching results
+        """
+        try:
+            # Get glossary matching results
+            glossary_results = self._match_columns_with_glossary(columns_mentioned, joined_df)
+            
+            # Enhance the original results
+            enhanced_result = original_column_result.copy()
+            enhanced_result["glossary_column_matching"] = glossary_results
+            
+            # Add glossary hints to the existing matched columns
+            if "matched_columns" in enhanced_result:
+                enhanced_matched_columns = enhanced_result["matched_columns"].copy()
+                
+                for mentioned_col, glossary_info in glossary_results["glossary_matches"].items():
+                    if mentioned_col not in enhanced_matched_columns:
+                        # Add the actual column name from glossary
+                        enhanced_matched_columns.append(glossary_info["actual_column"])
+                
+                enhanced_result["matched_columns"] = enhanced_matched_columns
+            
+            # Enhance columns_in_mentioned_table with glossary mappings
+            if "columns_in_mentioned_table" not in enhanced_result:
+                enhanced_result["columns_in_mentioned_table"] = {}
+                
+            
+            return enhanced_result
+            
+        except Exception as e:
+            logger.error(f"Error in _enhance_column_matching_with_glossary: {e}")
+            return original_column_result
+
+
     
     def enhance_classification_details(self, classification_details: Dict[str, Any], 
-                                     current_segment_id: int) -> Dict[str, Any]:
+                                     current_segment_id: int,joined_df: pd.DataFrame = None) -> Dict[str, Any]:
         """
         Main function to enhance classification details with fuzzy matching
         
@@ -459,6 +788,12 @@ class ClassificationEnhancer:
                 segment_match_result["segment_target_tables"]
             )
             
+            if joined_df is not None and not joined_df.empty:
+                column_match_result = self._enhance_column_matching_with_glossary(
+                    column_match_result,
+                    columns_mentioned,
+                    joined_df)
+            
 
             enhanced_matching_info = {
                 "tables_mentioned": table_match_result["matched_tables"],
@@ -466,7 +801,9 @@ class ClassificationEnhancer:
                 "columns_in_mentioned_table": column_match_result["columns_in_mentioned_table"],
                 "segments_mentioned": segment_match_result["matched_segments"],
                 "segment_target_tables": segment_match_result["segment_target_tables"],
-                "table_match_confidence": table_match_result["table_match_confidence"]
+                "table_match_confidence": table_match_result["table_match_confidence"],
+                "column_glossary_matching": column_match_result.get("glossary_column_matching", {}),
+                "column_hints": column_match_result.get("glossary_column_matching", {}).get("column_hints", {})
             }
 
             enhanced_matching_info["segment glossary"] = segment_match_result["segment_target_tables"]
@@ -490,9 +827,10 @@ class ClassificationEnhancer:
             return classification_details
 
 def enhance_classification_before_processing(classification_details: Dict[str, Any], 
-                                           current_segment_id: int,
-                                           db_path: str = None,
-                                           segments_csv_path: str = "segments.csv") -> Dict[str, Any]:
+                                        current_segment_id: int,
+                                        db_path: str = None,
+                                        segments_csv_path: str = "segments.csv",
+                                        joined_df : pd.DataFrame = None) -> Dict[str, Any]:
     """
     Convenience function to enhance classification details
     
@@ -506,7 +844,7 @@ def enhance_classification_before_processing(classification_details: Dict[str, A
         Dict[str, Any]: Enhanced classification details
     """
     enhancer = ClassificationEnhancer(db_path, segments_csv_path)
-    return enhancer.enhance_classification_details(classification_details, current_segment_id)
+    return enhancer.enhance_classification_details(classification_details, current_segment_id,joined_df)
 
 def classify_query_with_llm(query, target_table):
     """
@@ -602,8 +940,11 @@ Respond with a JSON object:
         response = client.models.generate_content(
             model="gemini-2.5-flash", 
             contents=prompt,
-            config=types.GenerateContentConfig(temperature=0.1)
-        )
+            config=types.GenerateContentConfig(
+            temperature=0.05,
+            top_p=0.8,
+            top_k=20
+        ))
         
         if not response or not hasattr(response, "text"):
             logger.warning("Invalid response from Gemini API for query classification")
@@ -1041,7 +1382,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
 
         query_type, classification_details = classify_query_with_llm(query,target_table)
         enhanced_classification = enhance_classification_before_processing(
-            classification_details, segment_id, db_path=os.environ.get('DB_PATH')
+            classification_details, segment_id, db_path=os.environ.get('DB_PATH'),joined_df=joined_df
         )
         classification_details = enhanced_classification
         logger.info(f"Query type: {query_type}")
@@ -1056,8 +1397,19 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
                 target_df_sample_str = json.dumps(target_df_sample, indent=2)
             except Exception as e:
                 logger.warning(f"Error formatting target data sample: {e}")
-                
-
+        
+        segment_prompt = ""
+        if query_type in ["CROSS_SEGMENT", "JOIN_OPERATION"]:
+            key_mapping = context_manager.get_key_mapping(session_id) if session_id else []
+            segment_glossary = enhanced_classification.get('enhanced_matching', {}).get('segment_target_tables', {})
+            source_tables_from_classification = enhanced_classification.get('enhanced_matching', {}).get('tables_mentioned', [])
+            
+            segment_prompt = create_enhanced_segment_column_prompt(
+                segment_glossary, 
+                key_mapping, 
+                source_tables_from_classification,
+                query_type
+            )
         visited_segments_str = "No previously visited segments"
         if visited_segments:
             try:
@@ -1113,7 +1465,20 @@ FUZZY MATCHING RESULTS:
 - Tables with Confidence: {', '.join([f"{table}({conf:.0%})" for table, conf in classification_details.get('enhanced_matching', {}).get('table_match_confidence', {}).items()]) or 'None'}
 - Columns in Mentioned Tables: {', '.join([f"{table}:[{', '.join(cols)}]" for table, cols in classification_details.get('enhanced_matching', {}).get('columns_in_mentioned_table', {}).items()]) or 'None'}
 
+Column Glossary Matching:
+- Columns Matched: {classification_details.get('enhanced_matching', {}).get('column_glossary_matching', {}).get('matched_columns', []) or 'None'}
+- Column Hints: {classification_details.get('enhanced_matching', {}).get('column_glossary_matching', {}).get('column_hints', {}) or 'None'}
+
+{"""SEGMENT AND COLUMN MAPPING DETAILS:
+{segment_prompt}
+VERIFICATION RESULTS:
+- Verified column mappings have been checked against actual database schemas
+- Use the EXACT column names specified above for each table
+- Target tables used as source have different column names than original source tables""" if segment_prompt else ""}
+
 INSTRUCTIONS: Use ONLY the validated table and column names from the mappings above. If a column is missing or a table is invalid, do not include it in your SQL generation.
+Do not invent new tables or columns that are not present in the provided mappings.
+Use the provided segment mappings to identify the correct tables for each segment mentioned in the query.
 """
         
         formatted_prompt = prompt_template.format(
@@ -1121,7 +1486,7 @@ INSTRUCTIONS: Use ONLY the validated table and column names from the mappings ab
             table_desc=list(table_desc.itertuples(index=False)),
             target_df_sample=target_df_sample_str,
             segment_mapping=context_manager.get_segments(session_id) if session_id else [],
-            additional_context=classification_details
+            additional_context=additional_context_prompt
         )
         
 
@@ -1136,7 +1501,7 @@ INSTRUCTIONS: Use ONLY the validated table and column names from the mappings ab
             model="gemini-2.5-flash", 
             contents=formatted_prompt,
             config=types.GenerateContentConfig(
-                temperature=0.5, top_p=0.95, top_k=40
+                temperature=0.5, top_p=0.95, top_k=30
             ),
         )
         
