@@ -707,7 +707,7 @@ PROMPT_TEMPLATES = {
 
     Note:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
-    
+    - Do not invent new tables or columns that are not mentioned in the query or the mappings.
 
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
@@ -769,7 +769,8 @@ PROMPT_TEMPLATES = {
 
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
-    
+    - Do not invent new tables or columns that are not mentioned in the query or the mappings.
+
     INSTRUCTIONS:
     1. Identify which previous segments are referenced in the query
     2. Determine how to link current data with segment data (join conditions)
@@ -823,6 +824,7 @@ PROMPT_TEMPLATES = {
 
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
+    - Do not invent new tables or columns that are not mentioned in the query or the mappings.
     
     
     INSTRUCTIONS:
@@ -874,6 +876,7 @@ PROMPT_TEMPLATES = {
     
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
+    - Do not invent new tables or columns that are not mentioned in the query or the mappings.
     
     INSTRUCTIONS:
     1. Identify the aggregation functions required (sum, count, average, etc.)
@@ -923,6 +926,7 @@ PROMPT_TEMPLATES = {
     
     Note:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
+    - Do not invent new tables or columns that are not mentioned in the query or the mappings.
     
     INSTRUCTIONS:
     1. Identify key entities in the query:
@@ -1114,6 +1118,8 @@ FUZZY MATCHING RESULTS:
 - Columns in Mentioned Tables: {', '.join([f"{table}:[{', '.join(cols)}]" for table, cols in classification_details.get('enhanced_matching', {}).get('columns_in_mentioned_table', {}).items()]) or 'None'}
 
 INSTRUCTIONS: Use ONLY the validated table and column names from the mappings above. If a column is missing or a table is invalid, do not include it in your SQL generation.
+
+
 """
         
         formatted_prompt = prompt_template.format(

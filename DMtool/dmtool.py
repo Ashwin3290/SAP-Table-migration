@@ -522,7 +522,7 @@ class DMTool:
 
     def process_sequential_query(self, query, object_id, segment_id, project_id, session_id=None):
         """
-        Process a query as part of a sequential transformation using SQLite generation
+        Process a query as part of a sequential transformation using SQL generation
         instead of Python code generation
         
         Parameters:
@@ -632,8 +632,8 @@ class DMTool:
 
 
                 if isinstance(result, dict) and "error_type" in result:
-                    logger.error(f"SQLite execution error: {result}")
-                    return f"SQLite execution failed: {result.get('error_message', 'Unknown error')}", session_id
+                    logger.error(f"SQL execution error: {result}")
+                    return f"SQL execution failed: {result.get('error_message', 'Unknown error')}", session_id
 
                 if isinstance(result, dict) and result.get("multi_query_result"):
                     logger.info(f"Processing multi-query result: {result.get('completed_statements', 0)} statements completed")
@@ -676,36 +676,10 @@ class DMTool:
                         planner_info["target_table_name"],
                     )
 
-                try:
-                    context_manager = ContextualSessionManager()
-                    
-
-                    transformation_data = {
-                        "original_query": query,
-                        "generated_sql": sql_query,
-                        "query_type": query_type,
-                        "source_tables": planner_info.get("source_table_name", []),
-                        "target_table": target_table,
-                        "fields_affected": planner_info.get("target_sap_fields", []),
-                        "execution_result": {
-                            "success": True,
-                            "rows_affected": len(target_data) if isinstance(target_data, pd.DataFrame) else 0,
-                            "is_multi_step": isinstance(result, dict) and result.get("multi_query_result", False),
-                            "steps_completed": result.get("completed_statements", 1) if isinstance(result, dict) else 1
-                        },
-                        "is_multi_step": isinstance(result, dict) and result.get("multi_query_result", False),
-                        "steps_completed": result.get("completed_statements", 1) if isinstance(result, dict) else 1
-                    }
-                    
-                    context_manager.add_transformation_record(session_id, transformation_data)
-                    
-                except Exception as e:
-                    logger.warning(f"Could not save transformation record: {e}")
-
                 if target_table and query_type in ["SIMPLE_TRANSFORMATION", "JOIN_OPERATION", "CROSS_SEGMENT", "AGGREGATION_OPERATION"]:
                     try:
 
-                        select_query = f"SELECT * FROM {validate_sql_identifier(target_table)}"
+                        select_query = f"SELECT * FROM [{validate_sql_identifier(target_table)}]"
                         target_data = self.sql_executor.execute_and_fetch_df(select_query)
                         
                         if isinstance(target_data, pd.DataFrame) and not target_data.empty:
@@ -713,20 +687,42 @@ class DMTool:
                             rows_affected = len(target_data)
                             non_null_columns = target_data.dropna(axis=1, how='all').columns.tolist()
                             
-
                             target_data.attrs['transformation_summary'] = {
                                 'rows': rows_affected,
                                 'populated_fields': non_null_columns,
                                 'target_table': target_table,
                                 'query_type': query_type
                             }
-                            
-                            return  target_data, session_id
+                            try:
+                                context_manager = ContextualSessionManager()
+                                transformation_data = {
+                                    "original_query": query,
+                                    "generated_sql": sql_query,
+                                    "query_type": query_type,
+                                    "source_tables": planner_info.get("source_table_name", []),
+                                    "target_table": target_table,
+                                    "fields_affected": planner_info.get("target_sap_fields", []),
+                                    "execution_result": {
+                                        "success": True,
+                                        "rows_affected": len(target_data) if isinstance(target_data, pd.DataFrame) else 0,
+                                        "is_multi_step": isinstance(result, dict) and result.get("multi_query_result", False),
+                                        "steps_completed": result.get("completed_statements", 1) if isinstance(result, dict) else 1
+                                    },
+                                    "is_multi_step": isinstance(result, dict) and result.get("multi_query_result", False),
+                                    "steps_completed": result.get("completed_statements", 1) if isinstance(result, dict) else 1
+                                }
+                                
+                                context_manager.add_transformation_record(session_id, transformation_data)
+                                
+                            except Exception as e:
+                                logger.warning(f"Could not save transformation record: {e}")
+
+                            return target_data, session_id
                         else:
 
                             empty_df = pd.DataFrame()
                             empty_df.attrs['message'] = f"Target table '{target_table}' is empty after transformation"
-                            return  empty_df, session_id
+                            return empty_df, session_id
                             
                     except Exception as e:
 
@@ -756,6 +752,13 @@ class DMTool:
             return False        
         statements = self.sql_executor.split_sql_statements(sql_query)
         return len(statements) > 1
+    
+    def create_session_id(self):
+        """ Create a new session ID for tracking transformations"""
+        context_manager = ContextualSessionManager()
+        session_id = context_manager.create_session()
+        logger.info(f"Created new session: {session_id}")
+        return session_id
 
     def _execute_sql_query(self, sql_query, sql_params, planner_info):
         """
