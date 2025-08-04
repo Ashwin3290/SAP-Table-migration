@@ -991,7 +991,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         username = os.environ.get('AZURE_SQL_USERNAME')
         password = os.environ.get('AZURE_SQL_PASSWORD')
         driver = os.environ.get('AZURE_SQL_DRIVER', 'ODBC Driver 18 for SQL Server')
-        conn = pyodbc.connect(f"Driver={driver};Server={server};Database={database};Uid={username};Pwd={password};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;")
+        conn = pyodbc.connect(os.environ.get(str('AZURE_SQL_CONNECTION_STRING'),r"Driver={ODBC Driver 17 for SQL Server};Server=YISC1100707LT1\SQLEXPRESS;Database=LLM;Integrated Security=True;Connect Timeout=30;Encrypt=True;Trust Server Certificate=True;Application Name=vscode-mssql"))
 
         try:
             cursor = conn.cursor()
