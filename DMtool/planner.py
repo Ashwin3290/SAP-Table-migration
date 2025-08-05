@@ -680,7 +680,6 @@ class ClassificationEnhancer:
         
         return {
             "matched_columns": matched_columns,
-            "columns_in_mentioned_table": columns_in_mentioned_table,
             "column_validation": column_validation
         }
         
@@ -945,19 +944,11 @@ class ClassificationEnhancer:
                 list(all_tables),
                 segment_match_result["segment_target_tables"]
             )
-            
-            # Create comprehensive column-to-table mapping
-            column_table_mapping = self.map_columns_to_tables(
-                list(all_tables),
-                columns_mentioned,
-                key_mapping
-            )
-            
             # Enhance with glossary if available
             if joined_df is not None and not joined_df.empty:
                 column_match_result = self._enhance_column_matching_with_glossary(
                     column_match_result,
-                    columns_mentioned,
+                    column_match_result["column_validation"]["missing_columns"],
                     joined_df
                 )
             
@@ -971,7 +962,6 @@ class ClassificationEnhancer:
                 "table_match_confidence": table_match_result["table_match_confidence"],
                 "column_glossary_matching": column_match_result.get("glossary_column_matching", {}),
                 "column_hints": column_match_result.get("glossary_column_matching", {}).get("column_hints", {}),
-                "column_table_mapping": column_table_mapping,
                 "column_validation": column_match_result.get("column_validation", {})
             }
             
@@ -1078,6 +1068,7 @@ Following is a Target Table glossary: {table_desc}
 Note:
 - if a query mentions a previous transformation that means that we need find that transformation in the context history and use that target table
 it does not influence the classification but it is important to understand the context
+- For SAP tables mentioned do not add the table in the table name like MARC table , just the table name
 
 Respond with a JSON object:
 ```json
@@ -1265,7 +1256,7 @@ PROMPT_TEMPLATES = {
     """,
     
     "CROSS_SEGMENT": """
-    You are a data transformation assistant specializing in SAP data mappings across multiple segments. 
+    You are a data transformation expert specializing in SAP data mappings across multiple segments. 
     Your task is to analyze a natural language query about data transformations involving previous segments.
     
     Target Table glossary: {table_desc}
@@ -1476,6 +1467,40 @@ PROMPT_TEMPLATES = {
     """
 }
 
+def map_keys(tables,key_mapping):
+    """
+    Map keys from the key_mapping to the provided tables
+    
+    Parameters:
+    tables (list): List of table names
+    key_mapping (list): List of key mappings
+    
+    Returns:
+    dict: Mapped keys for each table
+    """
+    table_keys={}
+    mapped_keys = {}
+    
+    for keys in key_mapping:
+        if isinstance(keys, dict):
+            source_col = keys.get("source_col")
+            target_col = keys.get("target_col")
+            if source_col and target_col:
+                for table in tables:
+                    if re.match(r"^t_\d+_.*$",table):
+                        if table not in table_keys:
+                            table_keys[table] = [target_col]
+                        else:
+                            if target_col not in table_keys[table]:
+                                table_keys[table].append(target_col)
+                    else:
+                        if table not in table_keys:
+                            table_keys[table] = [source_col]
+                        else:
+                            table_keys[table].append(source_col)
+    return mapped_keys
+
+
 def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
     """
     Process a query based on its classified type
@@ -1560,8 +1585,10 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         logger.info(f"Classification details: {classification_details}")
 
 
+
         prompt_template = PROMPT_TEMPLATES.get(query_type, PROMPT_TEMPLATES["SIMPLE_TRANSFORMATION"])
-        
+        key_mapping = context_manager.get_key_mapping(session_id) if session_id else []
+        logger.info(f"Key mapping for session {session_id}: {key_mapping}")
 
         target_df_sample_str = "No current target data available"
         if target_df_sample:
@@ -1571,7 +1598,6 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
                 logger.warning(f"Error formatting target data sample: {e}")
         
         segment_prompt = ""
-        key_mapping = context_manager.get_key_mapping(session_id) if session_id else []
         if query_type in ["CROSS_SEGMENT", "JOIN_OPERATION"]:
             segment_glossary = enhanced_classification.get('enhanced_matching', {}).get('segment_target_tables', {})
             source_tables_from_classification = enhanced_classification.get('enhanced_matching', {}).get('tables_mentioned', [])
@@ -1594,75 +1620,91 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             except Exception as e:
                 logger.warning(f"Error formatting visited segments: {e}")
                 
-
+        mapped_keys = map_keys(
+            classification_details.get('enhanced_matching', {}).get('column_validation', []).get("table_columns", {}).keys(),
+            key_mapping
+        )
+        classification_details['mapped_keys'] = mapped_keys
         table_desc = joined_df
-        additional_context_prompt = f"""
-COMPREHENSIVE QUERY ANALYSIS:
+        with open('classification_details.json', 'w') as f:
+            json.dump(classification_details, f, indent=2)
+#         additional_context_prompt = f"""
+# COMPREHENSIVE QUERY ANALYSIS:
 
-CLASSIFICATION RESULTS:
-- Query Type: {classification_details.get('primary_classification', 'Unknown')}
-- Confidence: {classification_details.get('confidence', 0)}
-- Reasoning: {classification_details.get('reasoning', 'Not provided')}
+# CLASSIFICATION RESULTS:
+# - Query Type: {classification_details.get('primary_classification', 'Unknown')}
+# - Confidence: {classification_details.get('confidence', 0)}
+# - Reasoning: {classification_details.get('reasoning', 'Not provided')}
 
-DETECTED ELEMENTS:
-- SAP Tables Mentioned: {', '.join(classification_details.get('detected_elements', {}).get('sap_tables_mentioned', [])) or 'None'}
-- Columns Mentioned: {', '.join(classification_details.get('detected_elements', {}).get('columns_Mentioned', [])) or 'None'}
-- Segments Referenced: {', '.join(classification_details.get('detected_elements', {}).get('segments_mentioned', [])) or 'None'}
-- Join Indicators: {', '.join(classification_details.get('detected_elements', {}).get('join_indicators', [])) or 'None'}
-- Validation Indicators: {', '.join(classification_details.get('detected_elements', {}).get('validation_indicators', [])) or 'None'}
-- Aggregation Indicators: {', '.join(classification_details.get('detected_elements', {}).get('aggregation_indicators', [])) or 'None'}
-- Transformation References: {', '.join(classification_details.get('detected_elements', {}).get('transformation_references', [])) or 'None'}
-- Has Multiple Tables: {classification_details.get('detected_elements', {}).get('has_multiple_tables', False)}
+# DETECTED ELEMENTS:
+# - SAP Tables Mentioned: {', '.join(classification_details.get('detected_elements', {}).get('sap_tables_mentioned', [])) or 'None'}
+# - Columns Mentioned: {', '.join(classification_details.get('detected_elements', {}).get('columns_Mentioned', [])) or 'None'}
+# - Segments Referenced: {', '.join(classification_details.get('detected_elements', {}).get('segments_mentioned', [])) or 'None'}
+# - Join Indicators: {', '.join(classification_details.get('detected_elements', {}).get('join_indicators', [])) or 'None'}
+# - Validation Indicators: {', '.join(classification_details.get('detected_elements', {}).get('validation_indicators', [])) or 'None'}
+# - Aggregation Indicators: {', '.join(classification_details.get('detected_elements', {}).get('aggregation_indicators', [])) or 'None'}
+# - Transformation References: {', '.join(classification_details.get('detected_elements', {}).get('transformation_references', [])) or 'None'}
+# - Has Multiple Tables: {classification_details.get('detected_elements', {}).get('has_multiple_tables', False)}
 
-TABLE VALIDATION:
-- Valid Tables: {', '.join(classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('valid_tables', {}).keys()) or 'None found'}
-- Invalid Tables: {', '.join([t.get('original_name', '') for t in classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('invalid_tables', [])]) or 'None'}
-- Schema Errors: {len(classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('schema_errors', []))} errors
+# TABLE VALIDATION:
+# - Valid Tables: {', '.join(classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('valid_tables', {}).keys()) or 'None found'}
+# - Invalid Tables: {', '.join([t.get('original_name', '') for t in classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('invalid_tables', [])]) or 'None'}
+# - Schema Errors: {len(classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('schema_errors', []))} errors
 
-COLUMN VALIDATION:
-- Columns Found in Database: {', '.join(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('columns_found_in_tables', {}).keys()) or 'None'}
-- Missing Columns: {', '.join(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('missing_columns', [])) or 'None'}
-- Total Tables Scanned: {len(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('table_columns', {}))}
+# COLUMN VALIDATION:
+# - Columns Found in Database: {', '.join(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('columns_found_in_tables', {}).keys()) or 'None'}
+# - Missing Columns: {', '.join(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('missing_columns', [])) or 'None'}
+# - Total Tables Scanned: {len(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('table_columns', {}))}
 
-DETAILED COLUMN-TABLE MAPPING:
-{chr(10).join([f"- Column '{col}': found in {len(tables)} table(s) → {', '.join([t.get('table', '') + '(' + t.get('actual_column_name', '') + ')' for t in tables])}" for col, tables in classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('columns_found_in_tables', {}).items()]) or '- No valid column mappings found'}
+# DETAILED COLUMN-TABLE MAPPING:
+# {chr(10).join([f"- Column '{col}': found in {len(tables)} table(s) → {', '.join([t.get('table', '') + '(' + t.get('actual_column_name', '') + ')' for t in tables])}" for col, tables in classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('columns_found_in_tables', {}).items()]) or '- No valid column mappings found'}
 
-TABLE COLUMNS AVAILABLE:
-{chr(10).join([f"- {table}: {', '.join(cols[:5])}{' ...' if len(cols) > 5 else ''} ({len(cols)} total)" for table, cols in classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('table_columns', {}).items()]) or '- No table schemas available'}
+# TABLE COLUMNS AVAILABLE:
+# {chr(10).join([f"- {table}: {', '.join(cols[:5])}{' ...' if len(cols) > 5 else ''} ({len(cols)} total)" for table, cols in classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('table_columns', {}).items()]) or '- No table schemas available'}
 
-SEGMENT MAPPINGS:
-{chr(10).join([f"- Segment '{seg}' → Tables: {', '.join(tables)}" for seg, tables in classification_details.get('enhanced_matching', {}).get('segment_target_tables', {}).items()]) or '- No segment mappings available'}
+# SEGMENT MAPPINGS:
+# {chr(10).join([f"- Segment '{seg}' → Tables: {', '.join(tables)}" for seg, tables in classification_details.get('enhanced_matching', {}).get('segment_target_tables', {}).items()]) or '- No segment mappings available'}
 
-FUZZY MATCHING RESULTS:
-- Tables with Confidence: {', '.join([f"{table}({conf:.0%})" for table, conf in classification_details.get('enhanced_matching', {}).get('table_match_confidence', {}).items()]) or 'None'}
-- Columns in Mentioned Tables: {', '.join([f"{table}:[{', '.join(cols)}]" for table, cols in classification_details.get('enhanced_matching', {}).get('columns_in_mentioned_table', {}).items()]) or 'None'}
+# FUZZY MATCHING RESULTS:
+# - Tables with Confidence: {', '.join([f"{table}({conf:.0%})" for table, conf in classification_details.get('enhanced_matching', {}).get('table_match_confidence', {}).items()]) or 'None'}
+# - Columns in Mentioned Tables: {', '.join([f"{table}:[{', '.join(cols)}]" for table, cols in classification_details.get('enhanced_matching', {}).get('columns_in_mentioned_table', {}).items()]) or 'None'}
 
-Column Glossary Matching:
-- Columns Matched: {classification_details.get('enhanced_matching', {}).get('column_glossary_matching', {}).get('matched_columns', []) or 'None'}
-- Column Hints: {classification_details.get('enhanced_matching', {}).get('column_glossary_matching', {}).get('column_hints', {}) or 'None'}
+# Column Glossary Matching:
+# - Columns Matched: {classification_details.get('enhanced_matching', {}).get('column_glossary_matching', {}).get('matched_columns', []) or 'None'}
+# - Column Hints: {classification_details.get('enhanced_matching', {}).get('column_glossary_matching', {}).get('column_hints', {}) or 'None'}
 
-Key Mapping:
-- Key Mappings: {key_mapping if classification_details.get('key_mapping') else 'No key mappings available'}
+# Key Columns Mapping:
+# Following are the keys in our context
+# {chr(10).join([f"- {key}: {', '.join(cols)}" for key, cols in mapped_keys.items()]) or '- No key mappings found'}
+# Mapping of these keys to the tables for the current query:
+# {mapped_keys if mapped_keys else '- No key mappings found'}
 
-{"""SEGMENT AND COLUMN MAPPING DETAILS:
-{segment_prompt}
-VERIFICATION RESULTS:
-- Verified column mappings have been checked against actual database schemas
-- Use the EXACT column names specified above for each table
-- Target tables used as source have different column names than original source tables""" if segment_prompt else ""}
-
-INSTRUCTIONS: Use ONLY the validated table and column names from the mappings above. If a column is missing or a table is invalid, do not include it in your SQL generation.
-Do not invent new tables or columns that are not present in the provided mappings.
-Use the provided segment mappings to identify the correct tables for each segment mentioned in the query.
-"""
+# {"""SEGMENT AND COLUMN MAPPING DETAILS:
+# {segment_prompt}
+# VERIFICATION RESULTS:
+# - Verified column mappings have been checked against actual database schemas
+# - Use the EXACT column names specified above for each table
+# - Target tables used as source have different column names than original source tables""" if segment_prompt else ""}
+# """
         
         formatted_prompt = prompt_template.format(
             question=query,
             table_desc=list(table_desc.itertuples(index=False)),
             target_df_sample=target_df_sample_str,
             segment_mapping=context_manager.get_segments(session_id) if session_id else [],
-            additional_context=additional_context_prompt
+            additional_context=classification_details
         )
+        formatted_prompt += formatted_prompt + f"""
+        {"""SEGMENT AND COLUMN MAPPING DETAILS:
+{segment_prompt}
+VERIFICATION RESULTS:
+- Verified column mappings have been checked against actual database schemas
+- Use the EXACT column names specified above for each table
+- Target tables used as source have different column names than original source tables""" if segment_prompt else ""}
+
+        INSTRUCTIONS: Use ONLY the validated table and column names from the mappings above. If a column is missing or a table is invalid, do not include it in your SQL generation.
+Do not invent new tables or columns that are not present in the provided mappings.
+Use the provided segment mappings to identify the correct tables for each segment mentioned in the query."""
         
         logger.info(f"Formatted prompt for Gemini API: {formatted_prompt}")
         api_key = os.environ.get("GEMINI_API_KEY")

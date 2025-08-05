@@ -609,22 +609,17 @@ class DMTool:
                     logger.warning(f"Error getting target data samples: {e}")
                     resolved_data["target_data_samples"] = pd.DataFrame()
 
-
                 if additional_source_tables:
                     source_tables = resolved_data.get("source_table_name", [])
                     if isinstance(source_tables, list):
-
                         for table in additional_source_tables:
                             if table not in source_tables:
                                 source_tables.append(table)
                         resolved_data["source_table_name"] = source_tables
 
-
                 planner_info = self._extract_planner_info(resolved_data)
-                
-
                 sql_plan = self._create_operation_plan(query, planner_info, template)
-                
+                logger.info(f"Generated SQL plan: {sql_plan}")
 
                 sql_query, sql_params = self.sql_generator.generate_sql(sql_plan, planner_info, template)
                 logger.info(f"Generated SQL query: {sql_query}")
