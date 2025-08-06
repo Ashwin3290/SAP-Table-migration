@@ -3,7 +3,7 @@ from DMtool.dmtool import DMTool
 dm_tool = DMTool()
 
 query = """
-Extract Description from MAKT table for the Materials got from  Output of Transformation 1"""
+Extract Description from MAKT table for the Materials got in Transformation 1"""
 result, session_id = dm_tool.process_sequential_query(
     query,
     object_id=41,
