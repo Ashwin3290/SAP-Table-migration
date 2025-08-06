@@ -479,6 +479,11 @@ class DMTool:
     Verification: Using qualified fields MARA.MATNR and MARA.MTART from source fields list"
 
     Remember: Use ONLY the qualified table.column references provided - no modifications or additions!
+
+    Notes:
+    1. Use Alter table only when the prompt specifically mentions creation or deletion of a column.
+    2. If the prompt does not specify a column, do not include it in the query.
+    3. If we have Column given that exist in a table, then use that column in the query.
     """
 
             # Call LLM with enhanced prompt
