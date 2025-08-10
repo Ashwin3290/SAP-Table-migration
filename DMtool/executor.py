@@ -30,7 +30,11 @@ class SQLExecutor:
                      query: str, 
                      params: Optional[Dict[str, Any]] = None, 
                      fetch_results: bool = True,
-                     commit: bool = True) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+                     commit: bool = True,
+                     object_id: Optional[int] = None,
+                     segment_id: Optional[int] = None,
+                     project_id: Optional[int] = None
+                     ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Execute an SQL query with parameter binding
         
@@ -65,6 +69,19 @@ class SQLExecutor:
             if commit:
                 conn.commit()
             
+            if commit and query.upper().strip().startswith('ALTER TABLE'):
+                if object_id and segment_id and project_id:
+                    if 'ADD COLUMN' in query.upper():
+                        column_name = self._extract_column_name_from_alter(query, 'ADD')
+                        if column_name:
+                            add_column_metadata(column_name, object_id, segment_id, project_id)
+                            logger.info(f"Successfully added column metadata for '{column_name}'")
+                            
+                    elif 'DROP COLUMN' in query.upper():
+                        column_name = self._extract_column_name_from_alter(query, 'DROP')
+                        if column_name:
+                            remove_column_metadata(column_name, object_id, segment_id, project_id)
+                            logger.info(f"Successfully removed column metadata for '{column_name}'")
 
             if fetch_results:
 
@@ -221,7 +238,7 @@ class SQLExecutor:
         
         return True, backup_name
     
-    def execute_multi_statement_query(self, multi_sql, sql_params,context_manager=None, session_id=None):
+    def execute_multi_statement_query(self, multi_sql, sql_params,context_manager=None, session_id=None,object_id=None, segment_id=None, project_id=None):
         """Execute multiple SQL statements with recovery support"""
         try:            
 
@@ -231,16 +248,16 @@ class SQLExecutor:
             if session_id:
                 execution_state = context_manager.load_multi_query_state(session_id)
                 if execution_state:
-                    return self.resume_execution(execution_state, statements, sql_params, context_manager, session_id)
+                    return self.resume_execution(execution_state, statements, sql_params, context_manager, session_id, object_id, segment_id, project_id)
             
 
-            return self.execute_with_recovery(statements, sql_params, session_id, context_manager)
+            return self.execute_with_recovery(statements, sql_params, session_id, context_manager, object_id, segment_id, project_id)
             
         except Exception as e:
             logger.error(f"Error in execute_multi_statement_query: {e}")
             return {"error_type": "MultiQueryError", "error_message": str(e)}
         
-    def resume_execution(self, execution_state, statements, sql_params, context_manager, session_id):
+    def resume_execution(self, execution_state, statements, sql_params, context_manager, session_id, object_id=None, segment_id=None, project_id=None):
         """Resume execution from a previously failed multi-query operation"""
         try:
             logger.info(f"Resuming multi-query execution from session {session_id}")
@@ -253,7 +270,7 @@ class SQLExecutor:
 
             if len(statements) != len(previous_statements):
                 logger.warning("Statement count mismatch during resume, starting fresh execution")
-                return self.execute_with_recovery(statements, sql_params, session_id, context_manager)
+                return self.execute_with_recovery(statements, sql_params, session_id, context_manager,object_id=object_id, segment_id=segment_id, project_id=project_id)
             
 
             results = []
@@ -280,7 +297,7 @@ class SQLExecutor:
                     logger.info(f"Executing statement {i+1}/{len(statements)} (resumed): {statement[:100]}...")
                     
 
-                    result = self.execute_query(statement, sql_params, fetch_results=False)
+                    result = self.execute_query(statement, sql_params, fetch_results=False,object_id=object_id, segment_id=segment_id, project_id=project_id)
                     
                     if isinstance(result, dict) and "error_type" in result:
 
@@ -401,7 +418,7 @@ class SQLExecutor:
         
         return statements
 
-    def execute_with_recovery(self, statements, sql_params, session_id, context_manager):
+    def execute_with_recovery(self, statements, sql_params, session_id, context_manager, object_id=None, segment_id=None, project_id=None):
         """Execute statements one by one with failure tracking"""
         results = []
         execution_state = {
@@ -417,7 +434,7 @@ class SQLExecutor:
                 logger.info(f"Executing statement {i+1}/{len(statements)}: {statement[:100]}...")
                 
 
-                result = self.execute_query(statement, sql_params, fetch_results=False)
+                result = self.execute_query(statement, sql_params, fetch_results=False,object_id=object_id, segment_id=segment_id, project_id=project_id)
                 
                 if isinstance(result, dict) and "error_type" in result:
 
@@ -494,3 +511,110 @@ class SQLExecutor:
             return True
             
         return True
+    
+    def _extract_column_name_from_alter(self, query: str, operation: str) -> str:
+        """Extract column name from ALTER TABLE query"""
+        try:
+            if operation == 'ADD':
+                pattern = r'ADD\s+COLUMN\s+(\w+)'
+            else:
+                pattern = r'DROP\s+COLUMN\s+(\w+)'
+            match = re.search(pattern, query, re.IGNORECASE)
+            return match.group(1) if match else None
+        except:
+            return None
+
+def add_column_metadata(column_name: str, object_id: int, segment_id: int, project_id: int) -> bool:
+    """
+    Add column metadata to connection_fields table after successful ALTER TABLE ADD COLUMN
+    
+    Parameters:
+    column_name (str): Name of the column that was added
+    object_id (int): Object ID for the field mapping
+    segment_id (int): Segment ID for the field mapping  
+    project_id (int): Project ID for the field mapping
+    
+    Returns:
+    bool: True if successful, False otherwise
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(os.environ.get('DB_PATH'))
+        cursor = conn.cursor()
+        cursor.execute("SELECT MAX(field_id) FROM connection_fields")
+        max_field_id = cursor.fetchone()[0]
+        next_field_id = (max_field_id + 1) if max_field_id is not None else 1
+        cursor.execute("""
+            INSERT INTO connection_fields 
+            (field_id, fields, description, isMandatory, obj_id_id, project_id_id, segement_id_id, sap_structure, isKey)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            next_field_id,
+            column_name,
+            "",
+            "False",
+            object_id,
+            project_id,
+            segment_id,
+            "",
+            "False"
+        ))
+        
+        conn.commit()
+        
+        logger.info(f"Successfully added column metadata for '{column_name}' with field_id {next_field_id}")
+        return True
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Error adding column metadata for '{column_name}': {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def remove_column_metadata(column_name: str, object_id: int, segment_id: int, project_id: int) -> bool:
+    """
+    Remove column metadata from connection_fields table after successful ALTER TABLE DROP COLUMN
+    
+    Parameters:
+    column_name (str): Name of the column that was dropped
+    object_id (int): Object ID for the field mapping
+    segment_id (int): Segment ID for the field mapping
+    project_id (int): Project ID for the field mapping
+    
+    Returns:
+    bool: True if successful, False otherwise
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(os.environ.get('DB_PATH'))
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM connection_fields 
+            WHERE fields = ? 
+            AND obj_id_id = ? 
+            AND segement_id_id = ? 
+            AND project_id_id = ?
+        """, (column_name, object_id, segment_id, project_id))
+        
+        rows_deleted = cursor.rowcount
+        conn.commit()
+        
+        if rows_deleted > 0:
+            logger.info(f"Successfully removed column metadata for '{column_name}' ({rows_deleted} rows deleted)")
+            return True
+        else:
+            logger.warning(f"No metadata found to remove for column '{column_name}'")
+            return False
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Error removing column metadata for '{column_name}': {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()

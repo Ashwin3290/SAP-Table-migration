@@ -361,8 +361,6 @@ def is_phone(phone: str) -> bool:
         return 7 <= len(clean_phone) <= 15
     except Exception:
         return False
-
-#yyyymmdd
 def to_date(date_str : str):
     return date_str[0:4] + '-' + date_str[4:6] + '-' + date_str[6:8]
 

@@ -165,105 +165,6 @@ class QueryTemplateRepository:
             logger.error(f"Error finding matching template: {e}")
             return None    
 
-class ErrorRecoveryManager:
-    """Manages error analysis and targeted retry logic"""
-    
-    def __init__(self):
-        self.max_retries = 2
-        self.retry_history = {}
-    
-    def analyze_error_stage(self, error_result: Dict[str, Any], sql_query: str = None) -> str:
-        """
-        Analyze where the error occurred and determine retry stage
-        
-        Returns:
-        - "PLANNER" - Retry from query classification/planning
-        - "GENERATOR" - Retry from SQL generation only  
-        - "EXECUTOR" - Retry execution with fixes
-        - "FATAL" - Cannot recover
-        """
-        
-        if not isinstance(error_result, dict) or "error_type" not in error_result:
-            return "FATAL"
-        
-        error_type = error_result.get("error_type", "")
-        error_message = error_result.get("error_message", "").lower()
-        
-        # Database/Table/Column issues - retry from PLANNER (re-analyze query)
-        if any(indicator in error_message for indicator in [
-            "no such table", "table does not exist", "no such column", 
-            "column not found", "invalid table", "table not found"
-        ]):
-            return "PLANNER"
-        
-        # SQL Syntax issues - retry from GENERATOR (regenerate SQL)
-        if any(indicator in error_message for indicator in [
-            "syntax error", "near", "unexpected token", "sql error",
-            "invalid sql", "parse error", "malformed"
-        ]):
-            return "GENERATOR"
-        
-        # Execution/Runtime issues - retry EXECUTOR with fixes
-        if any(indicator in error_message for indicator in [
-            "connection", "timeout", "lock", "busy", "constraint"
-        ]):
-            return "EXECUTOR"
-        
-        # Variable/Code issues - retry from GENERATOR
-        if any(indicator in error_message for indicator in [
-            "nonetype", "not iterable", "attribute error", "key error"
-        ]):
-            return "GENERATOR"
-        
-        return "FATAL"
-    
-    def create_retry_prompt_addition(self, stage: str, error_result: Dict[str, Any], 
-                                   attempt_number: int) -> str:
-        """Create additional prompt context for retry attempts"""
-        
-        error_msg = error_result.get("error_message", "")
-        
-        if stage == "PLANNER":
-            return f"""
-RETRY ATTEMPT #{attempt_number} - QUERY ANALYSIS CORRECTION:
-Previous attempt failed with error: {error_msg}
-
-SPECIFIC INSTRUCTIONS FOR THIS RETRY:
-- Double-check all table names exist in the database schema
-- Verify all mentioned columns are available in their respective tables  
-- Use only validated table and column names from the enhanced matching results
-- If tables/columns don't exist, suggest alternatives or indicate data unavailability
-- Pay extra attention to table name formatting (no spaces, correct suffixes)
-"""
-        
-        elif stage == "GENERATOR":
-            return f"""
-RETRY ATTEMPT #{attempt_number} - SQL GENERATION CORRECTION:
-Previous SQL generation failed with error: {error_msg}
-
-SPECIFIC INSTRUCTIONS FOR THIS RETRY:
-- Generate simpler, more conservative SQL syntax
-- Avoid complex joins if column validation shows issues
-- Use proper SQLite syntax (no RIGHT JOIN, use IFNULL not ISNULL)
-- Quote table names with spaces using double quotes
-- For DDL operations (ALTER/DROP), don't try to fetch results
-- Validate column existence before including in SELECT/UPDATE clauses
-"""
-        
-        elif stage == "EXECUTOR":
-            return f"""
-RETRY ATTEMPT #{attempt_number} - EXECUTION OPTIMIZATION:
-Previous execution failed with error: {error_msg}
-
-SPECIFIC INSTRUCTIONS FOR THIS RETRY:
-- Generate more robust SQL with better error handling
-- Add NULL checks and COALESCE where appropriate
-- Use simpler table aliases and join conditions
-- Avoid operations on non-existent or empty tables
-"""
-        
-        return ""
-
 class DMTool:
     """SQLite-based DMTool for optimized data transformations using direct SQLite queries"""
 
@@ -405,18 +306,13 @@ class DMTool:
         Use LLM to create a detailed plan for SQLite query generation using enhanced planner info
         """
         try:
-            # Extract enhanced information from planner
             qualified_source_fields = planner_info.get("qualified_source_fields", [])
             qualified_filtering_fields = planner_info.get("qualified_filtering_fields", [])
             qualified_insertion_fields = planner_info.get("qualified_insertion_fields", [])
             qualified_target_fields = planner_info.get("qualified_target_fields", [])
             table_column_mapping = planner_info.get("table_column_mapping", {})
             join_conditions = planner_info.get("join_conditions", [])
-            
-            # Build table.column context from enhanced planner info
             table_column_context = self._format_table_column_context_from_planner(table_column_mapping)
-            
-            # Build join context if available
             join_context = ""
             if join_conditions:
                 join_context = "\nVERIFIED JOIN CONDITIONS:\n"
@@ -424,8 +320,6 @@ class DMTool:
                     qualified_condition = condition.get("qualified_condition", "")
                     join_type = condition.get("join_type", "INNER")
                     join_context += f"- {join_type} JOIN: {qualified_condition}\n"
-            
-            # Enhanced prompt using the qualified field information
             prompt = f"""
     You are an expert SQLite database engineer focusing on data transformation. I need you to create 
     precise SQLite generation plan for a data transformation task.
@@ -458,6 +352,11 @@ class DMTool:
     3. Follow the exact qualified field mappings for all operations
     4. For JOIN operations, use the verified join conditions provided
     5. All column references must be exactly as specified in the qualified fields
+    6. If you need to create a new column, use the ALTER TABLE statement with the exact qualified table.column reference
+    7. If you need to delete a column, use the ALTER TABLE statement with the exact qualified table.column reference
+    8. Do not create or delete columns unless explicitly mentioned in the prompt
+    9. Do not drop any tables or columns.
+    10. If a column is not said to be created, assume it already exists in the tables.
 
     REQUIREMENTS:
     1. Generate 10-20 detailed steps for SQLite query creation
@@ -481,12 +380,11 @@ class DMTool:
     Remember: Use ONLY the qualified table.column references provided - no modifications or additions!
 
     Notes:
-    1. Use Alter table only when the prompt specifically mentions creation or deletion of a column.
-    2. If the prompt does not specify a column, do not include it in the query.
-    3. If we have Column given that exist in a table, then use that column in the query.
+    1. Use Alter table only when the prompt specifically mentions creation or deletion of a column. DO NOT use Alter for anything else
+    2. If User does not give to create a column then assume that the column already exists in the tables and there is not need to create a column.
+    3. If the prompt does not specify a column, do not include it in the query.
+    4. If we have Column given that exist in a table, then use that column in the query.
     """
-
-            # Call LLM with enhanced prompt
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
                 model="gemini-2.5-flash", 
@@ -512,15 +410,11 @@ class DMTool:
                 return "No table column mapping available"
             
             context_parts = ["AVAILABLE TABLE.COLUMN REFERENCES:"]
-            
-            # Source tables
             source_tables = table_column_mapping.get("source_tables", {})
             for table_name, columns in source_tables.items():
                 context_parts.append(f"\nSOURCE TABLE '{table_name}':")
                 for col in columns:
                     context_parts.append(f"  {table_name}.{col}")
-            
-            # Target tables  
             target_tables = table_column_mapping.get("target_tables", {})
             for table_name, columns in target_tables.items():
                 context_parts.append(f"\nTARGET TABLE '{table_name}':")
@@ -541,7 +435,6 @@ class DMTool:
             
             fallback_steps = []
             for i, step in enumerate(template.get("plan", []), 1):
-                # Use qualified fields in fallback steps
                 source_ref = qualified_source[0] if qualified_source else "source_table.source_field"
                 target_ref = qualified_target[0] if qualified_target else "target_table.target_field"
                 
@@ -672,7 +565,10 @@ class DMTool:
 
                 sql_query, sql_params = self.sql_generator.generate_sql(sql_plan, planner_info, template)
                 logger.info(f"Generated SQL query: {sql_query}")
-                result = self._execute_sql_query(sql_query, sql_params, planner_info)
+                result = self._execute_sql_query(sql_query, sql_params, planner_info,
+                object_id=object_id,
+                segment_id=segment_id,
+                project_id=project_id)
 
 
                 if isinstance(result, dict) and "error_type" in result:
@@ -804,7 +700,7 @@ class DMTool:
         logger.info(f"Created new session: {session_id}")
         return session_id
 
-    def _execute_sql_query(self, sql_query, sql_params, planner_info):
+    def _execute_sql_query(self, sql_query, sql_params, planner_info, object_id=None, segment_id=None, project_id=None):
         """
         Execute SQLite query using the SQLExecutor with multi-statement support
         
@@ -821,7 +717,10 @@ class DMTool:
         if self._is_multi_statement_query(sql_query):
             logger.info("Detected multi-statement query, using multi-query executor")
             return self.sql_executor.execute_multi_statement_query(
-                sql_query, sql_params, context_manager=ContextualSessionManager(),session_id=planner_info.get("session_id")
+                sql_query, sql_params, context_manager=ContextualSessionManager(),session_id=planner_info.get("session_id"),
+                object_id=object_id,
+                segment_id=segment_id,
+                project_id=project_id
             )
         
 
@@ -844,9 +743,9 @@ class DMTool:
             elif operation_type == "UPDATE":
                 return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
             elif operation_type == "DELETE":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id)
             elif operation_type == "ALTER":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id)
             elif operation_type == "WITH":
                 if "INSERT INTO" in sql_query.upper():
                     return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)

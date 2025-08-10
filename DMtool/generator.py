@@ -1175,22 +1175,15 @@ class SQLGenerator:
             if self._is_valid_sqlite_query(sql_query):
                 return sql_query, sql_params, True
                 
-            
-
-            analysis = self._analyze_sqlite_query(sql_query, planner_info)
-            
             best_query = sql_query
             best_params = sql_params
             
 
             for attempt in range(max_attempts):
-                
-
                 fixed_query, fixed_params = self._fix_sqlite_query(
                     best_query, 
                     sql_params, 
                     planner_info, 
-                    analysis, 
                     attempt
                 )
                 
@@ -1202,10 +1195,6 @@ class SQLGenerator:
                 if self._compare_query_quality(fixed_query, best_query, planner_info):
                     best_query = fixed_query
                     best_params = fixed_params
-                    
-
-                if attempt < max_attempts - 1:
-                    analysis = self._analyze_sqlite_query(fixed_query, planner_info)
                     
 
             logger.warning(f"Could not generate a perfectly valid query after {max_attempts} attempts")
@@ -1275,7 +1264,7 @@ class SQLGenerator:
             logger.error(f"Error in _analyze_sqlite_query: {e}")
             return f"Error analyzing query: {e}"
             
-    def _fix_sqlite_query(self, sql_query, sql_params, planner_info, analysis, attempt_number):
+    def _fix_sqlite_query(self, sql_query, sql_params, planner_info, attempt_number):
         """
         Fix a SQL query based on analysis
         
@@ -1292,13 +1281,10 @@ class SQLGenerator:
         try:
 
             prompt = f"""
-    You are an expert SQLite database engineer. Fix the following SQL query based on the analysis.
+    You are an expert SQLite database engineer. Fix the following SQL query along with the issue that is happening
 
     ORIGINAL SQL QUERY:
     {sql_query}
-
-    ANALYSIS OF ISSUES:
-    {analysis}
 
     FIX ATTEMPT: {attempt_number + 1}
 
