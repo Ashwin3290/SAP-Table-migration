@@ -15,6 +15,8 @@ from dotenv import load_dotenv
 from difflib import SequenceMatcher
 from typing import Dict, List, Any, Optional, Tuple
 
+from config import DatabaseConfig
+
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -114,7 +116,7 @@ class ClassificationEnhancer:
     Enhances LLM classification details with fuzzy matching for tables, columns, and segments
     """
     
-    def __init__(self, connection_string=None, segments_csv_path="segments.csv"):
+    def __init__(self, segments_csv_path="segments.csv"):
         """
         Initialize the ClassificationEnhancer
         
@@ -122,28 +124,14 @@ class ClassificationEnhancer:
             db_path (str): Path to the SQLite database
             segments_csv_path (str): Path to the segments CSV file
         """
-        self.connection_string = connection_string or self._build_connection_string()                
+        from DMtool.config import DatabaseConfig
+        self.db_config = DatabaseConfig()
+        self.connection_string = self.db_config.connection_string
         self.segments_csv_path = segments_csv_path
         self._available_tables = None
         self._table_columns = {}
         self._segments_df = None
     
-    def _build_connection_string(self):
-        """Build Azure SQL Server connection string from environment variables"""
-        connection_string = os.environ.get('AZURE_SQL_CONNECTION_STRING')
-        if connection_string:
-            return connection_string
-        
-        server = os.environ.get('AZURE_SQL_SERVER')
-        database = os.environ.get('AZURE_SQL_DATABASE')
-        username = os.environ.get('AZURE_SQL_USERNAME')
-        password = os.environ.get('AZURE_SQL_PASSWORD')
-        driver = os.environ.get('AZURE_SQL_DRIVER', '{ODBC Driver 18 for SQL Server}')
-        
-        if not all([server, database, username, password]):
-            raise ValueError("Missing required Azure SQL connection parameters")
-        
-        return f"Driver={driver};Server={server};Database={database};Uid={username};Pwd={password};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
 
     def _get_available_tables(self) -> List[str]:
         try:
@@ -486,7 +474,6 @@ class ClassificationEnhancer:
 
 def enhance_classification_before_processing(classification_details: Dict[str, Any], 
                                            current_segment_id: int,
-                                           connection_string: str = None,
                                            segments_csv_path: str = "segments.csv") -> Dict[str, Any]:
 
     """
@@ -501,7 +488,7 @@ def enhance_classification_before_processing(classification_details: Dict[str, A
     Returns:
         Dict[str, Any]: Enhanced classification details
     """
-    enhancer = ClassificationEnhancer(connection_string, segments_csv_path)
+    enhancer = ClassificationEnhancer(segments_csv_path)
     return enhancer.enhance_classification_details(classification_details, current_segment_id)
 
 def classify_query_with_llm(query, target_table):
@@ -985,13 +972,9 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
 
         previous_context = context_manager.get_context(session_id) if session_id else None
         visited_segments = previous_context.get("segments_visited", {}) if previous_context else {}
-        
-        server = os.environ.get('AZURE_SQL_SERVER')
-        database = os.environ.get('AZURE_SQL_DATABASE')
-        username = os.environ.get('AZURE_SQL_USERNAME')
-        password = os.environ.get('AZURE_SQL_PASSWORD')
-        driver = os.environ.get('AZURE_SQL_DRIVER', 'ODBC Driver 18 for SQL Server')
-        conn = pyodbc.connect(os.environ.get(str('AZURE_SQL_CONNECTION_STRING'),r"Driver={ODBC Driver 17 for SQL Server};Server=YISC1100707LT1\SQLEXPRESS;Database=LLM;Integrated Security=True;Connect Timeout=30;Encrypt=True;Trust Server Certificate=True;Application Name=vscode-mssql"))
+        from config import DatabaseConfig
+        db_config = DatabaseConfig()
+        conn = db_config.get_connection()
 
         try:
             cursor = conn.cursor()
@@ -1040,7 +1023,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
 
         query_type, classification_details = classify_query_with_llm(query,target_table)
         enhanced_classification = enhance_classification_before_processing(
-            classification_details, segment_id, connection_string=None
+            classification_details, segment_id
         )
         classification_details = enhanced_classification
         logger.info(f"Query type: {query_type}")

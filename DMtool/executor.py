@@ -17,25 +17,9 @@ class SQLExecutor:
     def __init__(self):
         """Initialize the SQL executor
         """
-        self.connection_string = self._build_connection_string()
-    
-    def _build_connection_string(self):
-        """Build Azure SQL Server connection string from environment variables"""
-        connection_string = os.environ.get('AZURE_SQL_CONNECTION_STRING')
-        if connection_string:
-            return connection_string
-        
-        # Build from individual components
-        server = os.environ.get('AZURE_SQL_SERVER')
-        database = os.environ.get('AZURE_SQL_DATABASE')
-        username = os.environ.get('AZURE_SQL_USERNAME')
-        password = os.environ.get('AZURE_SQL_PASSWORD')
-        driver = os.environ.get('AZURE_SQL_DRIVER', '{ODBC Driver 18 for SQL Server}')
-        
-        if not all([server, database, username, password]):
-            raise ValueError("Missing required Azure SQL connection parameters")
-        
-        return f"Driver={driver};Server={server};Database={database};Uid={username};Pwd={password};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
+        from DMtool.config import DatabaseConfig
+        self.db_config = DatabaseConfig()
+        self.connection_string = self.db_config.connection_string
     
     def _get_connection(self):
         """Get a new database connection"""
@@ -143,39 +127,20 @@ class SQLExecutor:
                 conn.close()
     
     def table_exists(self, table_name: str) -> bool:
-        """
-        Check if a table exists in the database
-        
-        Parameters:
-        table_name (str): Name of the table to check
-        
-        Returns:
-        bool: True if the table exists, False otherwise
-        """
+        """Check if a table exists in the database"""
         query = """
         SELECT TABLE_NAME 
         FROM INFORMATION_SCHEMA.TABLES 
         WHERE TABLE_TYPE = 'BASE TABLE' 
         AND TABLE_NAME = ?
+        AND TABLE_SCHEMA = 'dbo'
         """
         
-        result = self.execute_query(query, {"table_name": table_name})
-        
-        if isinstance(result, list):
-            return len(result) > 0
-        
-        return False
+        result = self.execute_query(query, [table_name])
+        return isinstance(result, list) and len(result) > 0  
     
     def get_table_schema(self, table_name: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
-        """
-        Get the schema information for a table
-        
-        Parameters:
-        table_name (str): Name of the table
-        
-        Returns:
-        Union[List[Dict[str, Any]], Dict[str, Any]]: Schema information or error
-        """
+        """Get the schema information for a table"""
         query = """
         SELECT 
             COLUMN_NAME as name,
@@ -184,11 +149,11 @@ class SQLExecutor:
             COLUMN_DEFAULT as default_value,
             CHARACTER_MAXIMUM_LENGTH as max_length
         FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_NAME = ?
+        WHERE TABLE_NAME = ? AND TABLE_SCHEMA = 'dbo'
         ORDER BY ORDINAL_POSITION
         """
         
-        return self.execute_query(query, {"table_name": table_name})
+        return self.execute_query(query, [table_name])
     
     def get_table_sample(self, table_name: str, limit: int = 5) -> Union[pd.DataFrame, Dict[str, Any]]:
         """
