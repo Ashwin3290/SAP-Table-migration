@@ -1,0 +1,167 @@
+[
+  {
+    "id": "simple_select",
+    "prompt": "Select {fields} from {table}",
+    "query": "SELECT {fields} FROM {table}",
+    "plan": [
+      "1. Identify the source table {table}",
+      "2. Identify the fields {fields} to select",
+      "3. Execute SELECT query to retrieve data"
+    ]
+  },
+  {
+    "id": "simple_insert",
+    "prompt": "Insert data into {target_table} from {source_table}",
+    "query": "INSERT INTO {target_table} ({target_fields}) SELECT {source_fields} FROM {source_table}",
+    "plan": [
+      "1. Identify source table {source_table}",
+      "2. Identify target table {target_table}",
+      "3. Map source fields {source_fields} to target fields {target_fields}",
+      "4. Execute INSERT operation"
+    ]
+  },
+  {
+    "id": "simple_update",
+    "prompt": "Update {field} in {table} with {value}",
+    "query": "UPDATE {table} SET {field} = '{value}'",
+    "plan": [
+      "1. Identify the table {table}",
+      "2. Identify the field {field} to update",
+      "3. Set the new value {value}",
+      "4. Execute UPDATE operation"
+    ]
+  },
+  {
+    "id": "filtered_select",
+    "prompt": "Select {fields} from {table} where {condition}",
+    "query": "SELECT {fields} FROM {table} WHERE {condition}",
+    "plan": [
+      "1. Identify the source table {table}",
+      "2. Identify the fields {fields} to select",
+      "3. Apply filter condition {condition}",
+      "4. Execute filtered SELECT query"
+    ]
+  },
+  {
+    "id": "filtered_insert",
+    "prompt": "Insert filtered data from {source_table} to {target_table} where {condition}",
+    "query": "INSERT INTO {target_table} ({target_fields}) SELECT {source_fields} FROM {source_table} WHERE {condition}",
+    "plan": [
+      "1. Identify source table {source_table}",
+      "2. Identify target table {target_table}",
+      "3. Map source fields to target fields",
+      "4. Apply filter condition {condition}",
+      "5. Execute filtered INSERT operation"
+    ]
+  },
+  {
+    "id": "conditional_update",
+    "prompt": "Update {field} in {table} based on condition",
+    "query": "UPDATE {table} SET {field} = CASE WHEN {condition} THEN '{value1}' ELSE '{value2}' END",
+    "plan": [
+      "1. Identify the table {table}",
+      "2. Identify the field {field} to update",
+      "3. Define conditional logic with {condition}",
+      "4. Set conditional values {value1} and {value2}",
+      "5. Execute conditional UPDATE"
+    ]
+  },
+  {
+    "id": "simple_join",
+    "prompt": "Join {table1} with {table2} on {join_field}",
+    "query": "SELECT {fields} FROM {table1} t1 JOIN {table2} t2 ON t1.{join_field} = t2.{join_field}",
+    "plan": [
+      "1. Identify primary table {table1}",
+      "2. Identify secondary table {table2}",
+      "3. Define join condition on {join_field}",
+      "4. Select required fields {fields}",
+      "5. Execute JOIN operation"
+    ]
+  },
+  {
+    "id": "add_column",
+    "prompt": "Add new column {column_name} to {table}",
+    "query": "ALTER TABLE {table} ADD COLUMN {column_name} {data_type}",
+    "plan": [
+      "1. Identify the table {table}",
+      "2. Specify new column name {column_name}",
+      "3. Define data type {data_type}",
+      "4. Execute ALTER TABLE to add column"
+    ]
+  },
+  {
+    "id": "drop_column",
+    "prompt": "Remove column {column_name} from {table}",
+    "query": "ALTER TABLE {table} DROP COLUMN {column_name}",
+    "plan": [
+      "1. Identify the table {table}",
+      "2. Specify column to remove {column_name}",
+      "3. Execute ALTER TABLE to drop column"
+    ]
+  },
+  {
+    "id": "count_records",
+    "prompt": "Count records in {table}",
+    "query": "SELECT COUNT(*) FROM {table}",
+    "plan": [
+      "1. Identify the table {table}",
+      "2. Execute COUNT query",
+      "3. Return total record count"
+    ]
+  },
+  {
+    "id": "distinct_values",
+    "prompt": "Get distinct values of {field} from {table}",
+    "query": "SELECT DISTINCT {field} FROM {table}",
+    "plan": [
+      "1. Identify the table {table}",
+      "2. Identify the field {field}",
+      "3. Execute DISTINCT query",
+      "4. Return unique values"
+    ]
+  },
+  {
+    "id": "group_by_count",
+    "prompt": "Count records grouped by {field} in {table}",
+    "query": "SELECT {field}, COUNT(*) FROM {table} GROUP BY {field}",
+    "plan": [
+      "1. Identify the table {table}",
+      "2. Identify grouping field {field}",
+      "3. Execute GROUP BY with COUNT",
+      "4. Return grouped counts"
+    ]
+  },
+  {
+    "id": "exists_check",
+    "prompt": "Check if records exist in {table} with {condition}",
+    "query": "SELECT CASE WHEN EXISTS (SELECT 1 FROM {table} WHERE {condition}) THEN 'Yes' ELSE 'No' END",
+    "plan": [
+      "1. Identify the table {table}",
+      "2. Define check condition {condition}",
+      "3. Execute EXISTS query",
+      "4. Return existence status"
+    ]
+  },
+  {
+    "id": "null_check",
+    "prompt": "Find null values in {field} of {table}",
+    "query": "SELECT * FROM {table} WHERE {field} IS NULL",
+    "plan": [
+      "1. Identify the table {table}",
+      "2. Identify the field {field} to check",
+      "3. Execute NULL check query",
+      "4. Return records with null values"
+    ]
+  },
+  {
+    "id": "update_null_values",
+    "prompt": "Replace null values in {field} of {table} with {default_value}",
+    "query": "UPDATE {table} SET {field} = '{default_value}' WHERE {field} IS NULL",
+    "plan": [
+      "1. Identify the table {table}",
+      "2. Identify field {field} with null values",
+      "3. Set default value {default_value}",
+      "4. Execute UPDATE for null records"
+    ]
+  }
+]

@@ -178,7 +178,5 @@ generated_code/
 sessions/
 *.db
 *.sqlite3
-analyser.py
 wiper.py
 tool.py
-DMtool
