@@ -1,620 +1,458 @@
+# executor.py
 import logging
-import sqlite3
-import re
-import pandas as pd
-import uuid
-import os
-from dotenv import load_dotenv
+import time
+from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Union, Tuple
 
-from DMtool.sqlite_utils import add_sqlite_functions
-
-load_dotenv()
-
+from DMtool.enums.database_types import ExecutionStatus, ExecutionResult
+from DMtool.database.database_manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
-class SQLExecutor:
-    """Executes SQL queries against the database"""
+class ExecutionContext:
+    """Manages execution context and state"""
     
-    def __init__(self, db_path=os.environ.get('DB_PATH')):
-        """Initialize the SQL executor
+    def __init__(self, session_id: str, transformation_id: str):
+        self.session_id = session_id
+        self.transformation_id = transformation_id
+        self.start_time = datetime.now()
+        self.execution_steps = []
+        self.current_step = 0
+        self.total_steps = 0
         
-        Parameters:
-        db_path (str): Path to the SQLite database
-        """
-        self.db_path = db_path
-    
-    def execute_query(self, 
-                     query: str, 
-                     params: Optional[Dict[str, Any]] = None, 
-                     fetch_results: bool = True,
-                     commit: bool = True,
-                     object_id: Optional[int] = None,
-                     segment_id: Optional[int] = None,
-                     project_id: Optional[int] = None
-                     ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
-        """
-        Execute an SQL query with parameter binding
-        
-        Parameters:
-        query (str): SQL query to execute
-        params (Optional[Dict[str, Any]]): Parameters to bind to the query
-        fetch_results (bool): Whether to fetch and return results
-        commit (bool): Whether to commit changes
-        
-        Returns:
-        Union[List[Dict[str, Any]], Dict[str, Any]]: 
-            Query results as a list of dictionaries, or error information
-        """
-        conn = None
-        try:
-
-            conn = sqlite3.connect(self.db_path)
-            add_sqlite_functions(conn)
-            
-
-            conn.row_factory = sqlite3.Row
-            
-            cursor = conn.cursor()
-            
-
-            if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
-                
-
-            if commit:
-                conn.commit()
-            
-            if commit and query.upper().strip().startswith('ALTER TABLE'):
-                if object_id and segment_id and project_id:
-                    if 'ADD COLUMN' in query.upper():
-                        column_name = self._extract_column_name_from_alter(query, 'ADD')
-                        if column_name:
-                            add_column_metadata(column_name, object_id, segment_id, project_id)
-                            logger.info(f"Successfully added column metadata for '{column_name}'")
-                            
-                    elif 'DROP COLUMN' in query.upper():
-                        column_name = self._extract_column_name_from_alter(query, 'DROP')
-                        if column_name:
-                            remove_column_metadata(column_name, object_id, segment_id, project_id)
-                            logger.info(f"Successfully removed column metadata for '{column_name}'")
-
-            if fetch_results:
-
-                rows = cursor.fetchall()
-                result = [dict(row) for row in rows]
-                return result
-            else:
-
-                return {"rowcount": cursor.rowcount}
-                
-        except sqlite3.Error as e:
-
-            if conn and commit:
-                conn.rollback()
-                
-            logger.error(f"SQLite error: {e}")
-            return {
-                "error_type": "SQLiteError", 
-                "error_message": str(e),
-                "query": query
-            }
-        except Exception as e:
-
-            if conn and commit:
-                conn.rollback()
-                
-            logger.error(f"Error executing query: {e}")
-            return {
-                "error_type": "ExecutionError", 
-                "error_message": str(e),
-                "query": query
-            }
-        finally:
-
-            if conn:
-                conn.close()
-    
-
-    def execute_and_fetch_df(self, query: str, params: Optional[Dict[str, Any]] = None) -> Union[pd.DataFrame, Dict[str, Any]]:
-        """
-        Execute a query and return results as a pandas DataFrame
-        
-        Parameters:
-        query (str): SQL query to execute
-        params (Optional[Dict[str, Any]]): Parameters to bind to the query
-        
-        Returns:
-        Union[pd.DataFrame, Dict[str, Any]]: DataFrame with results or error information
-        """
-        conn = None
-        try:
-
-            conn = sqlite3.connect(self.db_path)
-            
-
-            if params:
-                df = pd.read_sql_query(query, conn, params=params)
-            else:
-                df = pd.read_sql_query(query, conn)
-                
-            return df
-                
-        except sqlite3.Error as e:
-
-            logger.error(f"SQLite error in execute_and_fetch_df: {e}")
-            return {
-                "error_type": "SQLiteError", 
-                "error_message": str(e),
-                "query": query
-            }
-        except Exception as e:
-
-            logger.error(f"Error in execute_and_fetch_df: {e}")
-            return {
-                "error_type": "ExecutionError", 
-                "error_message": str(e),
-                "query": query
-            }
-        finally:
-
-            if conn:
-                conn.close()
-    
-    def table_exists(self, table_name: str) -> bool:
-        """
-        Check if a table exists in the database
-        
-        Parameters:
-        table_name (str): Name of the table to check
-        
-        Returns:
-        bool: True if the table exists, False otherwise
-        """
-        query = """
-        SELECT name FROM sqlite_master 
-        WHERE type='table' AND name=? Limit 1
-        """
-        
-        result = self.execute_query(query, {"table_name": table_name})
-        
-        if isinstance(result, list):
-            return len(result) > 0
-        
-        return False
-    
-    def get_table_schema(self, table_name: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
-        """
-        Get the schema information for a table
-        
-        Parameters:
-        table_name (str): Name of the table
-        
-        Returns:
-        Union[List[Dict[str, Any]], Dict[str, Any]]: Schema information or error
-        """
-        query = f"PRAGMA table_info({table_name})"
-        
-        return self.execute_query(query)
-    
-    def get_table_sample(self, table_name: str, limit: int = 5) -> Union[pd.DataFrame, Dict[str, Any]]:
-        """
-        Get a sample of rows from a table as a DataFrame
-        
-        Parameters:
-        table_name (str): Name of the table
-        limit (int): Maximum number of rows to return
-        
-        Returns:
-        Union[pd.DataFrame, Dict[str, Any]]: DataFrame with sample rows or error
-        """
-        query = f"SELECT * FROM {table_name} LIMIT {limit}"
-        
-        return self.execute_and_fetch_df(query)
-    
-    def backup_table(self, table_name: str) -> Tuple[bool, str]:
-        """
-        Create a backup of a table
-        
-        Parameters:
-        table_name (str): Name of the table to backup
-        
-        Returns:
-        Tuple[bool, str]: Success status and backup table name
-        """
-
-        backup_name = f"{table_name}_backup_{uuid.uuid4().hex[:8]}"
-        
-        query = f"CREATE TABLE {backup_name} AS SELECT * FROM {table_name}"
-        
-        result = self.execute_query(query, fetch_results=False)
-        
-        if isinstance(result, dict) and "error_type" in result:
-            return False, ""
-        
-        return True, backup_name
-    
-    def execute_multi_statement_query(self, multi_sql, sql_params,context_manager=None, session_id=None,object_id=None, segment_id=None, project_id=None):
-        """Execute multiple SQL statements with recovery support"""
-        try:            
-
-            statements = self.split_sql_statements(multi_sql)
-            
-
-            if session_id:
-                execution_state = context_manager.load_multi_query_state(session_id)
-                if execution_state:
-                    return self.resume_execution(execution_state, statements, sql_params, context_manager, session_id, object_id, segment_id, project_id)
-            
-
-            return self.execute_with_recovery(statements, sql_params, session_id, context_manager, object_id, segment_id, project_id)
-            
-        except Exception as e:
-            logger.error(f"Error in execute_multi_statement_query: {e}")
-            return {"error_type": "MultiQueryError", "error_message": str(e)}
-        
-    def resume_execution(self, execution_state, statements, sql_params, context_manager, session_id, object_id=None, segment_id=None, project_id=None):
-        """Resume execution from a previously failed multi-query operation"""
-        try:
-            logger.info(f"Resuming multi-query execution from session {session_id}")
-            
-
-            completed_count = execution_state.get("completed_count", 0)
-            failed_count = execution_state.get("failed_count", 0)
-            previous_statements = execution_state.get("statements", [])
-            
-
-            if len(statements) != len(previous_statements):
-                logger.warning("Statement count mismatch during resume, starting fresh execution")
-                return self.execute_with_recovery(statements, sql_params, session_id, context_manager,object_id=object_id, segment_id=segment_id, project_id=project_id)
-            
-
-            results = []
-            
-
-            for prev_statement in previous_statements:
-                if prev_statement.get("status") == "completed":
-                    results.append(prev_statement.get("result", {}))
-            
-
-            resume_index = completed_count
-            
-
-            execution_state["resumed_at"] = datetime.now().isoformat() if 'datetime' in globals() else "resumed"
-            execution_state["resume_attempt"] = execution_state.get("resume_attempt", 0) + 1
-            
-            logger.info(f"Resuming from statement {resume_index + 1}/{len(statements)}")
-            
-
-            for i in range(resume_index, len(statements)):
-                statement = statements[i]
-                
-                try:
-                    logger.info(f"Executing statement {i+1}/{len(statements)} (resumed): {statement[:100]}...")
-                    
-
-                    result = self.execute_query(statement, sql_params, fetch_results=False,object_id=object_id, segment_id=segment_id, project_id=project_id)
-                    
-                    if isinstance(result, dict) and "error_type" in result:
-
-                        statement_result = {
-                            "statement": statement,
-                            "index": i,
-                            "status": "failed", 
-                            "error": result,
-                            "can_retry": self._can_retry_statement(statement, result),
-                            "resume_attempt": execution_state.get("resume_attempt", 1)
-                        }
-                        execution_state["failed_count"] += 1
-                        
-
-                        if i < len(execution_state["statements"]):
-                            execution_state["statements"][i] = statement_result
-                        else:
-                            execution_state["statements"].append(statement_result)
-                        
-
-                        context_manager.save_multi_query_state(session_id, execution_state)
-                        
-
-                        return {
-                            "multi_query_result": True,
-                            "completed_statements": execution_state["completed_count"],
-                            "failed_statement_index": i,
-                            "failed_statement": statement,
-                            "error": result,
-                            "can_resume": True,
-                            "session_id": session_id,
-                            "all_results": results,
-                            "is_resumed_execution": True,
-                            "resume_attempt": execution_state.get("resume_attempt", 1)
-                        }
-                    else:
-
-                        statement_result = {
-                            "statement": statement,
-                            "index": i,
-                            "status": "completed",
-                            "result": result,
-                            "resumed_execution": True
-                        }
-                        execution_state["completed_count"] += 1
-                        results.append(result)
-                        
-
-                        if i < len(execution_state["statements"]):
-                            execution_state["statements"][i] = statement_result
-                        else:
-                            execution_state["statements"].append(statement_result)
-                        
-
-                        prev_statement = next((s for s in previous_statements if s.get("index") == i), None)
-                        if prev_statement and prev_statement.get("status") == "failed":
-                            execution_state["failed_count"] = max(0, execution_state["failed_count"] - 1)
-                    
-                except Exception as e:
-
-                    logger.error(f"Unexpected error during resume at statement {i}: {e}")
-                    return {
-                        "error_type": "ResumeExecutionError",
-                        "error_message": f"Resume failed at statement {i+1}: {str(e)}",
-                        "completed_statements": execution_state["completed_count"],
-                        "failed_statement": statement,
-                        "session_id": session_id,
-                        "is_resumed_execution": True
-                    }
-            
-
-            context_manager.cleanup_multi_query_state(session_id)
-            
-            logger.info(f"Multi-query execution resumed and completed successfully. Total statements: {len(statements)}")
-            
-            return {
-                "multi_query_result": True, 
-                "completed_statements": len(statements),
-                "all_results": results,
-                "success": True,
-                "is_resumed_execution": True,
-                "resume_attempt": execution_state.get("resume_attempt", 1)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in resume_execution: {e}")
-            return {
-                "error_type": "ResumeExecutionError",
-                "error_message": f"Failed to resume execution: {str(e)}",
-                "session_id": session_id
-            }
-
-    def split_sql_statements(self, multi_sql):
-        """Split multi-SQL into individual statements, handling edge cases"""
-        statements = []
-        current_statement = ""
-        in_string = False
-        string_char = None
-        
-        for char in multi_sql:
-            if char in ("'", '"') and not in_string:
-                in_string = True
-                string_char = char
-            elif char == string_char and in_string:
-                in_string = False
-                string_char = None
-            elif char == ';' and not in_string:
-                if current_statement.strip():
-                    statements.append(current_statement.strip())
-                current_statement = ""
-                continue
-            
-            current_statement += char
-        
-
-        if current_statement.strip():
-            statements.append(current_statement.strip())
-        
-        return statements
-
-    def execute_with_recovery(self, statements, sql_params, session_id, context_manager, object_id=None, segment_id=None, project_id=None):
-        """Execute statements one by one with failure tracking"""
-        results = []
-        execution_state = {
-            "statements": [],
-            "completed_count": 0,
-            "failed_count": 0,
-            "session_id": session_id,
-            "original_sql": "; ".join(statements)
+    def add_step(self, step_name: str, description: str = ""):
+        """Add execution step"""
+        step_info = {
+            'step_number': len(self.execution_steps) + 1,
+            'name': step_name,
+            'description': description,
+            'status': 'pending',
+            'start_time': None,
+            'end_time': None,
+            'result': None,
+            'error': None
         }
+        self.execution_steps.append(step_info)
+        self.total_steps = len(self.execution_steps)
         
-        for i, statement in enumerate(statements):
-            try:
-                logger.info(f"Executing statement {i+1}/{len(statements)}: {statement[:100]}...")
-                
-
-                result = self.execute_query(statement, sql_params, fetch_results=False,object_id=object_id, segment_id=segment_id, project_id=project_id)
-                
-                if isinstance(result, dict) and "error_type" in result:
-
-                    statement_result = {
-                        "statement": statement,
-                        "index": i,
-                        "status": "failed", 
-                        "error": result,
-                        "can_retry": self._can_retry_statement(statement, result)
-                    }
-                    execution_state["failed_count"] += 1
-                    execution_state["statements"].append(statement_result)
-                    
-
-                    if session_id:
-                        context_manager.save_multi_query_state(session_id, execution_state)
-                    
-
-                    return {
-                        "multi_query_result": True,
-                        "completed_statements": execution_state["completed_count"],
-                        "failed_statement_index": i,
-                        "failed_statement": statement,
-                        "error": result,
-                        "can_resume": True,
-                        "session_id": session_id,
-                        "all_results": results
-                    }
-                else:
-
-                    statement_result = {
-                        "statement": statement,
-                        "index": i,
-                        "status": "completed",
-                        "result": result
-                    }
-                    execution_state["completed_count"] += 1
-                    results.append(result)
-                    
-                execution_state["statements"].append(statement_result)
-                
-            except Exception as e:
-
-                logger.error(f"Unexpected error executing statement {i}: {e}")
-                return {
-                    "error_type": "StatementExecutionError",
-                    "error_message": f"Statement {i+1} failed: {str(e)}",
-                    "completed_statements": execution_state["completed_count"],
-                    "failed_statement": statement
-                }
-        
-
-        if session_id:
-            context_manager.cleanup_multi_query_state(session_id)
+    def start_step(self, step_number: int):
+        """Start execution of a step"""
+        if 0 <= step_number - 1 < len(self.execution_steps):
+            step = self.execution_steps[step_number - 1]
+            step['status'] = 'running'
+            step['start_time'] = datetime.now()
+            self.current_step = step_number
+            logger.info(f"Starting step {step_number}: {step['name']}")
+            
+    def complete_step(self, step_number: int, result: Any = None):
+        """Complete execution of a step"""
+        if 0 <= step_number - 1 < len(self.execution_steps):
+            step = self.execution_steps[step_number - 1]
+            step['status'] = 'completed'
+            step['end_time'] = datetime.now()
+            step['result'] = result
+            logger.info(f"Completed step {step_number}: {step['name']}")
+            
+    def fail_step(self, step_number: int, error: str):
+        """Mark step as failed"""
+        if 0 <= step_number - 1 < len(self.execution_steps):
+            step = self.execution_steps[step_number - 1]
+            step['status'] = 'failed'
+            step['end_time'] = datetime.now()
+            step['error'] = error
+            logger.error(f"Failed step {step_number}: {step['name']} - {error}")
+            
+    def get_summary(self) -> Dict[str, Any]:
+        """Get execution summary"""
+        completed_steps = sum(1 for step in self.execution_steps if step['status'] == 'completed')
+        failed_steps = sum(1 for step in self.execution_steps if step['status'] == 'failed')
         
         return {
-            "multi_query_result": True, 
-            "completed_statements": len(statements),
-            "all_results": results,
-            "success": True
+            'session_id': self.session_id,
+            'transformation_id': self.transformation_id,
+            'total_steps': self.total_steps,
+            'completed_steps': completed_steps,
+            'failed_steps': failed_steps,
+            'current_step': self.current_step,
+            'start_time': self.start_time.isoformat(),
+            'duration': (datetime.now() - self.start_time).total_seconds(),
+            'steps': self.execution_steps
         }
 
-    def _can_retry_statement(self, statement, error):
-        """Determine if a failed statement can be safely retried"""
-        error_msg = error.get("error_message", "").lower()
-        
-
-        if "alter table" in statement.lower() and "add column" in statement.lower():
-            if "already exists" in error_msg or "duplicate column" in error_msg:
-                return False
-        
-
-        if any(keyword in statement.lower() for keyword in ["update", "insert", "select"]):
-            return True
-            
-        return True
+class TransactionManager:
+    """Manages database transactions with savepoints and rollback"""
     
-    def _extract_column_name_from_alter(self, query: str, operation: str) -> str:
-        """Extract column name from ALTER TABLE query"""
+    def __init__(self, db_manager: DatabaseManager):
+        self.db_manager = db_manager
+        self.savepoints = []
+        self.transaction_active = False
+        
+    def begin_transaction(self) -> bool:
+        """Begin a new transaction"""
         try:
-            if operation == 'ADD':
-                pattern = r'ADD\s+COLUMN\s+(\w+)'
-            else:
-                pattern = r'DROP\s+COLUMN\s+(\w+)'
-            match = re.search(pattern, query, re.IGNORECASE)
-            return match.group(1) if match else None
-        except:
-            return None
-
-def add_column_metadata(column_name: str, object_id: int, segment_id: int, project_id: int) -> bool:
-    """
-    Add column metadata to connection_fields table after successful ALTER TABLE ADD COLUMN
-    
-    Parameters:
-    column_name (str): Name of the column that was added
-    object_id (int): Object ID for the field mapping
-    segment_id (int): Segment ID for the field mapping  
-    project_id (int): Project ID for the field mapping
-    
-    Returns:
-    bool: True if successful, False otherwise
-    """
-    conn = None
-    try:
-        conn = sqlite3.connect(os.environ.get('DB_PATH'))
-        cursor = conn.cursor()
-        cursor.execute("SELECT MAX(field_id) FROM connection_fields")
-        max_field_id = cursor.fetchone()[0]
-        next_field_id = (max_field_id + 1) if max_field_id is not None else 1
-        cursor.execute("""
-            INSERT INTO connection_fields 
-            (field_id, fields, description, isMandatory, obj_id_id, project_id_id, segement_id_id, sap_structure, isKey)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            next_field_id,
-            column_name,
-            "",
-            "False",
-            object_id,
-            project_id,
-            segment_id,
-            "",
-            "False"
-        ))
-        
-        conn.commit()
-        
-        logger.info(f"Successfully added column metadata for '{column_name}' with field_id {next_field_id}")
-        return True
-        
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        logger.error(f"Error adding column metadata for '{column_name}': {e}")
-        return False
-    finally:
-        if conn:
-            conn.close()
-
-
-def remove_column_metadata(column_name: str, object_id: int, segment_id: int, project_id: int) -> bool:
-    """
-    Remove column metadata from connection_fields table after successful ALTER TABLE DROP COLUMN
-    
-    Parameters:
-    column_name (str): Name of the column that was dropped
-    object_id (int): Object ID for the field mapping
-    segment_id (int): Segment ID for the field mapping
-    project_id (int): Project ID for the field mapping
-    
-    Returns:
-    bool: True if successful, False otherwise
-    """
-    conn = None
-    try:
-        conn = sqlite3.connect(os.environ.get('DB_PATH'))
-        cursor = conn.cursor()
-        cursor.execute("""
-            DELETE FROM connection_fields 
-            WHERE fields = ? 
-            AND obj_id_id = ? 
-            AND segement_id_id = ? 
-            AND project_id_id = ?
-        """, (column_name, object_id, segment_id, project_id))
-        
-        rows_deleted = cursor.rowcount
-        conn.commit()
-        
-        if rows_deleted > 0:
-            logger.info(f"Successfully removed column metadata for '{column_name}' ({rows_deleted} rows deleted)")
+            self.db_manager.connector.begin_transaction()
+            self.transaction_active = True
+            logger.debug("Transaction started")
             return True
-        else:
-            logger.warning(f"No metadata found to remove for column '{column_name}'")
+        except Exception as e:
+            logger.error(f"Failed to begin transaction: {e}")
             return False
+            
+    def create_savepoint(self, name: str) -> bool:
+        """Create a savepoint"""
+        try:
+            if not self.transaction_active:
+                logger.warning("Cannot create savepoint - no active transaction")
+                return False
+                
+            # SQLite doesn't support named savepoints, so we track them manually
+            self.savepoints.append({
+                'name': name,
+                'timestamp': datetime.now(),
+                'queries_count': len(getattr(self, 'executed_queries', []))
+            })
+            
+            logger.debug(f"Created savepoint: {name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to create savepoint {name}: {e}")
+            return False
+            
+    def rollback_to_savepoint(self, name: str) -> bool:
+        """Rollback to a specific savepoint"""
+        try:
+            savepoint = next((sp for sp in self.savepoints if sp['name'] == name), None)
+            if not savepoint:
+                logger.warning(f"Savepoint {name} not found")
+                return False
+                
+            # For SQLite, we need to rollback the entire transaction
+            # In a more sophisticated implementation, we'd track and replay queries
+            self.rollback_transaction()
+            
+            logger.debug(f"Rolled back to savepoint: {name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to rollback to savepoint {name}: {e}")
+            return False
+            
+    def commit_transaction(self) -> bool:
+        """Commit the transaction"""
+        try:
+            if not self.transaction_active:
+                logger.warning("No active transaction to commit")
+                return False
+                
+            self.db_manager.connector.commit_transaction()
+            self.transaction_active = False
+            self.savepoints.clear()
+            logger.debug("Transaction committed")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to commit transaction: {e}")
+            return False
+            
+    def rollback_transaction(self) -> bool:
+        """Rollback the entire transaction"""
+        try:
+            if not self.transaction_active:
+                logger.warning("No active transaction to rollback")
+                return False
+                
+            self.db_manager.connector.rollback_transaction()
+            self.transaction_active = False
+            self.savepoints.clear()
+            logger.debug("Transaction rolled back")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to rollback transaction: {e}")
+            return False
+
+class QueryExecutor:
+    """Executes individual SQL queries with monitoring and error handling"""
+    
+    def __init__(self, db_manager: DatabaseManager):
+        self.db_manager = db_manager
         
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        logger.error(f"Error removing column metadata for '{column_name}': {e}")
-        return False
-    finally:
-        if conn:
-            conn.close()
+    def execute_query_with_monitoring(self, query: str, params: Optional[Dict[str, Any]] = None,
+                                    timeout: float = 30.0) -> Dict[str, Any]:
+        """Execute query with performance monitoring"""
+        start_time = time.time()
+        
+        try:
+            # Validate query before execution
+            if not self._is_safe_query(query):
+                return {
+                    'success': False,
+                    'error': 'Query failed safety validation',
+                    'execution_time': 0,
+                    'result': None
+                }
+                
+            # Execute query
+            result = self.db_manager.execute_query(query, params)
+            
+            execution_time = time.time() - start_time
+            
+            # Check for timeout
+            if execution_time > timeout:
+                logger.warning(f"Query execution took {execution_time:.2f}s (timeout: {timeout}s)")
+                
+            return {
+                'success': True,
+                'result': result,
+                'execution_time': execution_time,
+                'rows_affected': getattr(result, 'rowcount', 0) if hasattr(result, 'rowcount') else 0,
+                'query': query
+            }
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error(f"Query execution failed after {execution_time:.2f}s: {e}")
+            
+            return {
+                'success': False,
+                'error': str(e),
+                'execution_time': execution_time,
+                'result': None,
+                'query': query
+            }
+            
+    def execute_batch_queries(self, queries: List[str], 
+                            params: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+        """Execute multiple queries with individual monitoring"""
+        results = []
+        
+        for i, query in enumerate(queries):
+            query_params = params[i] if params and i < len(params) else None
+            result = self.execute_query_with_monitoring(query, query_params)
+            result['query_index'] = i
+            results.append(result)
+            
+            # Stop on first failure if needed
+            if not result['success']:
+                logger.warning(f"Stopping batch execution at query {i} due to failure")
+                break
+                
+        return results
+        
+    def _is_safe_query(self, query: str) -> bool:
+        """Basic safety validation for queries"""
+        if not query or not query.strip():
+            return False
+            
+        # Check for potentially dangerous operations
+        dangerous_patterns = [
+            r'\bDROP\s+DATABASE\b',
+            r'\bDROP\s+SCHEMA\b',
+            r'\bTRUNCATE\s+TABLE\b.*WITHOUT\s+WHERE',
+            r'\bDELETE\s+FROM\b.*(?!WHERE)',
+            r'\bALTER\s+TABLE\b.*\bDROP\b'
+        ]
+        
+        import re
+        query_upper = query.upper()
+        
+        for pattern in dangerous_patterns:
+            if re.search(pattern, query_upper):
+                logger.warning(f"Potentially dangerous query pattern detected: {pattern}")
+                return False
+                
+        return True
+
+class Executor:
+    """Main executor that orchestrates SQL execution with transactions and monitoring"""
+    
+    def __init__(self, db_manager: DatabaseManager):
+        self.db_manager = db_manager
+        self.transaction_manager = TransactionManager(db_manager)
+        self.query_executor = QueryExecutor(db_manager)
+        
+    def execute_with_transaction(self, generation_result: Dict[str, Any], 
+                                context: Dict[str, Any]) -> ExecutionResult:
+        """Execute SQL queries with full transaction support"""
+        
+        session_id = context.get('session_id', 'unknown')
+        transformation_id = f"transform_{int(time.time())}"
+        
+        # Create execution context
+        exec_context = ExecutionContext(session_id, transformation_id)
+        
+        try:
+            # Prepare execution plan
+            execution_plan = generation_result.get('execution_plan', {})
+            sql_queries = generation_result.get('sql_queries', [])
+            validation_checks = generation_result.get('validation_checks', [])
+            
+            # Add execution steps
+            exec_context.add_step("begin_transaction", "Start database transaction")
+            
+            for i, query in enumerate(sql_queries):
+                exec_context.add_step(f"execute_query_{i+1}", f"Execute: {query[:50]}...")
+                
+            for i, check in enumerate(validation_checks):
+                exec_context.add_step(f"validate_{i+1}", f"Validate: {check[:50]}...")
+                
+            exec_context.add_step("commit_transaction", "Commit all changes")
+            
+            # Begin transaction
+            exec_context.start_step(1)
+            if not self.transaction_manager.begin_transaction():
+                exec_context.fail_step(1, "Failed to begin transaction")
+                return self._create_failure_result(exec_context, "Transaction start failed")
+            exec_context.complete_step(1, "Transaction started")
+            
+            # Execute queries
+            query_results = []
+            for i, query in enumerate(sql_queries):
+                step_num = i + 2  # +2 because step 1 is begin_transaction
+                exec_context.start_step(step_num)
+                
+                # Create savepoint before each query
+                savepoint_name = f"before_query_{i+1}"
+                self.transaction_manager.create_savepoint(savepoint_name)
+                
+                # Execute query
+                result = self.query_executor.execute_query_with_monitoring(query)
+                
+                if result['success']:
+                    exec_context.complete_step(step_num, result)
+                    query_results.append(result)
+                else:
+                    exec_context.fail_step(step_num, result['error'])
+                    
+                    # Rollback to savepoint and decide whether to continue
+                    self.transaction_manager.rollback_to_savepoint(savepoint_name)
+                    
+                    # For now, fail the entire execution on any query failure
+                    self.transaction_manager.rollback_transaction()
+                    return self._create_failure_result(exec_context, f"Query {i+1} failed: {result['error']}")
+                    
+            # Execute validation checks
+            validation_results = []
+            validation_step_start = len(sql_queries) + 2
+            
+            for i, check in enumerate(validation_checks):
+                step_num = validation_step_start + i
+                exec_context.start_step(step_num)
+                
+                result = self.query_executor.execute_query_with_monitoring(check)
+                
+                if result['success']:
+                    exec_context.complete_step(step_num, result)
+                    validation_results.append(result)
+                else:
+                    exec_context.fail_step(step_num, result['error'])
+                    logger.warning(f"Validation check {i+1} failed: {result['error']}")
+                    # Continue with other validations even if one fails
+                    
+            # Commit transaction
+            final_step = exec_context.total_steps
+            exec_context.start_step(final_step)
+            
+            if self.transaction_manager.commit_transaction():
+                exec_context.complete_step(final_step, "Transaction committed")
+                
+                return ExecutionResult(
+                    status=ExecutionStatus.SUCCESS,
+                    results=query_results,
+                    queries_executed=[r['query'] for r in query_results],
+                    rows_affected=sum(r.get('rows_affected', 0) for r in query_results)
+                )
+            else:
+                exec_context.fail_step(final_step, "Failed to commit transaction")
+                return self._create_failure_result(exec_context, "Transaction commit failed")
+                
+        except Exception as e:
+            logger.error(f"Execution failed with exception: {e}")
+            
+            # Rollback transaction on any exception
+            try:
+                self.transaction_manager.rollback_transaction()
+            except:
+                pass  # Ignore rollback errors
+                
+            return self._create_failure_result(exec_context, f"Execution exception: {str(e)}")
+            
+    def _create_failure_result(self, exec_context: ExecutionContext, error_message: str) -> ExecutionResult:
+        """Create failure result with execution context"""
+        summary = exec_context.get_summary()
+        
+        return ExecutionResult(
+            status=ExecutionStatus.FAILED,
+            results=[],
+            error_message=error_message,
+            queries_executed=[step.get('result', {}).get('query', '') 
+                            for step in summary['steps'] 
+                            if step.get('result') and step['result'].get('query')]
+        )
+        
+    def execute_single_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> ExecutionResult:
+        """Execute a single query without transaction management"""
+        try:
+            result = self.query_executor.execute_query_with_monitoring(query, params)
+            
+            if result['success']:
+                return ExecutionResult(
+                    status=ExecutionStatus.SUCCESS,
+                    results=[result['result']],
+                    queries_executed=[query],
+                    rows_affected=result.get('rows_affected', 0)
+                )
+            else:
+                return ExecutionResult(
+                    status=ExecutionStatus.FAILED,
+                    results=[],
+                    error_message=result['error'],
+                    queries_executed=[query]
+                )
+                
+        except Exception as e:
+            logger.error(f"Single query execution failed: {e}")
+            return ExecutionResult(
+                status=ExecutionStatus.FAILED,
+                results=[],
+                error_message=str(e),
+                queries_executed=[query]
+            )
+            
+    def test_queries(self, queries: List[str]) -> Dict[str, Any]:
+        """Test queries without executing them (syntax check only)"""
+        test_results = {
+            'all_valid': True,
+            'query_tests': []
+        }
+        
+        for i, query in enumerate(queries):
+            test_result = {
+                'query_index': i,
+                'query': query,
+                'valid': True,
+                'issues': []
+            }
+            
+            # Basic syntax validation
+            if not query.strip():
+                test_result['valid'] = False
+                test_result['issues'].append("Empty query")
+                test_results['all_valid'] = False
+                
+            # Check for dangerous operations
+            elif not self.query_executor._is_safe_query(query):
+                test_result['valid'] = False
+                test_result['issues'].append("Query failed safety validation")
+                test_results['all_valid'] = False
+                
+            test_results['query_tests'].append(test_result)
+            
+        return test_results
+        
+    def get_execution_stats(self) -> Dict[str, Any]:
+        """Get execution statistics"""
+        # This would be enhanced with actual metrics collection
+        return {
+            'database_type': self.db_manager.db_type.value,
+            'connection_active': self.db_manager.connector.is_connected,
+            'transaction_active': self.transaction_manager.transaction_active,
+            'savepoints_count': len(self.transaction_manager.savepoints)
+        }
