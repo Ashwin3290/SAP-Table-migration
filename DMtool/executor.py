@@ -2,10 +2,13 @@ import logging
 import pyodbc
 import pandas as pd
 import uuid
+import re
 import os
 from dotenv import load_dotenv
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Union, Tuple
+
+from DMtool.config import DatabaseConfig
 
 load_dotenv()
 
@@ -17,7 +20,7 @@ class SQLExecutor:
     def __init__(self):
         """Initialize the SQL executor
         """
-        from DMtool.config import DatabaseConfig
+        
         self.db_config = DatabaseConfig()
         self.connection_string = self.db_config.connection_string
     
@@ -29,7 +32,11 @@ class SQLExecutor:
                      query: str, 
                      params: Optional[Dict[str, Any]] = None, 
                      fetch_results: bool = True,
-                     commit: bool = True) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+                     commit: bool = True,
+                     object_id: Optional[int] = None,
+                     segment_id: Optional[int] = None,
+                     project_id: Optional[int] = None
+                     ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Execute an SQL query with parameter binding
         
@@ -52,9 +59,25 @@ class SQLExecutor:
                 cursor.execute(query, params)
             else:
                 cursor.execute(query)
-                
+            
+            if commit:
+                conn.commit()
+            
+            if commit and query.upper().strip().startswith('ALTER TABLE'):
+                if object_id and segment_id and project_id:
+                    if 'ADD COLUMN' in query.upper():
+                        column_name = self._extract_column_name_from_alter(query, 'ADD')
+                        if column_name:
+                            add_column_metadata(column_name, object_id, segment_id, project_id)
+                            logger.info(f"Successfully added column metadata for '{column_name}'")
+                            
+                    elif 'DROP COLUMN' in query.upper():
+                        column_name = self._extract_column_name_from_alter(query, 'DROP')
+                        if column_name:
+                            remove_column_metadata(column_name, object_id, segment_id, project_id)
+                            logger.info(f"Successfully removed column metadata for '{column_name}'")
+                    
             if fetch_results:
-                # Fetch all rows and convert to list of dictionaries
                 columns = [column[0] for column in cursor.description] if cursor.description else []
                 rows = cursor.fetchall()
                 result = [dict(zip(columns, row)) for row in rows]
@@ -434,3 +457,112 @@ class SQLExecutor:
             return True
             
         return True
+
+    def _extract_column_name_from_alter(self, query: str, operation: str) -> str:
+        """Extract column name from ALTER TABLE query"""
+        try:
+            if operation == 'ADD':
+                pattern = r'ADD\s+COLUMN\s+(\w+)'
+            else:
+                pattern = r'DROP\s+COLUMN\s+(\w+)'
+            match = re.search(pattern, query, re.IGNORECASE)
+            return match.group(1) if match else None
+        except:
+            return None
+
+def add_column_metadata(column_name: str, object_id: int, segment_id: int, project_id: int) -> bool:
+    """
+    Add column metadata to connection_fields table after successful ALTER TABLE ADD COLUMN
+    
+    Parameters:
+    column_name (str): Name of the column that was added
+    object_id (int): Object ID for the field mapping
+    segment_id (int): Segment ID for the field mapping  
+    project_id (int): Project ID for the field mapping
+    
+    Returns:
+    bool: True if successful, False otherwise
+    """
+    conn = None
+    try:
+        db_config = DatabaseConfig()
+        conn = pyodbc.connect(db_config.connection_string)
+        cursor = conn.cursor()
+        cursor.execute("SELECT MAX(field_id) FROM connection_fields")
+        max_field_id = cursor.fetchone()[0]
+        next_field_id = (max_field_id + 1) if max_field_id is not None else 1
+        cursor.execute("""
+            INSERT INTO connection_fields 
+            (field_id, fields, description, isMandatory, obj_id_id, project_id_id, segement_id_id, sap_structure, isKey)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            next_field_id,
+            column_name,
+            "",
+            "False",
+            object_id,
+            project_id,
+            segment_id,
+            "",
+            "False"
+        ))
+        
+        conn.commit()
+        
+        logger.info(f"Successfully added column metadata for '{column_name}' with field_id {next_field_id}")
+        return True
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Error adding column metadata for '{column_name}': {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def remove_column_metadata(column_name: str, object_id: int, segment_id: int, project_id: int) -> bool:
+    """
+    Remove column metadata from connection_fields table after successful ALTER TABLE DROP COLUMN
+    
+    Parameters:
+    column_name (str): Name of the column that was dropped
+    object_id (int): Object ID for the field mapping
+    segment_id (int): Segment ID for the field mapping
+    project_id (int): Project ID for the field mapping
+    
+    Returns:
+    bool: True if successful, False otherwise
+    """
+    conn = None
+    try:
+        db_config = DatabaseConfig()
+        conn = pyodbc.connect(db_config.connection_string)
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM connection_fields 
+            WHERE fields = ? 
+            AND obj_id_id = ? 
+            AND segement_id_id = ? 
+            AND project_id_id = ?
+        """, (column_name, object_id, segment_id, project_id))
+        
+        rows_deleted = cursor.rowcount
+        conn.commit()
+        
+        if rows_deleted > 0:
+            logger.info(f"Successfully removed column metadata for '{column_name}' ({rows_deleted} rows deleted)")
+            return True
+        else:
+            logger.warning(f"No metadata found to remove for column '{column_name}'")
+            return False
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Error removing column metadata for '{column_name}': {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()

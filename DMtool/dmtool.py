@@ -347,7 +347,11 @@ class DMTool:
             query_text = planner_info["restructured_query"]
             conditions = {}
 
-
+            planner_info["qualified_source_fields"] = resolved_data.get("qualified_source_fields", [])
+            planner_info["qualified_filtering_fields"] = resolved_data.get("qualified_filtering_fields", [])
+            planner_info["qualified_insertion_fields"] = resolved_data.get("qualified_insertion_fields", [])
+            planner_info["qualified_target_fields"] = resolved_data.get("qualified_target_fields", [])
+            planner_info["table_column_mapping"] = resolved_data.get("table_column_mapping", {})
             if query_text:
 
                 for field in planner_info["filtering_fields"]:
@@ -400,125 +404,193 @@ class DMTool:
             }
             return minimal_context
 
-    def _create_operation_plan(self, query, planner_info: Dict[str, Any],template: Dict[str, Any]) -> str:
+    def _format_table_column_context_from_planner(self, table_column_mapping):
+        """Format table.column context from planner's table_column_mapping"""
+        try:
+            if not table_column_mapping:
+                return "No table column mapping available"
+            
+            context_parts = ["AVAILABLE TABLE.COLUMN REFERENCES:"]
+            source_tables = table_column_mapping.get("source_tables", {})
+            for table_name, columns in source_tables.items():
+                context_parts.append(f"\nSOURCE TABLE '{table_name}':")
+                for col in columns:
+                    context_parts.append(f"  {table_name}.{col}")
+            
+            target_tables = table_column_mapping.get("target_tables", {})
+            for table_name, columns in target_tables.items():
+                context_parts.append(f"\nTARGET TABLE '{table_name}':")
+                for col in columns:
+                    context_parts.append(f"  {table_name}.{col}")
+            
+            return "\n".join(context_parts)
+            
+        except Exception as e:
+            logger.error(f"Error formatting table column context: {e}")
+            return "Error formatting table column context"
+
+    def _create_operation_plan(self, query, planner_info: Dict[str, Any], template: Dict[str, Any]) -> str:
         """
-        Use LLM to create a detailed plan for SQL query generation
-        
-        Parameters:
-        query (str): Original natural language query
-        planner_info (Dict): Information extracted by the planner
-        
-        Returns:
-        str: Step-by-step SQL generation plan
+        Use LLM to create a detailed plan for SQL Server query generation using enhanced planner info
         """
         try:
-
-            query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
-            source_tables = planner_info.get("source_table_name", [])
-            source_fields = planner_info.get("source_field_names", [])
-            target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
-            target_fields = planner_info.get("target_sap_fields", [])
-            filtering_fields = planner_info.get("filtering_fields", [])
-            conditions = planner_info.get("extracted_conditions", {})
-            key_mapping = planner_info.get("key_mapping", [])
+            # NEW: Extract qualified field information (these don't exist yet, but should be added)
+            qualified_source_fields = planner_info.get("qualified_source_fields", [])
+            qualified_filtering_fields = planner_info.get("qualified_filtering_fields", [])
+            qualified_insertion_fields = planner_info.get("qualified_insertion_fields", [])
+            qualified_target_fields = planner_info.get("qualified_target_fields", [])
+            table_column_mapping = planner_info.get("table_column_mapping", {})
+            join_conditions = planner_info.get("join_conditions", [])
             
-
-            target_has_data = False
-            target_data_samples = planner_info.get("target_data_samples", {})
-            if isinstance(target_data_samples, pd.DataFrame) and not target_data_samples.isnull().all().all():
-                target_has_data = True
+            # NEW: Format table-column context
+            table_column_context = self._format_table_column_context_from_planner(table_column_mapping)
             
-
-            print(source_fields)
-
+            # NEW: Enhanced join context
+            join_context = ""
+            if join_conditions:
+                join_context = "\nVERIFIED JOIN CONDITIONS:\n"
+                for condition in join_conditions:
+                    qualified_condition = condition.get("qualified_condition", "")
+                    join_type = condition.get("join_type", "INNER")
+                    join_context += f"- {join_type} JOIN: {qualified_condition}\n"
+            
             prompt = f"""
-    You are an expert Azure SQL Server/T-SQL database engineer focused on data transformation. I need you to create a step-by-step plan to generate 
-    T-SQL for the following natural language query:
+    You are an expert SQL Server database engineer focusing on data transformation. I need you to create 
+    precise SQL Server generation plan for a data transformation task.
 
     ORIGINAL QUERY: "{query}"
 
+    VERIFIED TABLE.COLUMN MAPPINGS:
+    {table_column_context}
+
+    {join_context}
+
+    QUALIFIED FIELD INFORMATION (Use these exact references):
+    - Source Fields: {qualified_source_fields}
+    - Filtering Fields: {qualified_filtering_fields}
+    - Insertion Fields: {qualified_insertion_fields}
+    - Target Fields: {qualified_target_fields}
+
     CONTEXT INFORMATION:
-    - Query Type: {query_type}
-    - Source Tables: {source_tables}
-    - Source Fields: {source_fields}
-    - Target Table: {target_table}
-    - Target Fields: {target_fields}
-    - Filtering Fields: {filtering_fields}
-    - Filtering Conditions: {json.dumps(conditions, indent=2)}
-    - Key Mapping: {json.dumps(key_mapping, indent=2)}
-    - Target Data Samples: {target_data_samples}
+    - Query Type: {planner_info.get("query_type", "SIMPLE_TRANSFORMATION")}
+    - Source Tables: {planner_info.get("source_table_name", [])}
+    - Target Table: {planner_info.get("target_table_name", [])}
+    - Key Mapping: {planner_info.get("key_mapping", [])}
 
-    Use this Template for the T-SQL generation plan:
-    {template["plan"]}
+    Use this Template for the SQL Server generation plan:
+    {template.get("plan", [])}
 
-    Properly understand how data is given in the source table and given the data how to transform it.
+    CRITICAL RULES:
+    1. Use ONLY the qualified table.column references provided above
+    2. Never invent or modify the table.column combinations
+    3. Follow the exact qualified field mappings for all operations
+    4. For JOIN operations, use the verified join conditions provided
+    5. All column references must be exactly as specified in the qualified fields
+    6. If you need to create a new column, use the ALTER TABLE statement with the exact qualified table.column reference
+    7. If you need to delete a column, use the ALTER TABLE statement with the exact qualified table.column reference
+    8. Do not create or delete columns unless explicitly mentioned in the prompt
+    9. Do not drop any tables or columns.
+    10. If a column is not said to be created, assume it already exists in the tables.
 
-    Note:
-    Tables with t_[number] like t_24 are target tables , these can act as both source and target tables.
-    These can be have different names for same column data as the source table
-    key mapping is used to match columns between source and target tables.
-    for example, if source table has MATNR and target table has Product, then if key mapping mentions then use them for matching in where clauses.
+    REQUIREMENTS:
+    1. Generate 10-20 detailed steps for SQL Server query creation
+    2. Each step must use the EXACT qualified table.column references from above
+    3. Include specific T-SQL syntax examples in each step
+    4. Verify every table.column reference against the provided qualified fields
+    5. For complex operations, reference the verified join conditions
 
-    Requirements:
-    - Generate a step-by-step T-SQL generation plan
-    - Give 10-20 steps to generate the T-SQL query
-    - Use the following format for each step:
-        1. Step description
-        2. T-SQL operation (e.g., SELECT, INSERT, UPDATE)
-        3. T-SQL query template with placeholders for parameters
-        4. Any additional notes or considerations
-    - Make sure to include any filtering conditions in the T-SQL query
-    - If the query references segments or previous transformations, make sure to use the appropriate source tables
-    - Pay special attention to the segment references - these indicate using data from previous segments
+    Format:
+    1. Step description using exact qualified references
+    2. SQL Server operation type (SELECT, INSERT, UPDATE, etc.)
+    3. T-SQL query template with exact qualified table.column names
+    4. Verification note confirming the table.column usage
 
-    Note:
-    1. ALWAYS assume we need to INSERT or UPDATE the target table with data from source tables
-    2. {"use an UPDATE operation (possibly with a subquery)" if target_has_data else " use an INSERT operation"}
-    3. For a validation query, use a SELECT operation instead
-    4. Always apply any filtering conditions to source data before inserting/updating
-    5. Match source fields to target fields exactly in the correct order
-    6. When filtering, use exact literal values (e.g., WHERE MTART = 'ROH')
-    7. For updates, use key fields to match records between source and target
-    8. If no explicit key mapping is provided, identify a likely key field (MATNR, ID, etc.)
-    10. DO NOT give any code 
-    11. DO NOT use Table alias.
-    12. When the query refers to a previous segment or transformation, 
-        we need to use the target table from that segment as a source table for this query
-    13. DO not DROP or CREATE any tables, just use the existing target table
-    14. When needing to delete a column, use ALTER TABLE to drop the column
-    Format your response as a numbered list only, with no explanations or additional text.
-    Each step should be clear, concise, and directly actionable for T-SQL generation.
+    EXAMPLE STEP FORMAT:
+    "1. Select material data from source table
+    T-SQL operation: SELECT
+    T-SQL query template: SELECT MARA.MATNR, MARA.MTART FROM MARA
+    Verification: Using qualified fields MARA.MATNR and MARA.MTART from source fields list"
+
+    Remember: Use ONLY the qualified table.column references provided - no modifications or additions!
+
+    Notes:
+    1. Use ALTER TABLE only when the prompt specifically mentions creation or deletion of a column. DO NOT use ALTER for anything else
+    2. If User does not give to create a column then assume that the column already exists in the tables and there is not need to create a column.
+    3. If the prompt does not specify a column, do not include it in the query.
+    4. If we have Column given that exist in a table, then use that column in the query.
     """
             
-
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
-                model="gemini-2.5-flash-preview-04-17", 
+                model="gemini-2.5-flash", 
                 contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.2)
+                config=types.GenerateContentConfig(temperature=0.1)
             )
             
-
             if response and hasattr(response, "text"):
-                logger.info(f"response text {response.text.strip()}")
+                logger.info(f"Plan generated using qualified field references")
                 return response.text.strip()
             else:
-                logger.warning("Invalid response from LLM in create_sql_plan")
-                return "1. Generate basic T-SQL query based on query type\n2. Return query"
+                logger.warning("Invalid response from LLM in enhanced plan generation")
+                return self._generate_fallback_plan_with_qualified_fields(template, planner_info)
                 
         except Exception as e:
-            logger.error(f"Error in create_sql_plan: {e}")
-            return "1. Generate basic T-SQL query based on query type\n2. Return query"
-        
-    def _get_segment_name(self, segment_id, conn):
-        cursor = conn.cursor()
-        cursor.execute("SELECT segement_name FROM connection_segments WHERE segment_id = ?", (segment_id,))
-        result = cursor.fetchone()
-        if result:
-            return result[0]
-        else:
-            logger.error(f"Segment ID {segment_id} not found in database")
-            return None
+            logger.error(f"Error in enhanced create_sql_plan: {e}")
+            return self._generate_fallback_plan_with_qualified_fields(template, planner_info)
+
+    def _format_table_column_context_from_planner(self, table_column_mapping):
+        """Format table.column context from planner's table_column_mapping"""
+        try:
+            if not table_column_mapping:
+                return "No table column mapping available"
+            
+            context_parts = ["AVAILABLE TABLE.COLUMN REFERENCES:"]
+            source_tables = table_column_mapping.get("source_tables", {})
+            for table_name, columns in source_tables.items():
+                context_parts.append(f"\nSOURCE TABLE '{table_name}':")
+                for col in columns:
+                    context_parts.append(f"  {table_name}.{col}")
+            
+            target_tables = table_column_mapping.get("target_tables", {})
+            for table_name, columns in target_tables.items():
+                context_parts.append(f"\nTARGET TABLE '{table_name}':")
+                for col in columns:
+                    context_parts.append(f"  {table_name}.{col}")
+            
+            return "\n".join(context_parts)
+            
+        except Exception as e:
+            logger.error(f"Error formatting table column context: {e}")
+            return "Error formatting table column context"
+
+    def _generate_fallback_plan_with_qualified_fields(self, template, planner_info):
+        """Generate fallback plan using qualified field information"""
+        try:
+            qualified_source = planner_info.get("qualified_source_fields", [])
+            qualified_target = planner_info.get("qualified_target_fields", [])
+            
+            fallback_steps = []
+            for i, step in enumerate(template.get("plan", []), 1):
+                source_ref = qualified_source[0] if qualified_source else "source_table.source_field"
+                target_ref = qualified_target[0] if qualified_target else "target_table.target_field"
+                
+                filled_step = step.replace("{field}", source_ref).replace("{table}", source_ref.split('.')[0] if '.' in source_ref else "unknown_table")
+                fallback_steps.append(f"{i}. {filled_step}")
+            
+            return "\n".join(fallback_steps)
+            
+        except Exception as e:
+            logger.error(f"Error in fallback plan generation: {e}")
+            return "1. Generate basic SQL Server query\n2. Execute transformation"
+        def _get_segment_name(self, segment_id, conn):
+            cursor = conn.cursor()
+            cursor.execute("SELECT segement_name FROM connection_segments WHERE segment_id = ?", (segment_id,))
+            result = cursor.fetchone()
+            if result:
+                return result[0]
+            else:
+                logger.error(f"Segment ID {segment_id} not found in database")
+                return None
 
     def process_sequential_query(self, query, object_id, segment_id, project_id, session_id=None):
         """
