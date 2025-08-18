@@ -9,17 +9,21 @@ class DatabaseConfig:
     """Centralized database configuration for local SQL Server"""
     
     def __init__(self):
-        self.server = os.environ.get('MSSQL_SERVER', 'localhost\\SQLEXPRESS')
-        self.database = os.environ.get('MSSQL_DATABASE')
-        self.username = os.environ.get('MSSQL_USERNAME')
-        self.password = os.environ.get('MSSQL_PASSWORD')
-        self.driver = os.environ.get('MSSQL_DRIVER', '{ODBC Driver 17 for SQL Server}')
+        self.connection_string = os.environ.get("SQL_CONNECTION_STRING","")
+        self.connection_string = os.getenv("SQL_CONNECTION_STRING", "")
+        print(f"Using connection string: {self.connection_string}")
+        if not self.connection_string:
+            self.server = os.environ.get('SQL_SERVER', 'localhost\\SQLEXPRESS')
+            self.database = os.environ.get('SQL_DATABASE')
+            self.username = os.environ.get('SQL_USERNAME')
+            self.password = os.environ.get('SQL_PASSWORD')
+            self.driver = os.environ.get('SQL_DRIVER', '{ODBC Driver 17 for SQL Server}')
+            self.connection_string = self.connection_string_generator()
         
-        if not self.database:
-            raise ValueError("MSSQL_DATABASE environment variable is required")
+            if not self.database:
+                raise ValueError("SQL_DATABASE environment variable is required")
     
-    @property
-    def connection_string(self):
+    def connection_string_generator(self):
         """Build SQL Server connection string"""
         if not self.username:
             # Windows Authentication

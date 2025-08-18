@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from difflib import SequenceMatcher
 from typing import Dict, List, Any, Optional, Tuple
 
-from config import DatabaseConfig
+from DMtool.config import DatabaseConfig
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,6 @@ class ClassificationEnhancer:
             db_path (str): Path to the SQLite database
             segments_csv_path (str): Path to the segments CSV file
         """
-        from DMtool.config import DatabaseConfig
         self.db_config = DatabaseConfig()
         self.connection_string = self.db_config.connection_string
         self.segments_csv_path = segments_csv_path
@@ -1068,7 +1067,6 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
 
         previous_context = context_manager.get_context(session_id) if session_id else None
         visited_segments = previous_context.get("segments_visited", {}) if previous_context else {}
-        from config import DatabaseConfig
         db_config = DatabaseConfig()
         conn = db_config.get_connection()
 
