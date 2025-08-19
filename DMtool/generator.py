@@ -146,20 +146,13 @@ class SQLGenerator:
                 return self._generate_aggregation_operation(planner_info)
             else:
                 return self._generate_simple_transformation(planner_info)
-
-    def generate_sql_with_llm(self, plan: str, planner_info: Dict[str, Any],template: str=None) -> Tuple[str, Dict[str, Any]]:
+            
+    def generate_sql_with_llm(self, plan: str, planner_info: Dict[str, Any], template: str = None) -> Tuple[str, Dict[str, Any]]:
         """
         Generate Azure SQL query using LLM based on the plan
-        
-        Parameters:
-        plan (str): Step-by-step plan for Azure SQL generation
-        planner_info (Dict): Information extracted by the planner
-        
-        Returns:
-        Tuple[str, Dict[str, Any]]: The generated Azure SQL query and parameters
         """
         try:
-
+            # Extract all the context information
             query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
             source_tables = planner_info.get("source_table_name", [])
             insertion_fields = planner_info.get("insertion_fields", [])
@@ -169,106 +162,80 @@ class SQLGenerator:
             conditions = planner_info.get("extracted_conditions", {})
             original_query = planner_info.get("original_query", "")
             key_mapping = planner_info.get("key_mapping", [])
+            join_conditions = planner_info.get("join_conditions", [])
             
-
+            # Determine the actual join field from join_conditions
+            actual_join_field = "PRODUCT"  # Default
+            if join_conditions and len(join_conditions) > 0:
+                first_condition = join_conditions[0]
+                # Get the field from target table side
+                if first_condition.get("left_table") == "CurrentTargetTable" or first_condition.get("left_table") == target_table:
+                    actual_join_field = first_condition.get("left_field", "PRODUCT")
+                elif first_condition.get("right_table") == "CurrentTargetTable" or first_condition.get("right_table") == target_table:
+                    actual_join_field = first_condition.get("right_field", "PRODUCT")
+            
+            # Check if target table has data
             target_has_data = False
             target_data_samples = planner_info.get("target_data_samples", {})
             if isinstance(target_data_samples, pd.DataFrame) and not target_data_samples.empty:
                 target_has_data = True
             
-
             prompt = f"""
-    You are an expert Azure SQL database engineer focusing on data transformation operations. I need you to generate 
-    precise Azure SQL query for a data transformation task based on the following plan and information:
+    You are an expert Azure SQL Server database engineer. Generate a precise Azure SQL query based on the following plan and information:
 
     ORIGINAL QUERY: "{original_query}"
 
-    Azure SQL GENERATION PLAN:
+    AZURE SQL GENERATION PLAN:
     {plan}
 
-    Use the given template to generate the Azure SQL Query:
+    TEMPLATE TO USE:
     {template}
 
     CONTEXT INFORMATION:
     - Query Type: {query_type}
     - Source Tables: {source_tables}
-    - Insertion Fields: {insertion_fields}  
     - Target Table: {target_table}
     - Target Fields: {target_fields}
-    - Filtering Fields: {filtering_fields}
-    - Filtering Conditions: {json.dumps(conditions, indent=2)}
-    - Key Mapping: {json.dumps(key_mapping, indent=2)}
+    - Insertion Fields (to retrieve): {insertion_fields}
+    - Join Conditions: {json.dumps(join_conditions, indent=2)}
     - Target Table Has Data: {target_has_data}
 
-    CRITICAL FIELD USAGE RULES:
-    1. Insertion Fields ({insertion_fields}) are the ONLY fields that should appear in:
-       - INSERT INTO field lists
-       - UPDATE SET clauses
-       - SELECT clauses for data retrieval operations
-    2. Filtering Fields ({filtering_fields}) should ONLY appear in:
-       - WHERE clauses
-       - JOIN conditions for filtering
-       - HAVING clauses
-    3. NEVER mix insertion fields with filtering fields in INSERT/UPDATE operations
-    4. If a field appears in both lists, use it according to the operation context
+    CRITICAL AZURE SQL REQUIREMENTS:
+    1. Use the EXACT column names from the join conditions above
+    2. The join field for the target table is: {actual_join_field}
+    3. DO NOT use 'MaterialKey' - use the actual column names from join_conditions
+    4. For multi-table conditional checks (MARA_500, MARA_700, MARA):
+    - Use CASE WHEN EXISTS pattern
+    - Join using the field: {actual_join_field} (from target) to MATNR (from source tables)
+    5. Use TOP 1 instead of LIMIT for Azure SQL
+    6. The target table name is: {target_table}
+    7. For UPDATE operations, the SET clause should update: {target_fields}
 
-    IMPORTANT REQUIREMENTS:
-    1. Generate ONLY standard Azure SQL SQL syntax (not MS SQL, MySQL, PostgreSQL, etc.)
-    2. For all queries except validations, use DML operations (INSERT, UPDATE, etc.)
-    3. If Target Table Has Data = True, use UPDATE operations with proper key matching
-    4. If Target Table Has Data = False, use INSERT operations
-    5. For validation queries only, use SELECT operations
-    6. Always include WHERE clauses for all filter conditions using exact literal values
-    7. If insertion fields are requested, make sure ONLY they are included in the INSERT/UPDATE
-    8. Properly handle key fields for matching records in UPDATE operations
-    9. Return ONLY the final SQL query with no explanations or markdown formatting
-
-    CRITICAL AZURE SQL SERVER SYNTAX:
-    - Use ISNULL(column, default_value) for null handling
-    - Use GETDATE() for current date, not date('now')
-    - Use DATEPART(part, date) for date parts, not strftime()
-    - Use square brackets [table_name] for identifiers with spaces
-    - Use NVARCHAR instead of TEXT for string columns
-    - Parameter format: @param_name or ? for positional
-    - Azure SQL UPDATE with JOIN requires FROM clause (different from standard SQL)
-    - Azure SQL has no BOOLEAN type (use INTEGER 0/1)
-    - For UPDATE with data from another table, use: UPDATE target SET col = subquery.col FROM (SELECT...) AS subquery WHERE target.key = subquery.key
-
-    EXAMPLES:
-    - For "Bring Material Number with Material Type = ROH from MARA Table" with empty target table:
-    INSERT INTO target_table (MATNR)
-    SELECT MATNR FROM MARA
-    WHERE MTART = 'ROH'
-    Note: MTART is filtering field (WHERE clause), MATNR is insertion field (SELECT/INSERT)
-
-    - For "Bring Material Number with Material Type = ROH from MARA Table" with existing target data:
-    UPDATE target_table
-    SET MATNR = source.MATNR
-    FROM (SELECT MATNR FROM MARA WHERE MTART = 'ROH') AS source
-    WHERE target_table.MATNR = source.MATNR
-    Note: MTART is filtering field (WHERE clause), MATNR is insertion field (SET clause)
-
-    - For "Validate material numbers in MARA":
-    SELECT MATNR,
-    CASE WHEN MATNR IS NULL THEN 'Invalid' ELSE 'Valid' END AS validation_result
-    FROM MARA
+    EXAMPLE FOR YOUR SPECIFIC QUERY:
+    ```sql
+    UPDATE {target_table}
+    SET {target_fields[0] if target_fields else 'MEINS'} = CASE
+        WHEN EXISTS (SELECT 1 FROM MARA_500 WHERE MATNR = {target_table}.{actual_join_field})
+            THEN (SELECT TOP 1 MEINS FROM MARA_500 WHERE MATNR = {target_table}.{actual_join_field})
+        WHEN EXISTS (SELECT 1 FROM MARA_700 WHERE MATNR = {target_table}.{actual_join_field})
+            THEN (SELECT TOP 1 MEINS FROM MARA_700 WHERE MATNR = {target_table}.{actual_join_field})
+        ELSE (SELECT TOP 1 MEINS FROM MARA WHERE MATNR = {target_table}.{actual_join_field})
+    END;
+    Generate ONLY the SQL query, no explanations or markdown.
     """
-        
-
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
-                model="gemini-2.5-flash-preview-04-17",
+                model="gemini-2.5-flash",
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.1)
             )
             
-
             if response and hasattr(response, "text"):
                 sql_query = response.text.strip()
                 
-
+                # Clean up the response
                 import re
-                sql_match = re.search(r"```(?:Azure SQL|sql)\s*(.*?)\s*```", sql_query, re.DOTALL)
+                sql_match = re.search(r"```(?:sql|tsql)\s*(.*?)\s*```", sql_query, re.DOTALL | re.IGNORECASE)
                 if sql_match:
                     sql_query = sql_match.group(1)
                 else:
@@ -276,36 +243,50 @@ class SQLGenerator:
                     if sql_match:
                         sql_query = sql_match.group(1)
                 
-
-                params = {}
+                # Final check - replace any remaining MaterialKey references
+                if "MaterialKey" in sql_query:
+                    logger.warning("Found MaterialKey in generated SQL, replacing with actual field")
+                    sql_query = sql_query.replace("MaterialKey", actual_join_field)
                 
+                params = {}
                 return sql_query.strip(), params
             else:
                 logger.warning("Invalid response from LLM in generate_sql_with_llm")
-                
-
+                # Fallback query using actual column names
                 if target_has_data and query_type != "VALIDATION_OPERATION":
-
-                    if insertion_fields and target_fields:
-                        fallback = f"UPDATE {target_table} SET {target_fields[0]} = source.{insertion_fields[0]} FROM (SELECT {', '.join(insertion_fields)} FROM {source_tables[0]}) AS source WHERE {target_table}.{target_fields[0]} = source.{insertion_fields[0]}"
-                    else:
-                        fallback = f"UPDATE {target_table} SET field = 'value'"
-                elif query_type == "VALIDATION_OPERATION":
-
-                    fallback = f"SELECT * FROM {source_tables[0]}"
+                    fallback = f"""
+        UPDATE {target_table}
+        SET {target_fields[0] if target_fields else 'MEINS'} = CASE
+        WHEN EXISTS (SELECT 1 FROM MARA_500 WHERE MATNR = {target_table}.{actual_join_field})
+        THEN (SELECT TOP 1 MEINS FROM MARA_500 WHERE MATNR = {target_table}.{actual_join_field})
+        WHEN EXISTS (SELECT 1 FROM MARA_700 WHERE MATNR = {target_table}.{actual_join_field})
+        THEN (SELECT TOP 1 MEINS FROM MARA_700 WHERE MATNR = {target_table}.{actual_join_field})
+        ELSE (SELECT TOP 1 MEINS FROM MARA WHERE MATNR = {target_table}.{actual_join_field})
+        END;"""
                 else:
-
-                    if insertion_fields and target_fields:
-                        fallback = f"INSERT INTO {target_table} ({', '.join(target_fields)}) SELECT {', '.join(insertion_fields)} FROM {source_tables[0]}"
-                    else:
-                        fallback = f"SELECT * FROM {source_tables[0]}"
-                    
-                return fallback, {}
-            
+                    fallback = f"SELECT * FROM {source_tables[0] if source_tables else 'MARA'}"
+                    return fallback, {}
+                        
         except Exception as e:
             logger.error(f"Error in generate_sql_with_llm: {e}")
             return "SELECT * FROM " + str(source_tables[0] if source_tables else "unknown_table"), {}
 
+### 3. Update the multi_table_conditional template in `query_templates.json`:
+
+# ```json
+# {
+#   "id": "multi_table_conditional",
+#   "prompt": "Check {field1} in {table1} and IF matching entries found, bring {field2} from {table1} ELSE check in {table2} and bring {field2} ELSE bring from {table3}",
+#   "query": "UPDATE {target_table} SET {target_field} = CASE WHEN EXISTS (SELECT 1 FROM {table1} WHERE MATNR = {target_table}.PRODUCT) THEN (SELECT TOP 1 {field2} FROM {table1} WHERE MATNR = {target_table}.PRODUCT) WHEN EXISTS (SELECT 1 FROM {table2} WHERE MATNR = {target_table}.PRODUCT) THEN (SELECT TOP 1 {field2} FROM {table2} WHERE MATNR = {target_table}.PRODUCT) ELSE (SELECT TOP 1 {field2} FROM {table3} WHERE MATNR = {target_table}.PRODUCT) END",
+#   "plan": [
+#     "1. Identify the target table and its key field (usually PRODUCT or similar)",
+#     "2. Identify the field to retrieve from source tables (usually MEINS or similar)",
+#     "3. Identify the three source tables to check in sequence",
+#     "4. Create a CASE expression with EXISTS checks using proper join fields",
+#     "5. Use TOP 1 for Azure SQL instead of LIMIT",
+#     "6. Prepare an UPDATE statement to update the target field"
+#   ]
+# }
     def _generate_simple_transformation(self, planner_info: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
         """Generate SQL for simple transformations
         
@@ -1262,7 +1243,7 @@ class SQLGenerator:
 
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
-                model="gemini-2.5-flash-preview-04-17", 
+                model="gemini-2.5-flash", 
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.1)
             )
@@ -1350,7 +1331,7 @@ class SQLGenerator:
 
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
-                model="gemini-2.5-flash-preview-04-17", 
+                model="gemini-2.5-flash", 
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.2)
             )

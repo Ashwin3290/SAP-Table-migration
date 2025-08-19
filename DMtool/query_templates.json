@@ -16,13 +16,13 @@
   {
     "id": "multi_table_conditional",
     "prompt": "Check {field1} in {table1} and IF matching entries found, bring {field2} from {table1} ELSE check in {table2} and bring {field2} ELSE bring from {table3}",
-    "query": "UPDATE {target_table} SET {target_field} = CASE WHEN EXISTS (SELECT 1 FROM {table1} WHERE {key_field} = {target_table}.{key_field}) THEN (SELECT {field2} FROM {table1} WHERE {key_field} = {target_table}.{key_field}) WHEN EXISTS (SELECT 1 FROM {table2} WHERE {key_field} = {target_table}.{key_field}) THEN (SELECT {field2} FROM {table2} WHERE {key_field} = {target_table}.{key_field}) ELSE (SELECT {field2} FROM {table3} WHERE {key_field} = {target_table}.{key_field}) END",
+    "query": "UPDATE {target_table} SET {target_field} = CASE WHEN EXISTS (SELECT 1 FROM {table1} WHERE MATNR = {target_table}.PRODUCT) THEN (SELECT TOP 1 {field2} FROM {table1} WHERE MATNR = {target_table}.PRODUCT) WHEN EXISTS (SELECT 1 FROM {table2} WHERE MATNR = {target_table}.PRODUCT) THEN (SELECT TOP 1 {field2} FROM {table2} WHERE MATNR = {target_table}.PRODUCT) ELSE (SELECT TOP 1 {field2} FROM {table3} WHERE MATNR = {target_table}.PRODUCT) END",
     "plan": [
-      "1. Identify the key field {field1} to check across tables",
-      "2. Identify the field {field2} to retrieve",
-      "3. Identify the three tables to check in sequence",
-      "4. Create a CASE expression with EXISTS checks to implement the conditional logic",
-      "5. Prepare an UPDATE statement to update the target field"
+      "1. Identify the target table and its key field (usually PRODUCT or similar)",
+      "2. Identify the field to retrieve from source tables (usually MEINS or similar)",
+      "3. Identify the three source tables to check in sequence",
+      "4. Create a CASE expression with EXISTS checks using proper join fields",
+      "5. Use TOP 1 for Azure SQL instead of LIMIT"
     ]
   },
   {

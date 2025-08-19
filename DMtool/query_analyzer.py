@@ -111,7 +111,7 @@ Your analysis should be in a structured format with clear categories of issues.
 
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
-                model="gemini-2.5-flash-preview-04-17", 
+                model="gemini-2.5-flash", 
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.1)
             )
@@ -188,7 +188,7 @@ REQUIREMENTS:
 
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             response = client.models.generate_content(
-                model="gemini-2.5-flash-preview-04-17", 
+                model="gemini-2.5-flash", 
                 contents=prompt,
                 config=types.GenerateContentConfig(temperature=0.2)
             )

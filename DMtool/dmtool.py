@@ -127,7 +127,7 @@ class QueryTemplateRepository:
                 from google.genai import types
                 
                 response = self.client.models.generate_content(
-                    model="gemini-2.5-flash-preview-04-17",
+                    model="gemini-2.5-flash",
                     contents=llm_prompt,
                     config=types.GenerateContentConfig(temperature=0.1)
                 )
@@ -431,10 +431,10 @@ class DMTool:
 
     def _create_operation_plan(self, query, planner_info: Dict[str, Any], template: Dict[str, Any]) -> str:
         """
-        Use LLM to create a detailed plan for SQL Server query generation using enhanced planner info
+        Use LLM to create a detailed plan for Azure SQL query generation using enhanced planner info
         """
         try:
-            # NEW: Extract qualified field information (these don't exist yet, but should be added)
+            # Extract qualified field information
             qualified_source_fields = planner_info.get("qualified_source_fields", [])
             qualified_filtering_fields = planner_info.get("qualified_filtering_fields", [])
             qualified_insertion_fields = planner_info.get("qualified_insertion_fields", [])
@@ -442,82 +442,90 @@ class DMTool:
             table_column_mapping = planner_info.get("table_column_mapping", {})
             join_conditions = planner_info.get("join_conditions", [])
             
-            # NEW: Format table-column context
+            # Get actual column names from the resolved data
+            source_tables = planner_info.get("source_table_name", [])
+            target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
+            
+            # Format table-column context
             table_column_context = self._format_table_column_context_from_planner(table_column_mapping)
             
-            # NEW: Enhanced join context
+            # Enhanced join context
             join_context = ""
             if join_conditions:
                 join_context = "\nVERIFIED JOIN CONDITIONS:\n"
                 for condition in join_conditions:
-                    qualified_condition = condition.get("qualified_condition", "")
+                    # Use the actual field names from join conditions
+                    left_table = condition.get("left_table", "")
+                    right_table = condition.get("right_table", "")
+                    left_field = condition.get("left_field", "")
+                    right_field = condition.get("right_field", "")
                     join_type = condition.get("join_type", "INNER")
+                    
+                    # Build qualified condition
+                    if left_table and right_table and left_field and right_field:
+                        qualified_condition = f"{left_table}.{left_field} = {right_table}.{right_field}"
+                    else:
+                        qualified_condition = condition.get("qualified_condition", "")
+                        
                     join_context += f"- {join_type} JOIN: {qualified_condition}\n"
             
             prompt = f"""
-    You are an expert SQL Server database engineer focusing on data transformation. I need you to create 
-    precise SQL Server generation plan for a data transformation task.
+    You are an expert Azure SQL Server database engineer focusing on data transformation. I need you to create 
+    precise Azure SQL Server generation plan for a data transformation task.
 
     ORIGINAL QUERY: "{query}"
 
-    VERIFIED TABLE.COLUMN MAPPINGS:
-    {table_column_context}
+    SOURCE TABLES INFORMATION:
+    {source_tables}
+
+    TARGET TABLE INFORMATION:
+    {target_table}
+
+    JOIN CONDITIONS FROM PLANNER:
+    {join_conditions}
 
     {join_context}
-
-    QUALIFIED FIELD INFORMATION (Use these exact references):
-    - Source Fields: {qualified_source_fields}
-    - Filtering Fields: {qualified_filtering_fields}
-    - Insertion Fields: {qualified_insertion_fields}
-    - Target Fields: {qualified_target_fields}
 
     CONTEXT INFORMATION:
     - Query Type: {planner_info.get("query_type", "SIMPLE_TRANSFORMATION")}
     - Source Tables: {planner_info.get("source_table_name", [])}
     - Target Table: {planner_info.get("target_table_name", [])}
+    - Insertion Fields: {planner_info.get("insertion_fields", [])}
+    - Target Fields: {planner_info.get("target_sap_fields", [])}
     - Key Mapping: {planner_info.get("key_mapping", [])}
 
-    Use this Template for the SQL Server generation plan:
+    Use this Template for the Azure SQL Server generation plan:
     {template.get("plan", [])}
 
-    CRITICAL RULES:
-    1. Use ONLY the qualified table.column references provided above
-    2. Never invent or modify the table.column combinations
-    3. Follow the exact qualified field mappings for all operations
-    4. For JOIN operations, use the verified join conditions provided
-    5. All column references must be exactly as specified in the qualified fields
-    6. If you need to create a new column, use the ALTER TABLE statement with the exact qualified table.column reference
-    7. If you need to delete a column, use the ALTER TABLE statement with the exact qualified table.column reference
-    8. Do not create or delete columns unless explicitly mentioned in the prompt
-    9. Do not drop any tables or columns.
-    10. If a column is not said to be created, assume it already exists in the tables.
+    CRITICAL RULES FOR AZURE SQL:
+    1. For conditional multi-table lookups, use the actual column names provided in the join conditions
+    2. The target table is: {target_table}
+    3. Use the column names EXACTLY as they appear in the join_conditions
+    4. For the query type multi_table_conditional, the key field for joining should be taken from join_conditions
+    5. Common join fields in SAP tables: MATNR, PRODUCT, MaterialNumber, etc.
+    6. DO NOT invent column names like 'MaterialKey' - use the actual column names from join_conditions
+    7. For UPDATE operations with CASE WHEN EXISTS, use the proper join columns from the join_conditions
 
     REQUIREMENTS:
-    1. Generate 10-20 detailed steps for SQL Server query creation
-    2. Each step must use the EXACT qualified table.column references from above
+    1. Generate 10-20 detailed steps for Azure SQL Server query creation
+    2. Each step must reference the EXACT column names from the join conditions
     3. Include specific T-SQL syntax examples in each step
-    4. Verify every table.column reference against the provided qualified fields
-    5. For complex operations, reference the verified join conditions
+    4. For complex operations, reference the verified join conditions
+    5. Use TOP 1 instead of LIMIT for Azure SQL
 
     Format:
-    1. Step description using exact qualified references
-    2. SQL Server operation type (SELECT, INSERT, UPDATE, etc.)
-    3. T-SQL query template with exact qualified table.column names
-    4. Verification note confirming the table.column usage
+    1. Step description using exact column references
+    2. Azure SQL operation type (SELECT, INSERT, UPDATE, etc.)
+    3. T-SQL query template with exact column names from join_conditions
+    4. Verification note confirming the column usage
 
-    EXAMPLE STEP FORMAT:
-    "1. Select material data from source table
-    T-SQL operation: SELECT
-    T-SQL query template: SELECT MARA.MATNR, MARA.MTART FROM MARA
-    Verification: Using qualified fields MARA.MATNR and MARA.MTART from source fields list"
+    EXAMPLE STEP FORMAT FOR YOUR QUERY:
+    "1. Check if materials exist in MARA_500 table
+    T-SQL operation: EXISTS check
+    T-SQL query template: EXISTS (SELECT 1 FROM MARA_500 WHERE MARA_500.{actual_join_field} = {target_table}.{actual_join_field})
+    Verification: Using the join field from join_conditions"
 
-    Remember: Use ONLY the qualified table.column references provided - no modifications or additions!
-
-    Notes:
-    1. Use ALTER TABLE only when the prompt specifically mentions creation or deletion of a column. DO NOT use ALTER for anything else
-    2. If User does not give to create a column then assume that the column already exists in the tables and there is not need to create a column.
-    3. If the prompt does not specify a column, do not include it in the query.
-    4. If we have Column given that exist in a table, then use that column in the query.
+    Remember: Use ONLY the column names that appear in the join_conditions - no invented columns!
     """
             
             client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
@@ -528,14 +536,14 @@ class DMTool:
             )
             
             if response and hasattr(response, "text"):
-                logger.info(f"Plan generated using qualified field references")
+                logger.info(f"Plan generated with proper column references")
                 return response.text.strip()
             else:
-                logger.warning("Invalid response from LLM in enhanced plan generation")
+                logger.warning("Invalid response from LLM in plan generation")
                 return self._generate_fallback_plan_with_qualified_fields(template, planner_info)
                 
         except Exception as e:
-            logger.error(f"Error in enhanced create_sql_plan: {e}")
+            logger.error(f"Error in create_operation_plan: {e}")
             return self._generate_fallback_plan_with_qualified_fields(template, planner_info)
 
     def _format_table_column_context_from_planner(self, table_column_mapping):
@@ -582,15 +590,16 @@ class DMTool:
         except Exception as e:
             logger.error(f"Error in fallback plan generation: {e}")
             return "1. Generate basic SQL Server query\n2. Execute transformation"
-        def _get_segment_name(self, segment_id, conn):
-            cursor = conn.cursor()
-            cursor.execute("SELECT segement_name FROM connection_segments WHERE segment_id = ?", (segment_id,))
-            result = cursor.fetchone()
-            if result:
-                return result[0]
-            else:
-                logger.error(f"Segment ID {segment_id} not found in database")
-                return None
+        
+    def _get_segment_name(self, segment_id, conn):
+        cursor = conn.cursor()
+        cursor.execute("SELECT segement_name FROM connection_segments WHERE segment_id = ?", (segment_id,))
+        result = cursor.fetchone()
+        if result:
+            return result[0]
+        else:
+            logger.error(f"Segment ID {segment_id} not found in database")
+            return None
 
     def process_sequential_query(self, query, object_id, segment_id, project_id, session_id=None):
         """

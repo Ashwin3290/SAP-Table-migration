@@ -122,12 +122,12 @@ class SQLExecutor:
         """
         conn = None
         try:
-            conn = self._get_connection()
+            engine = self.db_config.get_engine()
             
             if params:
-                df = pd.read_sql_query(query, conn, params=params)
+                df = pd.read_sql_query(query, engine, params=params)
             else:
-                df = pd.read_sql_query(query, conn)
+                df = pd.read_sql_query(query, engine)
                 
             return df
                 

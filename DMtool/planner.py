@@ -193,7 +193,8 @@ class ClassificationEnhancer:
             
         try:
             conn = pyodbc.connect(self.connection_string)
-            self._segments_df = pd.read_sql("SELECT * FROM connection_segments", conn)
+            engine = self.db_config.get_engine()
+            self._segments_df = pd.read_sql("SELECT * FROM connection_segments", engine)
             conn.close()
             return self._segments_df
         except Exception as e:
@@ -1068,7 +1069,8 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         previous_context = context_manager.get_context(session_id) if session_id else None
         visited_segments = previous_context.get("segments_visited", {}) if previous_context else {}
         db_config = DatabaseConfig()
-        conn = db_config.get_connection()
+        conn = pyodbc.connect(db_config.connection_string)
+        engine = db_config.get_engine()
 
         try:
             cursor = conn.cursor()
@@ -1081,7 +1083,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             logger.warning(f"Error tracking segment: {e}")
         
 
-        joined_df = fetch_data_by_ids(object_id, segment_id, project_id, conn)
+        joined_df = fetch_data_by_ids(object_id, segment_id, project_id, engine)
         
 
         joined_df = missing_values_handling(joined_df)
@@ -1100,7 +1102,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
                     logger.warning(f"SQL-based target data sample retrieval failed, using fallback")
 
                     target_df = get_or_create_session_target_df(
-                        session_id, target_table[0], conn
+                        session_id, target_table[0], engine
                     )
                     target_df_sample = (
                         target_df.head(5).to_dict("records")
@@ -1264,7 +1266,7 @@ INSTRUCTIONS: Use ONLY the validated table and column names from the mappings ab
                 logger.warning(f"Error fetching schema for target table {target_table}: {e}")
                 
 
-        results = process_info(parsed_data, conn)
+        results = process_info(parsed_data, engine)
         
 
         if query_type == "SIMPLE_TRANSFORMATION":
@@ -2060,7 +2062,7 @@ def fetch_data_by_ids(object_id, segment_id, project_id, conn):
         AND f.project_id_id = ? 
         """
 
-        params = [object_id, segment_id, project_id] * 3
+        params = tuple([object_id, segment_id, project_id] * 3)
         joined_df = pd.read_sql_query(joined_query, conn, params=params)
 
         if joined_df.empty:
