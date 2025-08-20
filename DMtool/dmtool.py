@@ -522,7 +522,6 @@ class DMTool:
     EXAMPLE STEP FORMAT FOR YOUR QUERY:
     "1. Check if materials exist in MARA_500 table
     T-SQL operation: EXISTS check
-    T-SQL query template: EXISTS (SELECT 1 FROM MARA_500 WHERE MARA_500.{actual_join_field} = {target_table}.{actual_join_field})
     Verification: Using the join field from join_conditions"
 
     Remember: Use ONLY the column names that appear in the join_conditions - no invented columns!

@@ -59,7 +59,7 @@ class SQLExecutor:
                 cursor.execute(query, params)
             else:
                 cursor.execute(query)
-            
+            logger.info(f"Executed query: {query}... with params: {params}")
             if commit:
                 conn.commit()
             
@@ -151,20 +151,20 @@ class SQLExecutor:
     
     def table_exists(self, table_name: str) -> bool:
         """Check if a table exists in the database"""
-        query = """
+        query = f"""
         SELECT TABLE_NAME 
         FROM INFORMATION_SCHEMA.TABLES 
         WHERE TABLE_TYPE = 'BASE TABLE' 
-        AND TABLE_NAME = ?
+        AND TABLE_NAME = {table_name}
         AND TABLE_SCHEMA = 'dbo'
         """
         
-        result = self.execute_query(query, [table_name])
+        result = self.execute_query(query)
         return isinstance(result, list) and len(result) > 0  
     
     def get_table_schema(self, table_name: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """Get the schema information for a table"""
-        query = """
+        query = f"""
         SELECT 
             COLUMN_NAME as name,
             DATA_TYPE as type,
@@ -172,11 +172,11 @@ class SQLExecutor:
             COLUMN_DEFAULT as default_value,
             CHARACTER_MAXIMUM_LENGTH as max_length
         FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_NAME = ? AND TABLE_SCHEMA = 'dbo'
+        WHERE TABLE_NAME = {table_name} AND TABLE_SCHEMA = 'dbo'
         ORDER BY ORDINAL_POSITION
         """
         
-        return self.execute_query(query, [table_name])
+        return self.execute_query(query)
     
     def get_table_sample(self, table_name: str, limit: int = 5) -> Union[pd.DataFrame, Dict[str, Any]]:
         """
