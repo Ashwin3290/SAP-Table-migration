@@ -10,6 +10,7 @@ import os
 from typing import Dict, List, Any, Optional, Union, Tuple
 
 from DMtool.query_analyzer import SQLiteQueryAnalyzer
+from DMtool.llm_config import LLMManager
 
 logger = logging.getLogger(__name__)
 
@@ -253,13 +254,13 @@ class SQLGenerator:
     """
         
 
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-pro",
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.1)
+            llm= LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
             )
             
+            response = llm.generate(prompt, temperature=0.05, max_tokens=500)
 
             if response and hasattr(response, "text"):
                 sql_query = response.text.strip()
@@ -1247,15 +1248,14 @@ class SQLGenerator:
     """
 
 
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.1)
+            llm= LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
             )
-            
+            response = llm.generate(prompt)
 
-            if response and hasattr(response, "text"):
+            if response:
                 return response.text.strip()
             else:
                 return "Failed to analyze query"
@@ -1333,12 +1333,12 @@ class SQLGenerator:
     """
 
 
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.2)
+            llm= LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
             )
+            response = llm.generate(prompt)
             
 
             if response and hasattr(response, "text"):

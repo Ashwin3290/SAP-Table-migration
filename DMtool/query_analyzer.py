@@ -8,6 +8,7 @@ from google.genai import types
 import os
 import pandas as pd
 
+from DMtool.llm_config import LLMManager
 
 logger = logging.getLogger(__name__)
 
@@ -112,12 +113,12 @@ Your analysis should be in a structured format with clear categories of issues.
 """
 
 
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.1)
+            llm = LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
             )
+            response = llm.generate(prompt, temperature=0.1, max_tokens=500)
             
 
             if response and hasattr(response, "text"):
@@ -189,12 +190,12 @@ REQUIREMENTS:
 """
 
 
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.2)
+            llm = LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
             )
+            response = llm.generate(prompt, temperature=0.1, max_tokens=500)
             
 
             if response and hasattr(response, "text"):

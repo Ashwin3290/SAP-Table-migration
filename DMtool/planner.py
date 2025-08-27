@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 from DMtool.executor import SQLExecutor
+from DMtool.llm_config import LLMManager
 
 sql_executor = SQLExecutor()
 
@@ -603,13 +604,13 @@ Respond with a JSON object:
 
             return _fallback_classification(query)
             
-        client = genai.Client(api_key=api_key)
-        
-        response = client.models.generate_content(
-            model="gemini-2.5-flash", 
-            contents=prompt,
-            config=types.GenerateContentConfig(temperature=0.1)
+        llm = LLMManager(
+            provider="google",
+            model="gemini/gemini-2.5-flash",
+            api_key=api_key
         )
+        
+        response = llm.generate(prompt, temperature=0.3, max_tokens=500)
         
         if not response or not hasattr(response, "text"):
             logger.warning("Invalid response from Gemini API for query classification")
@@ -1179,15 +1180,13 @@ INSTRUCTIONS: Use ONLY the validated table and column names from the mappings ab
             logger.error("GEMINI_API_KEY not found in environment variables")
             raise APIError("Gemini API key not configured")
             
-        client = genai.Client(api_key=api_key)
-        
-        response = client.models.generate_content(
-            model="gemini-2.5-flash", 
-            contents=formatted_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.5, top_p=0.95, top_k=40
-            ),
+        llm = LLMManager(
+            provider="google",
+            model="gemini/gemini-2.5-flash",
+            api_key=api_key
         )
+        
+        response = llm.generate(formatted_prompt, temperature=0.3, max_tokens=1500)
         
 
         json_str = re.search(r"```json(.*?)```", response.text, re.DOTALL)

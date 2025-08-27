@@ -9,12 +9,12 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Union, Tuple
 
 from DMtool.sqlite_utils import add_sqlite_functions
+from DMtool.source_table_manager import handle_source_sync
 
 load_dotenv()
 
 
 logger = logging.getLogger(__name__)
-
 class SQLExecutor:
     """Executes SQL queries against the database"""
     
@@ -25,6 +25,32 @@ class SQLExecutor:
         db_path (str): Path to the SQLite database
         """
         self.db_path = db_path
+
+    def _extract_target_table_name(self, query: str) -> Optional[str]:
+        """
+        Extract target table name from SQL query
+        Add this method to the SQLExecutor class
+        
+        Args:
+            query (str): SQL query
+            
+        Returns:
+            str or None: Target table name
+        """
+        import re
+        
+        query_upper = query.upper().strip()
+        insert_match = re.search(r'INSERT\s+INTO\s+([^\s\(]+)', query_upper)
+        if insert_match:
+            return insert_match.group(1).strip('[]"`')
+        update_match = re.search(r'UPDATE\s+([^\s]+)', query_upper)
+        if update_match:
+            return update_match.group(1).strip('[]"`')
+        alter_match = re.search(r'ALTER\s+TABLE\s+([^\s]+)', query_upper)
+        if alter_match:
+            return alter_match.group(1).strip('[]"`')
+        
+        return None
     
     def execute_query(self, 
                      query: str, 
@@ -49,54 +75,67 @@ class SQLExecutor:
             Query results as a list of dictionaries, or error information
         """
         conn = None
+        execution_successful = False
+        target_table = None
+        
         try:
-
+            target_table = self._extract_target_table_name(query)
+            
             conn = sqlite3.connect(self.db_path)
             add_sqlite_functions(conn)
-            
-
             conn.row_factory = sqlite3.Row
             
             cursor = conn.cursor()
             
-
             if params:
                 cursor.execute(query, params)
             else:
                 cursor.execute(query)
                 
-
             if commit:
                 conn.commit()
-            
+                execution_successful = True  # Mark as successful after commit
             if commit and query.upper().strip().startswith('ALTER TABLE'):
                 if object_id and segment_id and project_id:
-                    if 'ADD COLUMN' in query.upper():
-                        column_name = self._extract_column_name_from_alter(query, 'ADD')
-                        if column_name:
-                            add_column_metadata(column_name, object_id, segment_id, project_id)
-                            logger.info(f"Successfully added column metadata for '{column_name}'")
-                            
-                    elif 'DROP COLUMN' in query.upper():
-                        column_name = self._extract_column_name_from_alter(query, 'DROP')
-                        if column_name:
-                            remove_column_metadata(column_name, object_id, segment_id, project_id)
-                            logger.info(f"Successfully removed column metadata for '{column_name}'")
-
+                    pass
             if fetch_results:
-
                 rows = cursor.fetchall()
                 result = [dict(row) for row in rows]
-                return result
             else:
-
-                return {"rowcount": cursor.rowcount}
+                result = {"rowcount": cursor.rowcount}
+            if execution_successful and target_table:
+                try:
+                    sync_result = handle_source_sync(
+                        query=query,
+                        target_table=target_table,
+                        params=params,
+                        main_execution_successful=True
+                    )
+                    if sync_result.get("sync_attempted"):
+                        if sync_result.get("sync_successful"):
+                            logger.debug(f"Source sync successful for {target_table}: {sync_result.get('reason')}")
+                        else:
+                            logger.warning(f"Source sync failed for {target_table}: {sync_result.get('reason')}")
+                            
+                except Exception as sync_error:
+                    logger.warning(f"Source table sync error (non-critical): {sync_error}")
+            
+            return result
                 
         except sqlite3.Error as e:
-
             if conn and commit:
                 conn.rollback()
-                
+            if target_table:
+                try:
+                    handle_source_sync(
+                        query=query,
+                        target_table=target_table,
+                        params=params,
+                        main_execution_successful=False
+                    )
+                except:
+                    pass  # Ignore sync errors when main execution failed
+                    
             logger.error(f"SQLite error: {e}")
             return {
                 "error_type": "SQLiteError", 
@@ -104,10 +143,19 @@ class SQLExecutor:
                 "query": query
             }
         except Exception as e:
-
             if conn and commit:
                 conn.rollback()
-                
+            if target_table:
+                try:
+                    handle_source_sync(
+                        query=query,
+                        target_table=target_table,
+                        params=params,
+                        main_execution_successful=False
+                    )
+                except:
+                    pass  # Ignore sync errors when main execution failed
+                    
             logger.error(f"Error executing query: {e}")
             return {
                 "error_type": "ExecutionError", 
@@ -115,9 +163,9 @@ class SQLExecutor:
                 "query": query
             }
         finally:
-
             if conn:
                 conn.close()
+
     
 
     def execute_and_fetch_df(self, query: str, params: Optional[Dict[str, Any]] = None) -> Union[pd.DataFrame, Dict[str, Any]]:

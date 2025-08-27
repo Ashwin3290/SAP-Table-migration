@@ -19,6 +19,7 @@ from DMtool.planner import ContextualSessionManager
 from DMtool.generator import SQLGenerator
 from DMtool.executor import SQLExecutor
 from DMtool.logging_config import setup_logging
+from DMtool.llm_config import LLMManager
 
 setup_logging(log_to_file=True, log_to_console=True)
 
@@ -46,11 +47,15 @@ class QueryTemplateRepository:
         """
         self.template_file = template_file
         self.templates = self._load_templates()
-        api_key = os.environ.get("GEMINI_API_KEY")
+        api_key = os.environ.get("API_KEY") or os.environ.get("GEMINI_API_KEY")
         if not api_key:
             logger.error("GEMINI_API_KEY not found in environment variables")
             raise APIError("Gemini API key not configured")
-        self.client = genai.Client(api_key=api_key)
+        self.llm = LLMManager(
+            provider="google",
+            model="gemini/gemini-2.5-flash",
+            api_key=api_key
+        )
         
     def _load_templates(self):
         """
@@ -126,11 +131,7 @@ class QueryTemplateRepository:
 
                 from google.genai import types
                 
-                response = self.client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=llm_prompt,
-                    config=types.GenerateContentConfig(temperature=0.1)
-                )
+                response = self.llm.generate(llm_prompt, temperature=0.05, max_tokens=50)
                 
                 if response and hasattr(response, "text"):
 
@@ -172,13 +173,16 @@ class DMTool:
         """Initialize the DMToolSQL instance"""
         try:
 
-            api_key = os.environ.get("GEMINI_API_KEY")
+            api_key = os.environ.get("API_KEY") or os.environ.get("GEMINI_API_KEY")
             if not api_key:
                 logger.error("GEMINI_API_KEY not found in environment variables")
                 raise APIError("Gemini API key not configured")
 
-            self.client = genai.Client(api_key=api_key)
- 
+            self.llm = LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=api_key
+            )
 
             self.sql_generator = SQLGenerator()
             self.sql_executor = SQLExecutor()
@@ -385,12 +389,7 @@ class DMTool:
     3. If the prompt does not specify a column, do not include it in the query.
     4. If we have Column given that exist in a table, then use that column in the query.
     """
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.1)
-            )
+            response = self.llm.generate(prompt, temperature=0.3, max_tokens=1500)
             
             if response and hasattr(response, "text"):
                 logger.info(f"Plan generated using qualified field references")
