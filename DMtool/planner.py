@@ -7,8 +7,6 @@ import sqlite3
 from io import StringIO
 from datetime import datetime
 import logging
-from google import genai
-from google.genai import types
 from pathlib import Path
 import spacy
 import traceback
@@ -612,18 +610,18 @@ Respond with a JSON object:
         
         response = llm.generate(prompt, temperature=0.3, max_tokens=500)
         
-        if not response or not hasattr(response, "text"):
+        if not response:
             logger.warning("Invalid response from Gemini API for query classification")
+            logger.info(f"Raw response: {response}")
             return _fallback_classification(query)
             
-
         try:
-            json_str = re.search(r"```json(.*?)```", response.text, re.DOTALL)
+            json_str = re.search(r"```json(.*?)```", response, re.DOTALL)
             if json_str:
                 result = json.loads(json_str.group(1).strip())
             else:
 
-                result = json.loads(response.text.strip())
+                result = json.loads(response.strip())
 
             primary_class = result.get("primary_classification", "SIMPLE_TRANSFORMATION")
             
@@ -646,7 +644,7 @@ Respond with a JSON object:
             
         except (json.JSONDecodeError, KeyError) as e:
             logger.error(f"Error parsing LLM classification response: {e}")
-            logger.error(f"Raw response: {response.text}")
+            logger.error(f"Raw response: {response}")
             return _fallback_classification(query)
             
     except Exception as e:
@@ -1189,13 +1187,12 @@ INSTRUCTIONS: Use ONLY the validated table and column names from the mappings ab
         response = llm.generate(formatted_prompt, temperature=0.3, max_tokens=1500)
         
 
-        json_str = re.search(r"```json(.*?)```", response.text, re.DOTALL)
+        json_str = re.search(r"```json(.*?)```", response, re.DOTALL)
         if json_str:
             parsed_data = json.loads(json_str.group(1).strip())
         else:
-
-            parsed_data = json.loads(response.text.strip())
-        
+            parsed_data = json.loads(response.strip())
+        logger.info(f"LLM response: {response}")
         logger.info(f"Parsed data: {parsed_data}")
         parsed_data["query_type"] = query_type
         

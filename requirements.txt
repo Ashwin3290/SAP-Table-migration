@@ -9,3 +9,4 @@ python-docx
 google
 google-generativeai
 litellm
+spacy

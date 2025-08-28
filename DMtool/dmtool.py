@@ -7,8 +7,6 @@ import re
 import sqlite3
 import traceback
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
 from typing import Dict, Any
 
 from DMtool.planner import process_query
@@ -128,14 +126,12 @@ class QueryTemplateRepository:
     Template ID:"""
 
             try:
-
-                from google.genai import types
                 
                 response = self.llm.generate(llm_prompt, temperature=0.05, max_tokens=50)
                 
-                if response and hasattr(response, "text"):
+                if response :
 
-                    template_id = response.text.strip().strip('"').strip("'").lower()
+                    template_id = response.strip().strip('"').strip("'").lower()
                     
 
                     best_match = None
@@ -391,9 +387,9 @@ class DMTool:
     """
             response = self.llm.generate(prompt, temperature=0.3, max_tokens=1500)
             
-            if response and hasattr(response, "text"):
+            if response:
                 logger.info(f"Plan generated using qualified field references")
-                return response.text.strip()
+                return response.strip()
             else:
                 logger.warning("Invalid response from LLM in enhanced plan generation")
                 return self._generate_fallback_plan_with_qualified_fields(template, planner_info)

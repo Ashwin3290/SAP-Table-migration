@@ -3,8 +3,6 @@ import json
 import re
 import sqlite3
 import pandas as pd
-from google import genai
-from google.genai import types
 import traceback
 import os
 from typing import Dict, List, Any, Optional, Union, Tuple
@@ -262,8 +260,8 @@ class SQLGenerator:
             
             response = llm.generate(prompt, temperature=0.05, max_tokens=500)
 
-            if response and hasattr(response, "text"):
-                sql_query = response.text.strip()
+            if response :
+                sql_query = response.strip()
                 
 
                 import re
@@ -1256,7 +1254,7 @@ class SQLGenerator:
             response = llm.generate(prompt)
 
             if response:
-                return response.text.strip()
+                return response.strip()
             else:
                 return "Failed to analyze query"
                 
@@ -1341,8 +1339,8 @@ class SQLGenerator:
             response = llm.generate(prompt)
             
 
-            if response and hasattr(response, "text"):
-                fixed_query = response.text.strip()
+            if response :
+                fixed_query = response.strip()
                 
 
                 import re
