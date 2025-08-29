@@ -95,6 +95,21 @@ class SQLExecutor:
             if commit:
                 conn.commit()
                 execution_successful = True  # Mark as successful after commit
+            
+            if commit and query.upper().strip().startswith('ALTER TABLE'):
+                if object_id and segment_id and project_id:
+                    if 'ADD COLUMN' in query.upper():
+                        column_name = self._extract_column_name_from_alter(query, 'ADD')
+                        if column_name:
+                            add_column_metadata(column_name, object_id, segment_id, project_id)
+                            logger.info(f"Successfully added column metadata for '{column_name}'")
+                            
+                    elif 'DROP COLUMN' in query.upper():
+                        column_name = self._extract_column_name_from_alter(query, 'DROP')
+                        if column_name:
+                            remove_column_metadata(column_name, object_id, segment_id, project_id)
+                            logger.info(f"Successfully removed column metadata for '{column_name}'")
+                            
             if commit and query.upper().strip().startswith('ALTER TABLE'):
                 if object_id and segment_id and project_id:
                     pass
