@@ -10,6 +10,7 @@ import logging
 from typing import Optional, Any
 import litellm
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -61,9 +62,10 @@ class LLMManager:
                 completion_params["api_key"] = self.api_key
             if self.base_url:
                 completion_params["api_base"] = self.base_url
+            time_start = time.time()
             response = litellm.completion(**completion_params)
-            logger.info(f"Reponse received in {response.response_time:.2f}s")
-            logger.info(f"Response usage: {response.usage}")
+            logger.info(f"Reponse Latency {time.time() - time_start:.2f}s")
+            logger.info(f"Token usage: {response.usage}")
             if hasattr(response, 'choices') and response.choices:
                 return response.choices[0].message.content
             elif hasattr(response, 'content'):

@@ -15,26 +15,60 @@ class SourceTableManager:
     and proper schema replication
     """
     
-    # Patterns that preserve original data
     DATA_PRESERVING_PATTERNS = [
+        # Basic INSERT operations
         r'INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+\w+\s*\([^)]+\)\s*SELECT\s+.*FROM\s+\w+',
+        r'INSERT\s+INTO\s+\w+\s+SELECT\s+\w+\s+FROM\s+\w+(?:\s+WHERE.*)?',
+        
+        # UPDATE operations that fetch data from other tables
         r'UPDATE\s+\w+\s+SET\s+.*=\s*\(\s*SELECT\s+.*FROM\s+\w+',
         r'UPDATE\s+\w+\s+SET\s+.*FROM\s+.*JOIN\s+',
         r'UPDATE\s+\w+\s+SET\s+\w+\s*=\s*\w+\.\w+\s+FROM\s+',
+        
+        # Complex conditional lookups with subqueries (your CASE WHEN issue)
+        r'UPDATE\s+\w+\s+SET\s+\w+\s*=\s*CASE\s+WHEN.*\(SELECT.*FROM.*\)',
+        
+        # Lookup updates with LIMIT
+        r'UPDATE\s+\w+\s+SET\s+\w+\s*=\s*\(\s*SELECT\s+\w+\s+FROM\s+\w+\s+WHERE.*LIMIT\s+1\s*\)',
+        
+        # Multi-table joins for data retrieval
+        r'UPDATE\s+\w+\s+SET\s+\([^)]+\)\s*=\s*\(\s*SELECT.*FROM.*JOIN.*\)',
     ]
-    
-    # Patterns that modify data (should not sync)
+        # Patterns that modify data (should not sync)
     DATA_MODIFYING_PATTERNS = [
+        # String manipulation functions
         r'(substr|length|trim|ltrim|rtrim|upper|lower|replace)\s*\(',
         r'regexp_replace\s*\(',
+        
+        # Mathematical operations and calculations
         r'[\+\-\*\/]\s*\d',
-        r'CASE\s+WHEN\s+.*THEN\s+[\'"][^\'"]',
-        r'SET\s+\w+\s*=\s*[\'"][^\'"]',
-        r'(date|datetime|strftime)\s*\(',
+        r'length\s*\(\s*\w+\s*\)',
+        
+        # Date manipulation and formatting
+        r'(date|datetime|strftime)\s*\(\s*[\'"][^\'\"]*[\'"]',
+        r'date\s*\(\s*[\'"]now[\'\"]\s*\)',
+        r'strftime\s*\(\s*[\'"][^\'\"]+[\'\"]\s*,',
+        r'substr\s*\(\s*\w+\s*,\s*\d+\s*,\s*\d+\s*\)',  # Date part extraction
+        
+        # Business rule CASE statements (hardcoded values)
+        r'CASE\s+WHEN\s+.*IN\s*\([^)]*\)\s+THEN\s+[\'"][^\'\"]+[\'"]',
+        r'CASE\s+WHEN\s+.*LIKE\s+[\'"][^\'\"]+[\'\"]\s+THEN\s+[\'"][^\'\"]+[\'"]',
+        
+        # Literal value assignments
+        r'SET\s+\w+\s*=\s*[\'"][^\'\"]+[\'"](?!\s*\))',
+        r'UPDATE\s+\w+\s+SET\s+\w+\s*=\s*[\'"][^\'\"]+[\'\"]\s+WHERE\s+\w+\s+(LIKE|=|IN)',
+        
+        # Custom functions for business logic
         r'(safe_divide|percentage|format_date|proper_case)\s*\(',
+        
+        # Column value clearing/deletion (data destruction)
+        r'UPDATE\s+\w+\s+SET\s+\w+\s*=\s*NULL',
+        
+        # Pattern-based conditional updates
+        r'WHERE\s+\w+\s+LIKE\s+[\'"][^\'\"]*%[^\'\"]*[\'"]',  # LIKE patterns
     ]
-    
-    # Schema modification patterns
+
+    # Schema modification patterns (SHOULD SYNC - but only schema, not data)
     SCHEMA_PATTERNS = [
         r'ALTER\s+TABLE\s+\w+\s+ADD\s+COLUMN',
         r'ALTER\s+TABLE\s+\w+\s+DROP\s+COLUMN',
