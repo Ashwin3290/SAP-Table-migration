@@ -223,6 +223,9 @@ class SQLGenerator:
     7. If insertion fields are requested, make sure ONLY they are included in the INSERT/UPDATE
     8. Properly handle key fields for matching records in UPDATE operations
     9. Return ONLY the final SQL query with no explanations or markdown formatting
+    10. Follow the plan step-by-step and do not skip any steps
+    11. Pay special attention to the CRITICAL FIELD USAGE RULES above
+    12. Do not skip any filtering conditions
 
     CRITICAL SQLite-SPECIFIC SYNTAX:
     - SQLite does not support RIGHT JOIN or FULL JOIN (use LEFT JOIN with table order swapped instead)
@@ -230,25 +233,6 @@ class SQLGenerator:
     - SQLite UPDATE with JOIN requires FROM clause (different from standard SQL)
     - SQLite has no BOOLEAN type (use INTEGER 0/1)
     - For UPDATE with data from another table, use: UPDATE target SET col = subquery.col FROM (SELECT...) AS subquery WHERE target.key = subquery.key
-
-    EXAMPLES:
-    - For "Bring Material Number with Material Type = ROH from MARA Table" with empty target table:
-    INSERT INTO target_table (MATNR)
-    SELECT MATNR FROM MARA
-    WHERE MTART = 'ROH'
-    Note: MTART is filtering field (WHERE clause), MATNR is insertion field (SELECT/INSERT)
-
-    - For "Bring Material Number with Material Type = ROH from MARA Table" with existing target data:
-    UPDATE target_table
-    SET MATNR = source.MATNR
-    FROM (SELECT MATNR FROM MARA WHERE MTART = 'ROH') AS source
-    WHERE target_table.MATNR = source.MATNR
-    Note: MTART is filtering field (WHERE clause), MATNR is insertion field (SET clause)
-
-    - For "Validate material numbers in MARA":
-    SELECT MATNR,
-    CASE WHEN MATNR IS NULL THEN 'Invalid' ELSE 'Valid' END AS validation_result
-    FROM MARA
     """
         
 

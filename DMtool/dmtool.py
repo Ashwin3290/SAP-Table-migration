@@ -357,6 +357,8 @@ class DMTool:
     8. Do not create or delete columns unless explicitly mentioned in the prompt
     9. Do not drop any tables or columns.
     10. If a column is not said to be created, assume it already exists in the tables.
+    11. Do not create or delete tables.
+    12. Do not create transactions
 
     REQUIREMENTS:
     1. Generate 10-20 detailed steps for SQLite query creation
@@ -389,6 +391,7 @@ class DMTool:
             
             if response:
                 logger.info(f"Plan generated using qualified field references")
+                logger.info(f"Generated Plan:\n{response}")
                 return response.strip()
             else:
                 logger.warning("Invalid response from LLM in enhanced plan generation")

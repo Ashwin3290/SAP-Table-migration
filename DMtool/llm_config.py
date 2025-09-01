@@ -1,3 +1,9 @@
+"""
+Simple LLM Manager for DMTool - Direct LiteLLM Wrapper
+
+A simple class that wraps LiteLLM to make it easy to use any LLM provider
+with a unified interface.
+"""
 
 import os
 import logging
@@ -31,8 +37,9 @@ class LLMManager:
         self.model = model
         self.api_key = api_key
         self.base_url = base_url
-        litellm.set_verbose = os.getenv("LITELLM_VERBOSE", "false").lower() == "true"    
-
+        litellm.set_verbose = os.getenv("LITELLM_VERBOSE", "false").lower() == "true"
+        litellm.drop_params = True  # Drop unsupported parameters automatically
+    
     def generate(self, prompt: str, **kwargs) -> Optional[str]:
         """
         Generate completion from prompt
@@ -54,17 +61,9 @@ class LLMManager:
                 completion_params["api_key"] = self.api_key
             if self.base_url:
                 completion_params["api_base"] = self.base_url
-            # if "temperature" in kwargs:
-            #     completion_params["temperature"] = float(kwargs["temperature"])
-            # if "max_tokens" in kwargs:
-            #     completion_params["max_tokens"] = int(kwargs["max_tokens"])
-            # if "top_p" in kwargs:
-            #     completion_params["top_p"] = float(kwargs["top_p"])
-            
             response = litellm.completion(**completion_params)
-            if not response:
-                logger.error("No response from LLM")
-                return None
+            logger.info(f"Reponse received in {response.response_time:.2f}s")
+            logger.info(f"Response usage: {response.usage}")
             if hasattr(response, 'choices') and response.choices:
                 return response.choices[0].message.content
             elif hasattr(response, 'content'):

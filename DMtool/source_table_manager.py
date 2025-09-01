@@ -17,7 +17,7 @@ class SourceTableManager:
     
     # Patterns that preserve original data
     DATA_PRESERVING_PATTERNS = [
-        r'INSERT\s+INTO\s+\w+\s*\([^)]+\)\s*SELECT\s+.*FROM\s+\w+',
+        r'INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+\w+\s*\([^)]+\)\s*SELECT\s+.*FROM\s+\w+',
         r'UPDATE\s+\w+\s+SET\s+.*=\s*\(\s*SELECT\s+.*FROM\s+\w+',
         r'UPDATE\s+\w+\s+SET\s+.*FROM\s+.*JOIN\s+',
         r'UPDATE\s+\w+\s+SET\s+\w+\s*=\s*\w+\.\w+\s+FROM\s+',

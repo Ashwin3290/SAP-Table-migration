@@ -39,14 +39,14 @@ class SQLExecutor:
         """
         import re
         
-        query_upper = query.upper().strip()
-        insert_match = re.search(r'INSERT\s+INTO\s+([^\s\(]+)', query_upper)
+        query = query.strip()
+        insert_match = re.search(r'INSERT\s+INTO\s+([^\s\(]+)', query,re.IGNORECASE)
         if insert_match:
             return insert_match.group(1).strip('[]"`')
-        update_match = re.search(r'UPDATE\s+([^\s]+)', query_upper)
+        update_match = re.search(r'UPDATE\s+([^\s]+)', query, re.IGNORECASE)
         if update_match:
             return update_match.group(1).strip('[]"`')
-        alter_match = re.search(r'ALTER\s+TABLE\s+([^\s]+)', query_upper)
+        alter_match = re.search(r'ALTER\s+TABLE\s+([^\s]+)', query, re.IGNORECASE)
         if alter_match:
             return alter_match.group(1).strip('[]"`')
         
@@ -94,7 +94,7 @@ class SQLExecutor:
                 
             if commit:
                 conn.commit()
-                execution_successful = True  # Mark as successful after commit
+                execution_successful = True
             
             if commit and query.upper().strip().startswith('ALTER TABLE'):
                 if object_id and segment_id and project_id:
@@ -109,7 +109,7 @@ class SQLExecutor:
                         if column_name:
                             remove_column_metadata(column_name, object_id, segment_id, project_id)
                             logger.info(f"Successfully removed column metadata for '{column_name}'")
-                            
+
             if commit and query.upper().strip().startswith('ALTER TABLE'):
                 if object_id and segment_id and project_id:
                     pass
@@ -120,6 +120,7 @@ class SQLExecutor:
                 result = {"rowcount": cursor.rowcount}
             if execution_successful and target_table:
                 try:
+                    logger.debug(f"Attempting source table sync for {target_table}")
                     sync_result = handle_source_sync(
                         query=query,
                         target_table=target_table,
