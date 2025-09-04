@@ -11,84 +11,83 @@ logger = logging.getLogger(__name__)
 
 class SourceTableManager:
     """
-    Manager for source table (_src) operations with comprehensive logging
-    and proper schema replication
+    Manager for source table (_src) operations with inverted logic:
+    Sync everything EXCEPT transformations/calculations
     """
     
-    DATA_PRESERVING_PATTERNS = [
-        # Basic INSERT operations
-        r'INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+\w+\s*\([^)]+\)\s*SELECT\s+.*FROM\s+\w+',
-        r'INSERT\s+INTO\s+\w+\s+SELECT\s+\w+\s+FROM\s+\w+(?:\s+WHERE.*)?',
-        
-        # UPDATE operations that fetch data from other tables
-        r'UPDATE\s+\w+\s+SET\s+.*=\s*\(\s*SELECT\s+.*FROM\s+\w+',
-        r'UPDATE\s+\w+\s+SET\s+.*FROM\s+.*JOIN\s+',
-        r'UPDATE\s+\w+\s+SET\s+\w+\s*=\s*\w+\.\w+\s+FROM\s+',
-        
-        # Complex conditional lookups with subqueries (your CASE WHEN issue)
-        r'UPDATE\s+\w+\s+SET\s+\w+\s*=\s*CASE\s+WHEN.*\(SELECT.*FROM.*\)',
-        
-        # Lookup updates with LIMIT
-        r'UPDATE\s+\w+\s+SET\s+\w+\s*=\s*\(\s*SELECT\s+\w+\s+FROM\s+\w+\s+WHERE.*LIMIT\s+1\s*\)',
-        
-        # Multi-table joins for data retrieval
-        r'UPDATE\s+\w+\s+SET\s+\([^)]+\)\s*=\s*\(\s*SELECT.*FROM.*JOIN.*\)',
-    ]
-        # Patterns that modify data (should not sync)
-    DATA_MODIFYING_PATTERNS = [
-        # String manipulation functions
-        r'(substr|length|trim|ltrim|rtrim|upper|lower|replace)\s*\(',
+    # Patterns that indicate data transformation/modification - DO NOT SYNC these
+    TRANSFORMATION_PATTERNS = [
+        # String manipulations that change data
+        r'\b(substr|substring|trim|ltrim|rtrim|upper|lower|replace|reverse)\s*\(',
         r'regexp_replace\s*\(',
+        r'split_string\s*\(',
+        r'proper_case\s*\(',
+        r'left_pad\s*\(',
+        r'right_pad\s*\(',
         
-        # Mathematical operations and calculations
-        r'[\+\-\*\/]\s*\d',
-        r'length\s*\(\s*\w+\s*\)',
+        # Mathematical operations (except simple column references)
+        r'[\+\-\*\/\%]\s*(?:\d+|[\'"][^\'"]+[\'"])',  # Math with literals
+        r'\b(round|abs|ceil|floor|sqrt|power|log)\s*\(',
+        r'safe_divide\s*\(',
+        r'percentage\s*\(',
         
-        # Date manipulation and formatting
-        r'(date|datetime|strftime)\s*\(\s*[\'"][^\'\"]*[\'"]',
-        r'date\s*\(\s*[\'"]now[\'\"]\s*\)',
-        r'strftime\s*\(\s*[\'"][^\'\"]+[\'\"]\s*,',
-        r'substr\s*\(\s*\w+\s*,\s*\d+\s*,\s*\d+\s*\)',  # Date part extraction
+        # Date/time manipulations that transform data
+        r'date\s*\(\s*[\'"]now[\'\"]\s*\)',  # Current date
+        r'datetime\s*\(\s*[\'"]now[\'\"]\s*\)',
+        r'strftime\s*\(',  # Date formatting
+        r'date_add_days\s*\(',
+        r'date_diff_days\s*\(',
+        r'format_date\s*\(',
+        r'to_date\s*\(',
         
-        # Business rule CASE statements (hardcoded values)
-        r'CASE\s+WHEN\s+.*IN\s*\([^)]*\)\s+THEN\s+[\'"][^\'\"]+[\'"]',
-        r'CASE\s+WHEN\s+.*LIKE\s+[\'"][^\'\"]+[\'\"]\s+THEN\s+[\'"][^\'\"]+[\'"]',
+        # CASE statements with hardcoded values (business logic)
+        r'CASE\s+WHEN\s+.*?\s+THEN\s+[\'"][^\'"]+[\'"]',  # CASE with literal strings
+        r'CASE\s+WHEN\s+.*?\s+THEN\s+\d+',  # CASE with literal numbers
         
-        # Literal value assignments
-        r'SET\s+\w+\s*=\s*[\'"][^\'\"]+[\'"](?!\s*\))',
-        r'UPDATE\s+\w+\s+SET\s+\w+\s*=\s*[\'"][^\'\"]+[\'\"]\s+WHERE\s+\w+\s+(LIKE|=|IN)',
+        # Hardcoded value assignments (not from another table)
+        r'SET\s+\w+\s*=\s*[\'"][^\'"]+[\'"](?!\s*FROM)',  # String literal not from subquery
+        r'SET\s+\w+\s*=\s*\d+(?:\.\d+)?(?!\s*FROM)',  # Number literal not from subquery
+        r'SET\s+\w+\s*=\s*NULL',  # Setting to NULL (data deletion)
         
-        # Custom functions for business logic
-        r'(safe_divide|percentage|format_date|proper_case)\s*\(',
+        # Calculated/derived values
+        r'length\s*\(',  # String length calculation
+        r'count\s*\(',  # Aggregations
+        r'sum\s*\(',
+        r'avg\s*\(',
+        r'min\s*\(',
+        r'max\s*\(',
         
-        # Column value clearing/deletion (data destruction)
-        r'UPDATE\s+\w+\s+SET\s+\w+\s*=\s*NULL',
+        # Conditional transformations
+        r'COALESCE\s*\([^,]+,[^)]*[\'"][^\'"]+[\'"][^)]*\)',  # COALESCE with literals
+        r'IFNULL\s*\([^,]+,\s*[\'"][^\'"]+[\'\"]\s*\)',  # IFNULL with literals
+        r'IIF\s*\(',  # IIF function
         
-        # Pattern-based conditional updates
-        r'WHERE\s+\w+\s+LIKE\s+[\'"][^\'\"]*%[^\'\"]*[\'"]',  # LIKE patterns
+        # JSON operations
+        r'json_extract_value\s*\(',
+        
+        # Validation functions (these compute new values)
+        r'is_numeric\s*\(',
+        r'is_email\s*\(',
+        r'is_phone\s*\(',
+        r'is_valid_json\s*\(',
     ]
-
-    # Schema modification patterns (SHOULD SYNC - but only schema, not data)
-    SCHEMA_PATTERNS = [
-        r'ALTER\s+TABLE\s+\w+\s+ADD\s+COLUMN',
-        r'ALTER\s+TABLE\s+\w+\s+DROP\s+COLUMN',
-        r'CREATE\s+TABLE',
+    
+    # Operations that should NEVER sync (even if they don't transform data)
+    NEVER_SYNC_PATTERNS = [
         r'DROP\s+TABLE',
+        r'TRUNCATE\s+TABLE',
+        r'CREATE\s+(?:TEMP|TEMPORARY)\s+',  # Temporary objects
+        r'CREATE\s+VIEW',  # Views
+        r'CREATE\s+INDEX',  # Indexes
     ]
     
     def __init__(self, db_path: Optional[str] = None):
-        """
-        Initialize Source Table Manager
-        
-        Args:
-            db_path (str, optional): Path to SQLite database
-        """
+        """Initialize Source Table Manager"""
         self.db_path = db_path or os.environ.get('DB_PATH')
         self.enabled = os.environ.get('ENABLE_SOURCE_TABLE_BACKUP', 'true').lower() == 'true'
         
         logger.info(f"SourceTableManager initialized - Enabled: {self.enabled}, DB Path: {self.db_path}")
         
-        # Track statistics
         self.stats = {
             'sync_attempts': 0,
             'sync_successes': 0,
@@ -97,21 +96,119 @@ class SourceTableManager:
             'last_sync': None
         }
     
-    def get_table_schema(self, table_name: str, conn: sqlite3.Connection) -> str:
+    def should_sync_to_source(self, query: str, target_table: str) -> Tuple[bool, str]:
         """
-        Get the complete CREATE TABLE statement for a table
+        Determine if a query should be synchronized to the _src table.
+        New logic: Sync everything EXCEPT transformations
+        """
+        if not self.enabled:
+            return False, "Source table sync disabled"
         
-        Args:
-            table_name (str): Name of the table
-            conn (sqlite3.Connection): Database connection
-            
-        Returns:
-            str: CREATE TABLE statement
+        if not query or not target_table:
+            return False, "Missing query or target table"
+        
+        query_upper = query.upper().strip()
+        
+        # Check if this operates on the target table
+        if not self._is_target_table_operation(query_upper, target_table):
+            return False, "Not a target table operation"
+        
+        # NEVER sync these operations
+        for pattern in self.NEVER_SYNC_PATTERNS:
+            if re.search(pattern, query, re.IGNORECASE):
+                logger.info(f"Never-sync pattern detected: {pattern[:30]}...")
+                return False, f"Operation type not suitable for sync"
+        
+        # Check for transformation patterns - if found, DON'T sync
+        for pattern in self.TRANSFORMATION_PATTERNS:
+            if re.search(pattern, query, re.IGNORECASE):
+                logger.info(f"Transformation pattern detected: {pattern[:50]}...")
+                return False, f"Data transformation detected - preserving original data"
+        
+        # Special checks for complex cases
+        if self._has_complex_transformation(query):
+            return False, "Complex transformation detected"
+        
+        # If we get here, it's likely a simple data movement operation - SYNC IT
+        query_type = self._identify_query_type(query_upper)
+        logger.info(f"Query type '{query_type}' approved for sync to {target_table}_src")
+        return True, f"Data preservation operation - {query_type}"
+    
+    def _has_complex_transformation(self, query: str) -> bool:
         """
+        Additional checks for complex transformations that might not be caught by patterns
+        """
+        query_upper = query.upper()
+        
+        # Check for UPDATE with complex SET clause
+        if 'UPDATE' in query_upper and 'SET' in query_upper:
+            set_match = re.search(r'SET\s+(.*?)(?:WHERE|FROM|$)', query_upper, re.DOTALL)
+            if set_match:
+                set_clause = set_match.group(1)
+                
+                # If SET clause has any function calls (except simple column references)
+                if re.search(r'\w+\s*\([^)]*\)', set_clause):
+                    # Check if it's just a simple subquery
+                    if not re.search(r'^\s*\(\s*SELECT\s+\w+\s+FROM\s+\w+', set_clause):
+                        return True
+                
+                # Multiple CASE statements usually indicate complex business logic
+                if set_clause.count('CASE') > 1:
+                    return True
+        
+        # Check for INSERT with complex SELECT
+        if 'INSERT' in query_upper and 'SELECT' in query_upper:
+            select_match = re.search(r'SELECT\s+(.*?)(?:FROM|$)', query_upper, re.DOTALL)
+            if select_match:
+                select_clause = select_match.group(1)
+                
+                # If SELECT has calculations or functions (not just column names)
+                if re.search(r'[\+\-\*\/]', select_clause):
+                    return True
+                if re.search(r'\w+\s*\([^)]*\)', select_clause):
+                    # Allow simple column selections from subqueries
+                    if not re.search(r'^\s*\w+\s*,?\s*$', select_clause):
+                        return True
+        
+        return False
+    
+    def _identify_query_type(self, query_upper: str) -> str:
+        """Identify the type of query for logging purposes"""
+        if 'INSERT' in query_upper and 'SELECT' in query_upper:
+            return "INSERT-SELECT"
+        elif 'INSERT' in query_upper:
+            return "INSERT"
+        elif 'UPDATE' in query_upper and 'FROM' in query_upper:
+            return "UPDATE-FROM"
+        elif 'UPDATE' in query_upper:
+            return "UPDATE"
+        elif 'ALTER TABLE' in query_upper and 'ADD COLUMN' in query_upper:
+            return "ALTER-ADD"
+        elif 'ALTER TABLE' in query_upper and 'DROP COLUMN' in query_upper:
+            return "ALTER-DROP"
+        elif 'DELETE' in query_upper:
+            return "DELETE"
+        else:
+            return "OTHER"
+    
+    def _is_target_table_operation(self, query_upper: str, target_table: str) -> bool:
+        """Check if query operates on the target table"""
+        target_upper = target_table.upper()
+        
+        # Use word boundary for more accurate matching
+        patterns = [
+            rf'\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+\[?{re.escape(target_upper)}\]?\b',
+            rf'\bUPDATE\s+\[?{re.escape(target_upper)}\]?\b',
+            rf'\bALTER\s+TABLE\s+\[?{re.escape(target_upper)}\]?\b',
+            rf'\bDELETE\s+FROM\s+\[?{re.escape(target_upper)}\]?\b',
+        ]
+        
+        return any(re.search(pattern, query_upper) for pattern in patterns)
+    
+    def get_table_schema(self, table_name: str, conn: sqlite3.Connection) -> str:
+        """Get the complete CREATE TABLE statement for a table"""
         try:
             cursor = conn.cursor()
-            
-            # Get the CREATE TABLE statement from sqlite_master
             cursor.execute("""
                 SELECT sql FROM sqlite_master 
                 WHERE type='table' AND name=?
@@ -129,40 +226,28 @@ class SourceTableManager:
             return None
     
     def replicate_table_schema(self, source_table: str, target_table: str, conn: sqlite3.Connection) -> bool:
-        """
-        Replicate the exact schema from source table to target table
-        
-        Args:
-            source_table (str): Source table name
-            target_table (str): Target table name  
-            conn (sqlite3.Connection): Database connection
-            
-        Returns:
-            bool: True if successful
-        """
+        """Replicate the exact schema from source table to target table"""
         try:
             logger.info(f"Replicating schema from {source_table} to {target_table}")
             
-            # Get the original CREATE TABLE statement
             create_sql = self.get_table_schema(source_table, conn)
             if not create_sql:
                 logger.error(f"Could not get schema for {source_table}")
                 return False
             
-            # Replace the table name in the CREATE statement
+            # Replace table name in CREATE statement
             create_sql = re.sub(
-                r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["\']?' + re.escape(source_table) + r'["\']?',
+                r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["\']?\w+["\']?',
                 f'CREATE TABLE IF NOT EXISTS {target_table}',
                 create_sql,
+                count=1,
                 flags=re.IGNORECASE
             )
             
             cursor = conn.cursor()
-            
-            # Create the table with the same schema
             cursor.execute(create_sql)
             
-            # Copy indexes if any
+            # Copy indexes
             cursor.execute("""
                 SELECT sql FROM sqlite_master 
                 WHERE type='index' AND tbl_name=? AND sql IS NOT NULL
@@ -171,9 +256,7 @@ class SourceTableManager:
             indexes = cursor.fetchall()
             for index_sql in indexes:
                 if index_sql[0]:
-                    # Modify index to work with new table
                     new_index_sql = index_sql[0].replace(source_table, target_table)
-                    # Make index name unique
                     new_index_sql = re.sub(
                         r'CREATE\s+(UNIQUE\s+)?INDEX\s+(\w+)',
                         lambda m: f"CREATE {m.group(1) or ''}INDEX {m.group(2)}_src",
@@ -181,7 +264,6 @@ class SourceTableManager:
                     )
                     try:
                         cursor.execute(new_index_sql)
-                        logger.debug(f"Created index for {target_table}")
                     except sqlite3.Error as e:
                         logger.warning(f"Could not create index for {target_table}: {e}")
             
@@ -190,101 +272,12 @@ class SourceTableManager:
             return True
             
         except Exception as e:
-            logger.error(f"Error replicating schema from {source_table} to {target_table}: {e}")
+            logger.error(f"Error replicating schema: {e}")
             return False
     
-    def should_sync_to_source(self, query: str, target_table: str) -> Tuple[bool, str]:
-        """
-        Determine if a query should be synchronized to the _src table
-        
-        Args:
-            query (str): SQL query to analyze
-            target_table (str): Name of the target table
-            
-        Returns:
-            Tuple[bool, str]: (should_sync, reason)
-        """
-        if not self.enabled:
-            logger.debug("Source sync disabled globally")
-            return False, "Source table sync disabled"
-        
-        if not query or not target_table:
-            logger.warning(f"Missing query or target table - Query: {bool(query)}, Table: {target_table}")
-            return False, "Missing query or target table"
-        
-        query_upper = query.upper().strip()
-        
-        # Check if this operates on the target table
-        if not self._is_target_table_operation(query_upper, target_table):
-            logger.debug(f"Query does not operate on target table {target_table}")
-            return False, "Not a target table operation"
-        
-        # Check for data-modifying patterns (should NOT sync)
-        for pattern in self.DATA_MODIFYING_PATTERNS:
-            if re.search(pattern, query, re.IGNORECASE):
-                logger.info(f"Data-modifying pattern detected: {pattern[:30]}...")
-                return False, f"Data-modifying operation detected"
-        
-        # Check for data-preserving patterns (should sync)
-        for pattern in self.DATA_PRESERVING_PATTERNS:
-            if re.search(pattern, query, re.IGNORECASE):
-                logger.info(f"Data-preserving pattern detected for {target_table}")
-                return True, f"Data-preserving operation"
-        
-        # Check for schema operations (should sync)
-        for pattern in self.SCHEMA_PATTERNS:
-            if re.search(pattern, query, re.IGNORECASE):
-                logger.info(f"Schema operation detected for {target_table}")
-                return True, f"Schema operation"
-        
-        # Check for simple INSERT/UPDATE
-        if self._is_simple_insert_or_update(query_upper):
-            logger.info(f"Simple INSERT/UPDATE detected for {target_table}")
-            return True, "Simple INSERT/UPDATE operation"
-        
-        logger.debug(f"Query pattern not recognized for sync: {query[:100]}...")
-        return False, "Query pattern not recognized as safe for source sync"
-    
-    def _is_target_table_operation(self, query_upper: str, target_table: str) -> bool:
-        """Check if query operates on the target table"""
-        target_upper = target_table.upper()
-        
-        patterns = [
-            f'INSERT INTO {target_upper}',
-            f'UPDATE {target_upper}',
-            f'ALTER TABLE {target_upper}',
-            f'DELETE FROM {target_upper}',
-            f'TRUNCATE TABLE {target_upper}',
-        ]
-        
-        return any(pattern in query_upper for pattern in patterns)
-    
-    def _is_simple_insert_or_update(self, query_upper: str) -> bool:
-        """Check if it's a simple INSERT or UPDATE without complex transformations"""
-        if 'INSERT INTO' in query_upper and 'SELECT' in query_upper:
-            # Check if SELECT has no function calls
-            if not re.search(r'\w+\s*\(', query_upper):
-                return True
-        
-        if 'UPDATE' in query_upper and 'SET' in query_upper:
-            # Simple UPDATE without CASE statements
-            if '=' in query_upper and not re.search(r'CASE\s+WHEN', query_upper):
-                return True
-        
-        return False
-    
     def ensure_src_table_exists(self, target_table: str) -> bool:
-        """
-        Ensure the _src table exists with the same schema as the target table
-        
-        Args:
-            target_table (str): Name of the target table
-            
-        Returns:
-            bool: True if _src table exists or was created successfully
-        """
+        """Ensure the _src table exists with the same schema as the target table"""
         if not self.enabled or not self.db_path:
-            logger.debug(f"Source table creation skipped - Enabled: {self.enabled}, DB Path: {bool(self.db_path)}")
             return False
         
         src_table = f"{target_table}_src"
@@ -293,7 +286,7 @@ class SourceTableManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Check if source table already exists
+            # Check if source table exists
             cursor.execute("""
                 SELECT name FROM sqlite_master 
                 WHERE type='table' AND name=?
@@ -306,13 +299,11 @@ class SourceTableManager:
             
             logger.info(f"Creating source table {src_table}")
             
-            # Replicate the schema exactly
             if self.replicate_table_schema(target_table, src_table, conn):
-                # Copy existing data if any
+                # Copy existing data
                 cursor.execute(f"INSERT INTO {src_table} SELECT * FROM {target_table}")
                 conn.commit()
                 
-                # Get row count for logging
                 cursor.execute(f"SELECT COUNT(*) FROM {src_table}")
                 row_count = cursor.fetchone()[0]
                 
@@ -322,40 +313,25 @@ class SourceTableManager:
                 conn.close()
                 return True
             else:
-                logger.error(f"Failed to replicate schema for {src_table}")
                 conn.close()
                 return False
                 
-        except sqlite3.Error as e:
-            logger.error(f"SQLite error creating source table {src_table}: {e}")
-            return False
         except Exception as e:
-            logger.error(f"Unexpected error creating source table {src_table}: {e}")
+            logger.error(f"Error creating source table {src_table}: {e}")
             return False
     
     def execute_on_src_table(self, query: str, target_table: str, params: Optional[Dict] = None) -> bool:
-        """
-        Execute the query on the _src table
-        
-        Args:
-            query (str): SQL query to execute
-            target_table (str): Original target table name
-            params (dict, optional): Query parameters
-            
-        Returns:
-            bool: True if execution was successful
-        """
+        """Execute the query on the _src table"""
         if not self.enabled or not self.db_path:
             return False
         
         src_table = f"{target_table}_src"
         
-        # Use regex for more accurate table name replacement
+        # Replace table name in query
         src_query = re.sub(
             r'\b' + re.escape(target_table) + r'\b',
             src_table,
-            query,
-            count=1
+            query
         )
         
         logger.debug(f"Executing on source table {src_table}: {src_query[:100]}...")
@@ -364,7 +340,6 @@ class SourceTableManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Execute the query
             if params:
                 cursor.execute(src_query, params)
             else:
@@ -377,29 +352,14 @@ class SourceTableManager:
             logger.info(f"Successfully executed on source table {src_table}, {rows_affected} rows affected")
             return True
             
-        except sqlite3.Error as e:
-            logger.error(f"Failed to execute on source table {src_table}: {e}")
-            logger.debug(f"Failed query: {src_query}")
-            return False
         except Exception as e:
-            logger.error(f"Unexpected error executing on source table {src_table}: {e}")
+            logger.error(f"Failed to execute on source table {src_table}: {e}")
             return False
     
     def handle_source_table_sync(self, query: str, target_table: str, 
                                  params: Optional[Dict] = None, 
                                  main_execution_successful: bool = True) -> Dict[str, Any]:
-        """
-        Main function to handle source table synchronization with comprehensive logging
-        
-        Args:
-            query (str): The SQL query that was executed
-            target_table (str): Name of the target table  
-            params (dict, optional): Query parameters used
-            main_execution_successful (bool): Whether the main query execution succeeded
-            
-        Returns:
-            Dict[str, Any]: Detailed result information about the sync operation
-        """
+        """Main function to handle source table synchronization"""
         start_time = datetime.now()
         
         result = {
@@ -413,17 +373,14 @@ class SourceTableManager:
             "execution_time_ms": 0
         }
         
-        # Update statistics
         self.stats['sync_attempts'] += 1
         
         if not self.enabled:
             result["reason"] = "Source table sync disabled"
-            logger.debug(f"Source sync skipped for {target_table}: disabled")
             return result
         
         if not main_execution_successful:
             result["reason"] = "Main execution failed"
-            logger.warning(f"Source sync skipped for {target_table}: main execution failed")
             return result
         
         # Check if we should sync
@@ -443,7 +400,6 @@ class SourceTableManager:
         
         if not src_exists:
             result["reason"] = f"Could not create/access _src table for {target_table}"
-            logger.error(f"Source sync failed for {target_table}: could not create source table")
             self.stats['sync_failures'] += 1
             return result
         
@@ -454,19 +410,14 @@ class SourceTableManager:
         
         if sync_success:
             result["reason"] = f"Successfully synced to {target_table}_src"
-            logger.info(f"Source sync successful for {target_table}")
             self.stats['sync_successes'] += 1
             self.stats['last_sync'] = datetime.now().isoformat()
         else:
             result["reason"] = f"Failed to sync to {target_table}_src"
-            logger.error(f"Source sync failed for {target_table}")
             self.stats['sync_failures'] += 1
         
-        # Calculate execution time
         execution_time = (datetime.now() - start_time).total_seconds() * 1000
         result["execution_time_ms"] = round(execution_time, 2)
-        
-        logger.debug(f"Source sync completed in {execution_time:.2f}ms for {target_table}")
         
         return result
     
@@ -475,15 +426,7 @@ class SourceTableManager:
         return self.stats.copy()
     
     def verify_sync_integrity(self, target_table: str) -> Dict[str, Any]:
-        """
-        Verify that source and target tables are in sync
-        
-        Args:
-            target_table (str): Target table name
-            
-        Returns:
-            Dict with comparison results
-        """
+        """Verify that source and target tables are in sync"""
         if not self.enabled or not self.db_path:
             return {"error": "Source sync disabled or no DB path"}
         
@@ -493,7 +436,6 @@ class SourceTableManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Check if source table exists
             cursor.execute("""
                 SELECT name FROM sqlite_master 
                 WHERE type='table' AND name=?
@@ -502,18 +444,15 @@ class SourceTableManager:
             if not cursor.fetchone():
                 return {"error": f"Source table {src_table} does not exist"}
             
-            # Compare row counts
             cursor.execute(f"SELECT COUNT(*) FROM {target_table}")
             target_count = cursor.fetchone()[0]
             
             cursor.execute(f"SELECT COUNT(*) FROM {src_table}")
             src_count = cursor.fetchone()[0]
             
-            # Compare schemas
             target_schema = self.get_table_schema(target_table, conn)
             src_schema = self.get_table_schema(src_table, conn)
             
-            # Normalize schemas for comparison (remove table name differences)
             target_schema_normalized = re.sub(r'\b' + re.escape(target_table) + r'\b', 'TABLE', target_schema or '')
             src_schema_normalized = re.sub(r'\b' + re.escape(src_table) + r'\b', 'TABLE', src_schema or '')
             
@@ -553,18 +492,7 @@ def get_source_manager() -> SourceTableManager:
 def handle_source_sync(query: str, target_table: str, 
                       params: Optional[Dict] = None,
                       main_execution_successful: bool = True) -> Dict[str, Any]:
-    """
-    Convenience function for handling source table sync
-    
-    Args:
-        query (str): The SQL query that was executed
-        target_table (str): Name of the target table
-        params (dict, optional): Query parameters
-        main_execution_successful (bool): Whether main execution succeeded
-        
-    Returns:
-        Dict[str, Any]: Sync operation results
-    """
+    """Convenience function for handling source table sync"""
     manager = get_source_manager()
     return manager.handle_source_table_sync(
         query, target_table, params, main_execution_successful

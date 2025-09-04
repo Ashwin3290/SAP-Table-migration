@@ -704,8 +704,7 @@ PROMPT_TEMPLATES = {
     
     CONTEXT DATA SCHEMA: {table_desc}
     
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
+    Target table name: {target_table_name}
     
     USER QUERY: {question}
 
@@ -808,8 +807,7 @@ PROMPT_TEMPLATES = {
     
     CONTEXT DATA SCHEMA: {table_desc}
 
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
+    Target table name: {target_table_name}
     
     USER QUERY: {question}
 
@@ -913,8 +911,7 @@ PROMPT_TEMPLATES = {
     
     CONTEXT DATA SCHEMA: {table_desc}
     
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
+    Target table name: {target_table_name}
     
     USER QUERY: {question}
 
@@ -1167,7 +1164,7 @@ INSTRUCTIONS: Use ONLY the validated table and column names from the mappings ab
         formatted_prompt = prompt_template.format(
             question=query,
             table_desc=list(table_desc.itertuples(index=False)),
-            target_df_sample=target_df_sample_str,
+            target_table_name=", ".join(target_table) if target_table else "Not specified",
             segment_mapping=context_manager.get_segments(session_id) if session_id else [],
             additional_context=classification_details
         )

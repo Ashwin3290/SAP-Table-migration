@@ -182,7 +182,7 @@ class SQLGenerator:
     You are an expert SQLite database engineer focusing on data transformation operations. I need you to generate 
     precise SQLite query for a data transformation task based on the following plan and information:
 
-    ORIGINAL QUERY: "{original_query}"
+    ORIGINAL QUERY: "{planner_info.get("restructured_query", original_query)}"
 
     SQLite GENERATION PLAN:
     {plan}
@@ -224,8 +224,8 @@ class SQLGenerator:
     8. Properly handle key fields for matching records in UPDATE operations
     9. Return ONLY the final SQL query with no explanations or markdown formatting
     10. Follow the plan step-by-step and do not skip any steps
-    11. Pay special attention to the CRITICAL FIELD USAGE RULES above
-    12. Do not skip any filtering conditions
+    11. Do not skip any filtering conditions
+    12. 
 
     CRITICAL SQLite-SPECIFIC SYNTAX:
     - SQLite does not support RIGHT JOIN or FULL JOIN (use LEFT JOIN with table order swapped instead)

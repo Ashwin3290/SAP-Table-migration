@@ -324,7 +324,7 @@ class DMTool:
     You are an expert SQLite database engineer focusing on data transformation. I need you to create 
     precise SQLite generation plan for a data transformation task.
 
-    ORIGINAL QUERY: "{query}"
+    ORIGINAL QUERY: "{planner_info.get("restructured_query", "")}"
 
     VERIFIED TABLE.COLUMN MAPPINGS:
     {table_column_context}
@@ -558,7 +558,7 @@ class DMTool:
                 planner_info = self._extract_planner_info(resolved_data)
                 
 
-                sql_plan = self._create_operation_plan(query, planner_info, template)
+                sql_plan = self._create_operation_plan(planner_info["restructured_query"], planner_info, template)
                 
 
                 sql_query, sql_params = self.sql_generator.generate_sql(sql_plan, planner_info, template)
