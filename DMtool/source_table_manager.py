@@ -2,20 +2,27 @@ import os
 import logging
 import sqlite3
 import re
+import csv
+import json
 from typing import Optional, Tuple, Dict, Any, List
 from datetime import datetime
 from dotenv import load_dotenv
 
+# Import LLM manager for transformation detection
+from DMtool.llm_config import LLMManager
+
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-class SourceTableManager:
+class EnhancedSourceTableManager:
     """
-    Manager for source table (_src) operations with inverted logic:
-    Sync everything EXCEPT transformations/calculations
+    Enhanced manager that handles:
+    1. Source table (_src) operations for data preservation
+    2. Column-level lineage tracking for transformations
+    3. Pre-load/post-load CSV report generation
     """
     
-    # Patterns that indicate data transformation/modification - DO NOT SYNC these
+    # Patterns that indicate data transformation/modification - DO NOT SYNC these to _src
     TRANSFORMATION_PATTERNS = [
         # String manipulations that change data
         r'\b(substr|substring|trim|ltrim|rtrim|upper|lower|replace|reverse)\s*\(',
@@ -82,26 +89,477 @@ class SourceTableManager:
     ]
     
     def __init__(self, db_path: Optional[str] = None):
-        """Initialize Source Table Manager"""
+        """Initialize Enhanced Source Table Manager"""
         self.db_path = db_path or os.environ.get('DB_PATH')
-        self.enabled = os.environ.get('ENABLE_SOURCE_TABLE_BACKUP', 'true').lower() == 'true'
+        self.sync_enabled = os.environ.get('ENABLE_SOURCE_TABLE_BACKUP', 'true').lower() == 'true'
+        self.lineage_enabled = os.environ.get('ENABLE_LINEAGE_TRACKING', 'true').lower() == 'true'
         
-        logger.info(f"SourceTableManager initialized - Enabled: {self.enabled}, DB Path: {self.db_path}")
+        logger.info(f"EnhancedSourceTableManager initialized - Sync: {self.sync_enabled}, Lineage: {self.lineage_enabled}")
         
         self.stats = {
             'sync_attempts': 0,
             'sync_successes': 0,
             'sync_failures': 0,
             'tables_created': 0,
-            'last_sync': None
+            'lineage_captures': 0,
+            'reports_generated': 0,
+            'llm_transformation_calls': 0,
+            'last_sync': None,
+            'last_lineage_capture': None
         }
     
+    def handle_query_execution(self, query: str, target_table: str, planner_info: Dict[str, Any],
+                              params: Optional[Dict] = None, 
+                              main_execution_successful: bool = True,
+                              session_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Main function to handle both source table sync AND lineage tracking
+        
+        Parameters:
+        query (str): The executed SQL query
+        target_table (str): Target table name
+        planner_info (Dict): Information from the planner
+        params (Optional[Dict]): Query parameters
+        main_execution_successful (bool): Whether main execution succeeded
+        session_id (Optional[str]): Session ID for tracking
+        
+        Returns:
+        Dict: Combined results from both sync and lineage operations
+        """
+        start_time = datetime.now()
+        
+        result = {
+            "sync_attempted": False,
+            "sync_successful": False,
+            "lineage_captured": False,
+            "should_sync": False,
+            "has_transformation": False,
+            "reason": "",
+            "target_table": target_table,
+            "execution_time_ms": 0,
+            "lineage_metadata": {}
+        }
+        
+        if not main_execution_successful:
+            result["reason"] = "Main execution failed"
+            return result
+        
+        # 1. Determine if query has transformations (using LLM)
+        has_transformation = self._has_transformation(query)
+        result["has_transformation"] = has_transformation
+        
+        # 2. Handle source table sync (for non-transformations)
+        if self.sync_enabled:
+            sync_result = self._handle_source_table_sync(query, target_table, params, main_execution_successful)
+            result.update(sync_result)
+        
+        # 3. Handle lineage tracking (especially for transformations)
+        if self.lineage_enabled and planner_info:
+            lineage_result = self._capture_column_lineage(query, target_table, planner_info, session_id)
+            result["lineage_captured"] = bool(lineage_result)
+            result["lineage_metadata"] = lineage_result
+            
+            if lineage_result:
+                self.stats['lineage_captures'] += 1
+                self.stats['last_lineage_capture'] = datetime.now().isoformat()
+        
+        execution_time = (datetime.now() - start_time).total_seconds() * 1000
+        result["execution_time_ms"] = round(execution_time, 2)
+        
+        return result
+    
+    def _has_transformation(self, query: str) -> bool:
+        """Check if query contains data transformations using LLM"""
+        try:
+            # Use LLM for a general transformation check
+            prompt = f"""
+Does this SQL query transform/alter data or just move existing data as-is?
+
+QUERY: {query}
+
+Answer with only: YES (if it transforms data) or NO (if it just moves data)
+"""
+            
+            llm = LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
+            )
+            
+            response = llm.generate(prompt, temperature=0.1, max_tokens=10)
+            self.stats['llm_transformation_calls'] += 1
+            
+            if response and response.strip().upper().startswith("YES"):
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error in LLM transformation check: {e}")
+            # Fallback to regex patterns
+            return self._has_complex_transformation_regex(query)
+    
+    def _has_complex_transformation_regex(self, query: str) -> bool:
+        """Fallback regex-based transformation detection"""
+        # Check transformation patterns
+        for pattern in self.TRANSFORMATION_PATTERNS:
+            if re.search(pattern, query, re.IGNORECASE):
+                return True
+        
+        # Check for complex transformations
+        return self._has_complex_transformation(query)
+    
+    def _handle_source_table_sync(self, query: str, target_table: str, 
+                                 params: Optional[Dict] = None, 
+                                 main_execution_successful: bool = True) -> Dict[str, Any]:
+        """Handle source table synchronization (existing logic)"""
+        result = {
+            "sync_attempted": False,
+            "sync_successful": False,
+            "should_sync": False,
+            "reason": "",
+            "src_table_exists": False,
+        }
+        
+        self.stats['sync_attempts'] += 1
+        
+        # Check if we should sync
+        should_sync, reason = self.should_sync_to_source(query, target_table)
+        result["should_sync"] = should_sync
+        result["reason"] = reason
+        
+        if not should_sync:
+            logger.info(f"Source sync not needed for {target_table}: {reason}")
+            return result
+        
+        logger.info(f"Starting source sync for {target_table}")
+        
+        # Ensure source table exists
+        src_exists = self.ensure_src_table_exists(target_table)
+        result["src_table_exists"] = src_exists
+        
+        if not src_exists:
+            result["reason"] = f"Could not create/access _src table for {target_table}"
+            self.stats['sync_failures'] += 1
+            return result
+        
+        # Attempt the sync
+        result["sync_attempted"] = True
+        sync_success = self.execute_on_src_table(query, target_table, params)
+        result["sync_successful"] = sync_success
+        
+        if sync_success:
+            result["reason"] = f"Successfully synced to {target_table}_src"
+            self.stats['sync_successes'] += 1
+            self.stats['last_sync'] = datetime.now().isoformat()
+        else:
+            result["reason"] = f"Failed to sync to {target_table}_src"
+            self.stats['sync_failures'] += 1
+        
+        return result
+    
+    def _capture_column_lineage(self, query: str, target_table: str, planner_info: Dict[str, Any], 
+                               session_id: Optional[str] = None) -> Dict[str, Any]:
+        """Capture column-level lineage information"""
+        try:
+            lineage_metadata = {
+                "session_id": session_id,
+                "target_table": target_table,
+                "query": query,
+                "timestamp": datetime.now().isoformat(),
+                "columns": {}
+            }
+            
+            # Extract field mappings from planner
+            qualified_source_fields = planner_info.get("qualified_source_fields", [])
+            qualified_target_fields = planner_info.get("qualified_target_fields", [])
+            insertion_fields = planner_info.get("insertion_fields", [])
+            target_sap_fields = planner_info.get("target_sap_fields", [])
+            
+            # Map each target column to its source
+            for i, target_field in enumerate(target_sap_fields):
+                # Clean the target field name (remove table prefix if present)
+                clean_target_field = self._clean_column_name(target_field)
+                
+                column_lineage = {
+                    "target_column": clean_target_field,
+                    "source_info": None,
+                    "transformation_applied": False,
+                    "transformation_type": "none",
+                    "query_executed": query
+                }
+                
+                # Find corresponding source field
+                if i < len(insertion_fields):
+                    source_field = insertion_fields[i]
+                    # Find qualified source field
+                    for qualified_field in qualified_source_fields:
+                        if qualified_field.endswith(f".{source_field}"):
+                            table_name = qualified_field.split('.')[0]
+                            column_lineage["source_info"] = {
+                                "table": table_name,
+                                "column": source_field,
+                                "qualified_name": qualified_field
+                            }
+                            break
+                
+                # Use LLM to detect transformation for this specific column
+                is_transformation, transformation_type = self._detect_transformation_with_llm(query, clean_target_field)
+                column_lineage["transformation_applied"] = is_transformation
+                column_lineage["transformation_type"] = transformation_type
+                
+                lineage_metadata["columns"][clean_target_field] = column_lineage
+            
+            # Store lineage metadata in session if session_id provided
+            if session_id:
+                self._store_lineage_metadata(session_id, lineage_metadata)
+            
+            return lineage_metadata
+            
+        except Exception as e:
+            logger.error(f"Error capturing column lineage: {e}")
+            return {}
+    
+    def _detect_transformation_with_llm(self, query: str, target_column: str) -> Tuple[bool, str]:
+        """
+        Use LLM to determine if a query transforms data or just moves it as-is
+        
+        Returns:
+        Tuple[bool, str]: (is_transformation, transformation_type)
+        """
+        try:
+            prompt = f"""
+Analyze this SQL query and determine if it transforms/alters data or just moves data as-is.
+
+SQL QUERY:
+{query}
+
+TARGET COLUMN: {target_column}
+
+QUESTION: Does this query transform/alter the data for column '{target_column}' such that the values in the target would be DIFFERENT from the source values?
+
+EXAMPLES OF TRANSFORMATION (answer YES):
+- CASE WHEN price > 100 THEN 'EXPENSIVE' ELSE 'CHEAP' END (creates new values)
+- SUM(amount) (aggregates multiple values)
+- UPPER(name) (changes text case)
+- price * 1.1 (mathematical calculation)
+- 'CONSTANT_VALUE' (hardcoded values)
+
+EXAMPLES OF DATA MOVEMENT (answer NO):
+- CASE WHEN table1.id IS NOT NULL THEN table1.field ELSE table2.field END (picks existing values)
+- COALESCE(field1, field2) (picks first non-null existing value)
+- Simple SELECT field FROM table (direct copy)
+- JOIN operations that combine existing values without changing them
+
+RESPOND WITH ONLY:
+- "YES" if data is transformed/altered
+- "NO" if data is just moved/copied as-is
+
+If YES, also provide the transformation type from: aggregation, string_manipulation, date_transformation, conditional_logic, constant_assignment, mathematical, value_mapping
+
+FORMAT: YES|transformation_type OR NO
+"""
+
+            llm = LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
+            )
+            
+            response = llm.generate(prompt, temperature=0.1, max_tokens=50)
+            self.stats['llm_transformation_calls'] += 1
+            
+            if response:
+                response = response.strip().upper()
+                
+                if response.startswith("YES"):
+                    # Extract transformation type if provided
+                    if "|" in response:
+                        parts = response.split("|")
+                        transformation_type = parts[1].strip().lower() if len(parts) > 1 else "conditional_logic"
+                    else:
+                        transformation_type = "conditional_logic"  # default for YES responses
+                    return True, transformation_type
+                elif response.startswith("NO"):
+                    return False, "none"
+                else:
+                    # Fallback: if response is unclear, assume no transformation
+                    logger.warning(f"Unclear LLM response for transformation detection: {response}")
+                    return False, "none"
+            else:
+                logger.warning("No response from LLM for transformation detection")
+                return False, "none"
+                
+        except Exception as e:
+            logger.error(f"Error in LLM transformation detection: {e}")
+            # Fallback to regex-based detection for critical errors
+            return self._fallback_regex_detection(query, target_column)
+
+    def _fallback_regex_detection(self, query: str, target_column: str) -> Tuple[bool, str]:
+        """Fallback regex-based detection for when LLM fails"""
+        query_upper = query.upper()
+        
+        # Simple fallback patterns for obvious transformations
+        obvious_transformations = [
+            (r'SUM\(', 'aggregation'),
+            (r'COUNT\(', 'aggregation'),
+            (r'AVG\(', 'aggregation'),
+            (r'UPPER\(', 'string_manipulation'),
+            (r'LOWER\(', 'string_manipulation'),
+            (r'SUBSTR\(', 'string_manipulation'),
+            (r'[\+\-\*\/]\s*\d+', 'mathematical'),
+            (r"THEN\s+['\"][^'\"]*['\"]", 'constant_assignment'),
+            (r'DATE\(', 'date_transformation')
+        ]
+        
+        for pattern, trans_type in obvious_transformations:
+            if re.search(pattern, query, re.IGNORECASE):
+                return True, trans_type
+        
+        return False, "none"
+    
+    def _clean_column_name(self, column_name: str) -> str:
+        """
+        Clean column name by removing table prefixes
+        Examples:
+        - 't_24_Product_Basic_Data_mandatory_Ext.MATKL' → 'MATKL'
+        - 'MARA.MATNR' → 'MATNR'
+        - 'PRODUCT' → 'PRODUCT' (unchanged)
+        """
+        if not column_name:
+            return column_name
+        
+        # If it contains a dot, take everything after the last dot
+        if '.' in column_name:
+            return column_name.split('.')[-1]
+        
+        return column_name
+    
+    def generate_preload_postload_csv(self, target_table: str, session_id: Optional[str] = None) -> str:
+        """
+        Generate CSV report showing pre-load vs post-load data comparison
+        
+        Parameters:
+        target_table (str): Target table name
+        session_id (str): Session ID to get lineage metadata
+        
+        Returns:
+        str: Path to generated CSV file
+        """
+        if not self.lineage_enabled:
+            logger.warning("Lineage tracking disabled, cannot generate report")
+            return ""
+        
+        try:
+            # Get lineage metadata
+            lineage_metadata = []
+            if session_id:
+                lineage_metadata = self._get_lineage_metadata(session_id)
+            
+            if not lineage_metadata:
+                logger.warning(f"No lineage metadata found for session {session_id}")
+                return ""
+            
+            # Build comparison query
+            comparison_query = self._build_comparison_query(target_table, lineage_metadata)
+            if not comparison_query:
+                logger.error("Failed to build comparison query")
+                return ""
+            
+            # Execute query and generate CSV
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_filename = f"{target_table}_preload_postload_{timestamp}.csv"
+            csv_path = os.path.join("reports", csv_filename)
+            
+            # Ensure reports directory exists
+            os.makedirs("reports", exist_ok=True)
+            
+            # Execute query and write to CSV
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(comparison_query)
+            
+            # Get column names
+            column_names = [description[0] for description in cursor.description]
+            
+            # Write CSV
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(column_names)
+                writer.writerows(cursor.fetchall())
+            
+            conn.close()
+            
+            self.stats['reports_generated'] += 1
+            logger.info(f"Generated pre-load/post-load report: {csv_path}")
+            return csv_path
+            
+        except Exception as e:
+            logger.error(f"Error generating CSV report: {e}")
+            return ""
+    
+    def _build_comparison_query(self, target_table: str, lineage_metadata: List[Dict[str, Any]]) -> str:
+        """Build a query that joins source tables and shows side-by-side comparison"""
+        try:
+            if not lineage_metadata:
+                return ""
+            
+            # Get primary key
+            primary_key = self._get_primary_key(target_table)
+            if not primary_key:
+                primary_key = "ROWID"
+            
+            select_parts = [f"t.{primary_key} as primary_key"]
+            joins = []
+            join_tables = set()
+            
+            # Process each transformation's lineage
+            for transformation in lineage_metadata:
+                columns = transformation.get("columns", {})
+                
+                for column_name, column_info in columns.items():
+                    source_info = column_info.get("source_info")
+                    transformation_applied = column_info.get("transformation_applied", False)
+                    
+                    if source_info and source_info.get("table"):
+                        source_table = source_info["table"]
+                        source_column = source_info["column"]
+                        
+                        # Add source column
+                        if transformation_applied:
+                            alias = f"s_{source_table.lower()}"
+                            select_parts.append(f"{alias}.{source_column} as {column_name}_source")
+                            
+                            if source_table not in join_tables:
+                                joins.append(f"LEFT JOIN {source_table} {alias} ON t.{primary_key} = {alias}.{primary_key}")
+                                join_tables.add(source_table)
+                        else:
+                            # For non-transformed data, source and target should be same
+                            select_parts.append(f"t.{column_name} as {column_name}_source")
+                    else:
+                        # Handle constants or missing source info
+                        select_parts.append(f"NULL as {column_name}_source")
+                    
+                    # Always add target column
+                    select_parts.append(f"t.{column_name} as {column_name}_target")
+            
+            # Build final query
+            query = f"""
+            SELECT {', '.join(select_parts)}
+            FROM {target_table} t
+            {' '.join(joins)}
+            ORDER BY t.{primary_key}
+            """
+            
+            return query.strip()
+            
+        except Exception as e:
+            logger.error(f"Error building comparison query: {e}")
+            return ""
+    
     def should_sync_to_source(self, query: str, target_table: str) -> Tuple[bool, str]:
-        """
-        Determine if a query should be synchronized to the _src table.
-        New logic: Sync everything EXCEPT transformations
-        """
-        if not self.enabled:
+        """Determine if a query should be synchronized to the _src table."""
+        if not self.sync_enabled:
             return False, "Source table sync disabled"
         
         if not query or not target_table:
@@ -135,9 +593,7 @@ class SourceTableManager:
         return True, f"Data preservation operation - {query_type}"
     
     def _has_complex_transformation(self, query: str) -> bool:
-        """
-        Additional checks for complex transformations that might not be caught by patterns
-        """
+        """Additional checks for complex transformations"""
         query_upper = query.upper()
         
         # Check for UPDATE with complex SET clause
@@ -195,7 +651,6 @@ class SourceTableManager:
         """Check if query operates on the target table"""
         target_upper = target_table.upper()
         
-        # Use word boundary for more accurate matching
         patterns = [
             rf'\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+\[?{re.escape(target_upper)}\]?\b',
             rf'\bUPDATE\s+\[?{re.escape(target_upper)}\]?\b',
@@ -277,7 +732,7 @@ class SourceTableManager:
     
     def ensure_src_table_exists(self, target_table: str) -> bool:
         """Ensure the _src table exists with the same schema as the target table"""
-        if not self.enabled or not self.db_path:
+        if not self.sync_enabled or not self.db_path:
             return False
         
         src_table = f"{target_table}_src"
@@ -322,7 +777,7 @@ class SourceTableManager:
     
     def execute_on_src_table(self, query: str, target_table: str, params: Optional[Dict] = None) -> bool:
         """Execute the query on the _src table"""
-        if not self.enabled or not self.db_path:
+        if not self.sync_enabled or not self.db_path:
             return False
         
         src_table = f"{target_table}_src"
@@ -356,78 +811,74 @@ class SourceTableManager:
             logger.error(f"Failed to execute on source table {src_table}: {e}")
             return False
     
-    def handle_source_table_sync(self, query: str, target_table: str, 
-                                 params: Optional[Dict] = None, 
-                                 main_execution_successful: bool = True) -> Dict[str, Any]:
-        """Main function to handle source table synchronization"""
-        start_time = datetime.now()
-        
-        result = {
-            "sync_attempted": False,
-            "sync_successful": False,
-            "should_sync": False,
-            "reason": "",
-            "src_table_exists": False,
-            "enabled": self.enabled,
-            "target_table": target_table,
-            "execution_time_ms": 0
-        }
-        
-        self.stats['sync_attempts'] += 1
-        
-        if not self.enabled:
-            result["reason"] = "Source table sync disabled"
-            return result
-        
-        if not main_execution_successful:
-            result["reason"] = "Main execution failed"
-            return result
-        
-        # Check if we should sync
-        should_sync, reason = self.should_sync_to_source(query, target_table)
-        result["should_sync"] = should_sync
-        result["reason"] = reason
-        
-        if not should_sync:
-            logger.info(f"Source sync not needed for {target_table}: {reason}")
-            return result
-        
-        logger.info(f"Starting source sync for {target_table}")
-        
-        # Ensure source table exists
-        src_exists = self.ensure_src_table_exists(target_table)
-        result["src_table_exists"] = src_exists
-        
-        if not src_exists:
-            result["reason"] = f"Could not create/access _src table for {target_table}"
-            self.stats['sync_failures'] += 1
-            return result
-        
-        # Attempt the sync
-        result["sync_attempted"] = True
-        sync_success = self.execute_on_src_table(query, target_table, params)
-        result["sync_successful"] = sync_success
-        
-        if sync_success:
-            result["reason"] = f"Successfully synced to {target_table}_src"
-            self.stats['sync_successes'] += 1
-            self.stats['last_sync'] = datetime.now().isoformat()
-        else:
-            result["reason"] = f"Failed to sync to {target_table}_src"
-            self.stats['sync_failures'] += 1
-        
-        execution_time = (datetime.now() - start_time).total_seconds() * 1000
-        result["execution_time_ms"] = round(execution_time, 2)
-        
-        return result
+    def _store_lineage_metadata(self, session_id: str, lineage_metadata: Dict[str, Any]):
+        """Store lineage metadata in session storage"""
+        try:
+            session_dir = f"sessions/{session_id}"
+            os.makedirs(session_dir, exist_ok=True)
+            
+            lineage_file = f"{session_dir}/lineage_metadata.json"
+            
+            # Load existing lineage data
+            existing_lineage = []
+            if os.path.exists(lineage_file):
+                try:
+                    with open(lineage_file, 'r') as f:
+                        existing_lineage = json.load(f)
+                except json.JSONDecodeError:
+                    existing_lineage = []
+            
+            # Append new lineage metadata
+            existing_lineage.append(lineage_metadata)
+            
+            # Save updated lineage data
+            with open(lineage_file, 'w') as f:
+                json.dump(existing_lineage, f, indent=2)
+                
+        except Exception as e:
+            logger.error(f"Error storing lineage metadata: {e}")
+    
+    def _get_lineage_metadata(self, session_id: str) -> List[Dict[str, Any]]:
+        """Retrieve lineage metadata for a session"""
+        try:
+            lineage_file = f"sessions/{session_id}/lineage_metadata.json"
+            if os.path.exists(lineage_file):
+                with open(lineage_file, 'r') as f:
+                    return json.load(f)
+            return []
+        except Exception as e:
+            logger.error(f"Error retrieving lineage metadata: {e}")
+            return []
+    
+    def _get_primary_key(self, table_name: str) -> Optional[str]:
+        """Get primary key column for a table"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get table info to find primary key
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            columns = cursor.fetchall()
+            
+            for column in columns:
+                if column[5]:  # pk column in PRAGMA table_info
+                    conn.close()
+                    return column[1]  # column name
+            
+            conn.close()
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting primary key for {table_name}: {e}")
+            return None
     
     def get_statistics(self) -> Dict[str, Any]:
-        """Get source table manager statistics"""
+        """Get enhanced source table manager statistics"""
         return self.stats.copy()
     
     def verify_sync_integrity(self, target_table: str) -> Dict[str, Any]:
         """Verify that source and target tables are in sync"""
-        if not self.enabled or not self.db_path:
+        if not self.sync_enabled or not self.db_path:
             return {"error": "Source sync disabled or no DB path"}
         
         src_table = f"{target_table}_src"
@@ -480,20 +931,31 @@ class SourceTableManager:
             return {"error": str(e)}
 
 # Global instance for easy access
-_source_manager = None
+_enhanced_source_manager = None
 
-def get_source_manager() -> SourceTableManager:
-    """Get global source table manager instance"""
-    global _source_manager
-    if _source_manager is None:
-        _source_manager = SourceTableManager()
-    return _source_manager
+def get_enhanced_source_manager() -> EnhancedSourceTableManager:
+    """Get global enhanced source table manager instance"""
+    global _enhanced_source_manager
+    if _enhanced_source_manager is None:
+        _enhanced_source_manager = EnhancedSourceTableManager()
+    return _enhanced_source_manager
 
 def handle_source_sync(query: str, target_table: str, 
                       params: Optional[Dict] = None,
                       main_execution_successful: bool = True) -> Dict[str, Any]:
-    """Convenience function for handling source table sync"""
-    manager = get_source_manager()
-    return manager.handle_source_table_sync(
-        query, target_table, params, main_execution_successful
-    )
+    """Convenience function for handling source table sync (backward compatibility)"""
+    manager = get_enhanced_source_manager()
+    return manager._handle_source_table_sync(query, target_table, params, main_execution_successful)
+
+def handle_query_execution(query: str, target_table: str, planner_info: Dict[str, Any],
+                          params: Optional[Dict] = None, 
+                          main_execution_successful: bool = True,
+                          session_id: Optional[str] = None) -> Dict[str, Any]:
+    """Enhanced function for handling both sync and lineage tracking"""
+    manager = get_enhanced_source_manager()
+    return manager.handle_query_execution(query, target_table, planner_info, params, main_execution_successful, session_id)
+
+def generate_lineage_report(target_table: str, session_id: Optional[str] = None) -> str:
+    """Convenience function for generating lineage report"""
+    manager = get_enhanced_source_manager()
+    return manager.generate_preload_postload_csv(target_table, session_id)

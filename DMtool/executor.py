@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Union, Tuple
 
 from DMtool.sqlite_utils import add_sqlite_functions
-from DMtool.source_table_manager import handle_source_sync
+from DMtool.source_table_manager import handle_query_execution
 
 load_dotenv()
 
@@ -59,7 +59,9 @@ class SQLExecutor:
                      commit: bool = True,
                      object_id: Optional[int] = None,
                      segment_id: Optional[int] = None,
-                     project_id: Optional[int] = None
+                     project_id: Optional[int] = None,
+                     session_id: Optional[str] = None,
+                     planner_info: Optional[Dict[str, Any]] = None
                      ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Execute an SQL query with parameter binding
@@ -118,40 +120,35 @@ class SQLExecutor:
                 result = [dict(row) for row in rows]
             else:
                 result = {"rowcount": cursor.rowcount}
+
             if execution_successful and target_table:
                 try:
-                    logger.debug(f"Attempting source table sync for {target_table}")
-                    sync_result = handle_source_sync(
+                    enhanced_result = handle_query_execution(
                         query=query,
                         target_table=target_table,
+                        planner_info=planner_info,
                         params=params,
-                        main_execution_successful=True
+                        main_execution_successful=True,
+                        session_id=session_id
                     )
-                    if sync_result.get("sync_attempted"):
-                        if sync_result.get("sync_successful"):
-                            logger.debug(f"Source sync successful for {target_table}: {sync_result.get('reason')}")
+                    
+                    if enhanced_result.get("sync_attempted"):
+                        if enhanced_result.get("sync_successful"):
+                            logger.debug(f"Source sync successful for {target_table}: {enhanced_result.get('reason')}")
                         else:
-                            logger.warning(f"Source sync failed for {target_table}: {sync_result.get('reason')}")
+                            logger.warning(f"Source sync failed for {target_table}: {enhanced_result.get('reason')}")
+                    
+                    if enhanced_result.get("lineage_captured"):
+                        logger.debug(f"Lineage captured for {target_table}")
                             
                 except Exception as sync_error:
-                    logger.warning(f"Source table sync error (non-critical): {sync_error}")
-            
-            return result
+                    logger.warning(f"Enhanced source table processing error (non-critical): {sync_error}")
                 
+                return result
+                    
         except sqlite3.Error as e:
             if conn and commit:
-                conn.rollback()
-            if target_table:
-                try:
-                    handle_source_sync(
-                        query=query,
-                        target_table=target_table,
-                        params=params,
-                        main_execution_successful=False
-                    )
-                except:
-                    pass  # Ignore sync errors when main execution failed
-                    
+                conn.rollback()                    
             logger.error(f"SQLite error: {e}")
             return {
                 "error_type": "SQLiteError", 
@@ -160,18 +157,7 @@ class SQLExecutor:
             }
         except Exception as e:
             if conn and commit:
-                conn.rollback()
-            if target_table:
-                try:
-                    handle_source_sync(
-                        query=query,
-                        target_table=target_table,
-                        params=params,
-                        main_execution_successful=False
-                    )
-                except:
-                    pass  # Ignore sync errors when main execution failed
-                    
+                conn.rollback()                
             logger.error(f"Error executing query: {e}")
             return {
                 "error_type": "ExecutionError", 
@@ -302,7 +288,7 @@ class SQLExecutor:
         
         return True, backup_name
     
-    def execute_multi_statement_query(self, multi_sql, sql_params,context_manager=None, session_id=None,object_id=None, segment_id=None, project_id=None):
+    def execute_multi_statement_query(self, multi_sql, sql_params,context_manager=None, session_id=None,object_id=None, segment_id=None, project_id=None,planner_info=None):
         """Execute multiple SQL statements with recovery support"""
         try:            
 
@@ -312,16 +298,16 @@ class SQLExecutor:
             if session_id:
                 execution_state = context_manager.load_multi_query_state(session_id)
                 if execution_state:
-                    return self.resume_execution(execution_state, statements, sql_params, context_manager, session_id, object_id, segment_id, project_id)
+                    return self.resume_execution(execution_state, statements, sql_params, context_manager, session_id, object_id, segment_id, project_id,planner_info)
             
 
-            return self.execute_with_recovery(statements, sql_params, session_id, context_manager, object_id, segment_id, project_id)
+            return self.execute_with_recovery(statements, sql_params, session_id, context_manager, object_id, segment_id, project_id,planner_info)
             
         except Exception as e:
             logger.error(f"Error in execute_multi_statement_query: {e}")
             return {"error_type": "MultiQueryError", "error_message": str(e)}
         
-    def resume_execution(self, execution_state, statements, sql_params, context_manager, session_id, object_id=None, segment_id=None, project_id=None):
+    def resume_execution(self, execution_state, statements, sql_params, context_manager, session_id, object_id=None, segment_id=None, project_id=None,planner_info: Optional[Dict[str, Any]] = None):
         """Resume execution from a previously failed multi-query operation"""
         try:
             logger.info(f"Resuming multi-query execution from session {session_id}")
@@ -361,7 +347,7 @@ class SQLExecutor:
                     logger.info(f"Executing statement {i+1}/{len(statements)} (resumed): {statement[:100]}...")
                     
 
-                    result = self.execute_query(statement, sql_params, fetch_results=False,object_id=object_id, segment_id=segment_id, project_id=project_id)
+                    result = self.execute_query(statement, sql_params, fetch_results=False,object_id=object_id, segment_id=segment_id, project_id=project_id,session_id=session_id,planner_info=planner_info)
                     
                     if isinstance(result, dict) and "error_type" in result:
 
@@ -482,7 +468,7 @@ class SQLExecutor:
         
         return statements
 
-    def execute_with_recovery(self, statements, sql_params, session_id, context_manager, object_id=None, segment_id=None, project_id=None):
+    def execute_with_recovery(self, statements, sql_params, session_id, context_manager, object_id=None, segment_id=None, project_id=None,planner_info: Optional[Dict[str, Any]] = None):
         """Execute statements one by one with failure tracking"""
         results = []
         execution_state = {
@@ -498,7 +484,7 @@ class SQLExecutor:
                 logger.info(f"Executing statement {i+1}/{len(statements)}: {statement[:100]}...")
                 
 
-                result = self.execute_query(statement, sql_params, fetch_results=False,object_id=object_id, segment_id=segment_id, project_id=project_id)
+                result = self.execute_query(statement, sql_params, fetch_results=False,object_id=object_id, segment_id=segment_id, project_id=project_id,session_id=session_id,planner_info=planner_info)
                 
                 if isinstance(result, dict) and "error_type" in result:
 

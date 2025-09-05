@@ -75,7 +75,7 @@ class SQLGenerator:
         }
         return templates
     
-    def generate_sql(self, sql_plan, planner_info: Dict[str, Any],template: Dict[str, str]=None) -> Tuple[str, Dict[str, Any]]:
+    def generate_sql(self, planner_info: Dict[str, Any],template: Dict[str, str]=None, sql_plan: str=None) -> Tuple[str, Dict[str, Any]]:
         """Generate SQL query based on planner information using LLM for planning and generation
         
         Parameters:
@@ -180,12 +180,12 @@ class SQLGenerator:
 
             prompt = f"""
     You are an expert SQLite database engineer focusing on data transformation operations. I need you to generate 
-    precise SQLite query for a data transformation task based on the following plan and information:
+    precise SQLite query for a data transformation task based on the following information:
 
     ORIGINAL QUERY: "{planner_info.get("restructured_query", original_query)}"
 
-    SQLite GENERATION PLAN:
-    {plan}
+    {f"""SQLite GENERATION PLAN:
+    {plan}""" if plan else "Follow the original query in detail and do not skip any steps and any filtering conditions."}
 
     Use the given template to generate the SQLite Query:
     {template}

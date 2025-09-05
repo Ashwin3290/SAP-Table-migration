@@ -7,7 +7,7 @@ import re
 import sqlite3
 import traceback
 from dotenv import load_dotenv
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 
 from DMtool.planner import process_query
 from DMtool.planner import (
@@ -18,6 +18,7 @@ from DMtool.generator import SQLGenerator
 from DMtool.executor import SQLExecutor
 from DMtool.logging_config import setup_logging
 from DMtool.llm_config import LLMManager
+from DMtool.source_table_manager import generate_lineage_report
 
 setup_logging(log_to_file=True, log_to_console=True)
 
@@ -218,17 +219,19 @@ class DMTool:
                 "source_table_name": resolved_data.get("source_table_name", []),
                 "target_table_name": resolved_data.get("target_table_name", []),
 
-                "source_field_names": resolved_data.get("source_field_names", []),
-                "target_sap_fields": resolved_data.get("target_sap_fields", []),
-                "filtering_fields": resolved_data.get("filtering_fields", []),
-                "insertion_fields": resolved_data.get("insertion_fields", []),
+                "source_field_names": resolved_data.get("qualified_source_fields", []),
+                "target_sap_fields": resolved_data.get("qualified_target_fields", []),
+                "filtering_fields": resolved_data.get("qualified_filtering_fields", []),
+                "insertion_fields": resolved_data.get("qualified_insertion_fields", []),
 
                 "original_query": resolved_data.get("original_query", ""),
                 "restructured_query": resolved_data.get("Resolved_query", ""),
 
                 "session_id": resolved_data.get("session_id", ""),
                 "key_mapping": resolved_data.get("key_mapping", []),
-
+                "table_column_mapping": resolved_data.get("table_column_mapping", {}),
+                "transformation_context": resolved_data.get("transformation_context", ""),
+                "transformation_plan": resolved_data.get("transformation_plan", ""),
                 "query_type": resolved_data.get("query_type", "SIMPLE_TRANSFORMATION"),
             }
             
@@ -554,14 +557,14 @@ class DMTool:
                                 source_tables.append(table)
                         resolved_data["source_table_name"] = source_tables
 
-
-                planner_info = self._extract_planner_info(resolved_data)
                 
+                # planner_info = self._extract_planner_info(resolved_data)
+                planner_info = resolved_data
 
-                sql_plan = self._create_operation_plan(planner_info["restructured_query"], planner_info, template)
+                # sql_plan = self._create_operation_plan(planner_info["restructured_query"], planner_info, template)
                 
-
-                sql_query, sql_params = self.sql_generator.generate_sql(sql_plan, planner_info, template)
+                
+                sql_query, sql_params = self.sql_generator.generate_sql(planner_info, template,sql_plan=planner_info.get("transformation_plan", ""))
                 logger.info(f"Generated SQL query: {sql_query}")
                 result = self._execute_sql_query(sql_query, sql_params, planner_info,
                 object_id=object_id,
@@ -683,6 +686,33 @@ class DMTool:
                 except:
                     pass
             return f"An error occurred: {e}", session_id
+        
+    def generate_preload_postload_report(self, target_table: str, session_id: Optional[str] = None) -> str:
+        """
+        Generate pre-load/post-load CSV report for a target table
+        
+        Parameters:
+        target_table (str): Target table name
+        session_id (str): Session ID for lineage tracking
+        
+        Returns:
+        str: Path to generated CSV file
+        """
+        try:
+            logger.info(f"Generating pre-load/post-load report for {target_table}")
+            
+            csv_path = generate_lineage_report(target_table, session_id)
+            
+            if csv_path:
+                logger.info(f"Report generated successfully: {csv_path}")
+                return csv_path
+            else:
+                logger.warning("Failed to generate report - no lineage data found")
+                return ""
+                
+        except Exception as e:
+            logger.error(f"Error generating report: {e}")
+            return ""
 
     def _is_multi_statement_query(self, sql_query):
         """Detect if SQL contains multiple statements"""
@@ -718,7 +748,8 @@ class DMTool:
                 sql_query, sql_params, context_manager=ContextualSessionManager(),session_id=planner_info.get("session_id"),
                 object_id=object_id,
                 segment_id=segment_id,
-                project_id=project_id
+                project_id=project_id,
+                planner_info=planner_info
             )
         
 
@@ -737,31 +768,30 @@ class DMTool:
                 
             
             if operation_type == "INSERT":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info)
             elif operation_type == "UPDATE":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info)
             elif operation_type == "DELETE":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id,session_id=planner_info.get("session_id"),planner_info=planner_info)
             elif operation_type == "ALTER":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id,session_id=planner_info.get("session_id"),planner_info=planner_info)
             elif operation_type == "WITH":
                 if "INSERT INTO" in sql_query.upper():
-                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info)
                 elif "UPDATE" in sql_query.upper():
-                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info)
                 else:
 
-                    return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
+                    return self.sql_executor.execute_and_fetch_df(sql_query, sql_params,session_id=planner_info.get("session_id"))
             else:
-
                 return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
         elif not operation_type :
-            return self.sql_executor.execute_query(sql_query, sql_params,fetch_results=False)
+            return self.sql_executor.execute_query(sql_query, sql_params,fetch_results=False,planner_info=planner_info)
         elif query_type in ["JOIN_OPERATION", "CROSS_SEGMENT"]:
 
             if "INSERT INTO" in sql_query.upper() or "UPDATE" in sql_query.upper():
 
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,planner_info=planner_info)
             else:
 
                 return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)

@@ -745,19 +745,18 @@ PROMPT_TEMPLATES = {
     
     6. For the insertion fields, identify the fields that need to be inserted into the target table based on the User query.
     7. When encountering that mention a previous transformation like transformation 1, use transformation context in the addtional context to resolve the fields and tables
+    8. For transformation plan provide a step by step plan to implement the transformation while considering the target table state and the source data schema and the exactly what the user is asking for in the query.
     Respond with:
     ```json
     {{
         "query_type": "SIMPLE_TRANSFORMATION",
         "source_table_name": [List of all source_tables],
-        "source_field_names": [List of all source_fields],
-        "qualified_source_fields": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
-        "filtering_fields": [List of filtering fields],
-        "qualified_filtering_fields": [List of table.column format for filtering],
-        "insertion_fields": [field to be inserted],
-        "qualified_insertion_fields": [List of table.column format for insertion],
-        "target_sap_fields": [Target field(s)],
-        "qualified_target_fields": [List of table.column format for target],
+        "source_field_names": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
+        "filtering_fields": [List of table.column format for filtering],
+        "insertion_fields": [List of table.column format for insertion],
+        "target_sap_fields": [List of table.column format for target],
+        "filter_conditions": "Any filter conditions in the query",
+        "transformation_logic": "Any transformation logic in the query",
         "table_column_mapping": {{
             "source_tables": {{
                 "table_name": ["column1", "column2", ...]
@@ -766,7 +765,9 @@ PROMPT_TEMPLATES = {
                 "table_name": ["column1", "column2", ...]
             }}
         }},
-        "Resolved_query": [Rephrased query with resolved data]
+        "Resolved_query": [Rephrased query with resolved data],
+        "transformation_context": "If any previous transformation context is used, mention it here",
+        "transformation_plan": "Step by step plan to implement the transformation"
     }}
     ```
 
@@ -838,20 +839,19 @@ PROMPT_TEMPLATES = {
     3. CRITICAL: Provide all column references in table.column format
     4. When encountering that mention a previous transformation like transformation 1, use transformation context in the addtional context to resolve the fields and tables
 
-    
-    5. Format your response as JSON with the following schema:
+    5. For transformation plan provide a step by step plan to implement the transformation while considering the target table state and the source data schema and the exactly what the user is asking for in the query.
+
+    6. Format your response as JSON with the following schema:
     ```json
     {{
         "query_type": "JOIN_OPERATION",
-        "source_table_name": [List of all source tables, including previously visited segment tables],
-        "source_field_names": [List of all fields to select],
-        "qualified_source_fields": [List of table.column format like "MARA.MATNR", "MAKT.MAKTX"],
-        "filtering_fields": [List of filtering fields],
-        "qualified_filtering_fields": [List of table.column format for filtering],
-        "insertion_fields": [insertion_field],
-        "qualified_insertion_fields": [List of table.column format for insertion],
-        "target_sap_fields": [Target field(s)],
-        "qualified_target_fields": [List of table.column format for target],
+        "source_table_name": [List of all source_tables],
+        "source_field_names": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
+        "filtering_fields": [List of table.column format for filtering],
+        "insertion_fields": [List of table.column format for insertion],
+        "target_sap_fields": [List of table.column format for target],
+        "filter_conditions": "Any filter conditions in the query",
+        "transformation_logic": "Any transformation logic in the query",
         "join_conditions": [
             {{
                 "left_table": "table1",
@@ -871,7 +871,9 @@ PROMPT_TEMPLATES = {
                 "target_table": ["column1", "column2", ...]
             }}
         }},
-        "Resolved_query": "Restructured query with resolved data"
+        "Resolved_query": "Restructured query with resolved data",
+        "transformation_context": "If any previous transformation context is used, mention it here",
+        "transformation_plan": "Step by step plan to implement the transformation"
     }}
     ```
     Important Note: Do not invent new tables or columns that are not mentioned in the query and in the Context data schema.
@@ -931,20 +933,19 @@ PROMPT_TEMPLATES = {
     5. Identify the target fields for insertion WITH table qualification
     6. CRITICAL: All column references must be in table.column format
     7. When encountering that mention a previous transformation like transformation 1, use transformation context in the addtional context to resolve the fields and tables
+    8. For transformation plan provide a step by step plan to implement the transformation while considering the target table state and the source data schema and the exactly what the user is asking for in the query.
 
     Format your response as JSON with the following schema:
     ```json
     {{
         "query_type": "CROSS_SEGMENT",
-        "source_table_name": [List of all source tables, including segment tables],
-        "source_field_names": [List of all fields to select],
-        "qualified_source_fields": [List of table.column format],
-        "filtering_fields": [List of filtering fields],
-        "qualified_filtering_fields": [List of table.column format for filtering],
-        "insertion_fields": [List of fields to be inserted],
-        "qualified_insertion_fields": [List of table.column format for insertion],
-        "target_sap_fields": [Target field(s)],
-        "qualified_target_fields": [List of table.column format for target],
+        "source_table_name": [List of all source_tables],
+        "source_field_names": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
+        "filtering_fields": [List of table.column format for filtering],
+        "insertion_fields": [List of table.column format for insertion],
+        "target_sap_fields": [List of table.column format for target],
+        "filter_conditions": "Any filter conditions in the query",
+        "transformation_logic": "Any transformation logic in the query",
         "segment_references": [
             {{
                 "segment_id": "segment_id",
@@ -970,7 +971,9 @@ PROMPT_TEMPLATES = {
                 "target_table": ["column1", "column2", ...]
             }}
         }},
-        "Resolved_query": "Restructured query with resolved data"
+        "Resolved_query": "Restructured query with resolved data",
+        "transformation_context": "If any previous transformation context is used, mention it here",
+        "transformation_plan": "Step by step plan to implement the transformation"
     }}
     ```
     Important Note: Do not invent new tables or columns that are not mentioned in the query and in the Context data schema.
@@ -1189,7 +1192,6 @@ INSTRUCTIONS: Use ONLY the validated table and column names from the mappings ab
             parsed_data = json.loads(json_str.group(1).strip())
         else:
             parsed_data = json.loads(response.strip())
-        logger.info(f"LLM response: {response}")
         logger.info(f"Parsed data: {parsed_data}")
         parsed_data["query_type"] = query_type
         
@@ -1238,11 +1240,8 @@ INSTRUCTIONS: Use ONLY the validated table and column names from the mappings ab
 
             results = _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn)
         else:
-
-
             results["key_mapping"] = parsed_data["key_mapping"]
         
-
         results["session_id"] = session_id
         results["query_type"] = query_type
         results["visited_segments"] = visited_segments
