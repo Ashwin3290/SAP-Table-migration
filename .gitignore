@@ -177,7 +177,7 @@ uploaded_files/
 generated_code/
 sessions/
 *.db
-*.sqlite3
+db1.sqlite3
 analyser.py
 wiper.py
 tool.py
