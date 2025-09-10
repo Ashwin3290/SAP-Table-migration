@@ -8,6 +8,7 @@ from typing import Optional, Tuple, Dict, Any, List
 from datetime import datetime
 from dotenv import load_dotenv
 
+# Import LLM manager for transformation detection
 from DMtool.llm_config import LLMManager
 
 load_dotenv()
@@ -21,7 +22,9 @@ class EnhancedSourceTableManager:
     3. Pre-load/post-load CSV report generation
     """
     
+    # Patterns that indicate data transformation/modification - DO NOT SYNC these to _src
     TRANSFORMATION_PATTERNS = [
+        # String manipulations that change data
         r'\b(substr|substring|trim|ltrim|rtrim|upper|lower|replace|reverse)\s*\(',
         r'regexp_replace\s*\(',
         r'split_string\s*\(',
@@ -29,45 +32,60 @@ class EnhancedSourceTableManager:
         r'left_pad\s*\(',
         r'right_pad\s*\(',
         
-        r'[\+\-\*\/\%]\s*(?:\d+|[\'"][^\'"]+[\'"])',
+        # Mathematical operations (except simple column references)
+        r'[\+\-\*\/\%]\s*(?:\d+|[\'"][^\'"]+[\'"])',  # Math with literals
         r'\b(round|abs|ceil|floor|sqrt|power|log)\s*\(',
         r'safe_divide\s*\(',
         r'percentage\s*\(',
         
-        r'date\s*\(\s*[\'"]now[\'\"]\s*\)',
+        # Date/time manipulations that transform data
+        r'date\s*\(\s*[\'"]now[\'\"]\s*\)',  # Current date
         r'datetime\s*\(\s*[\'"]now[\'\"]\s*\)',
-        r'strftime\s*\(',
+        r'strftime\s*\(',  # Date formatting
         r'date_add_days\s*\(',
         r'date_diff_days\s*\(',
         r'format_date\s*\(',
         r'to_date\s*\(',
         
-        r'CASE\s+WHEN\s+.*?\s+THEN\s+[\'"][^\'"]+[\'"]',
-        r'CASE\s+WHEN\s+.*?\s+THEN\s+\d+',
-        r'SET\s+\w+\s*=\s*[\'"][^\'"]+[\'"](?!\s*FROM)',
-        r'SET\s+\w+\s*=\s*\d+(?:\.\d+)?(?!\s*FROM)',
-        r'SET\s+\w+\s*=\s*NULL',
-        r'length\s*\(',
-        r'count\s*\(',
+        # CASE statements with hardcoded values (business logic)
+        r'CASE\s+WHEN\s+.*?\s+THEN\s+[\'"][^\'"]+[\'"]',  # CASE with literal strings
+        r'CASE\s+WHEN\s+.*?\s+THEN\s+\d+',  # CASE with literal numbers
+        
+        # Hardcoded value assignments (not from another table)
+        r'SET\s+\w+\s*=\s*[\'"][^\'"]+[\'"](?!\s*FROM)',  # String literal not from subquery
+        r'SET\s+\w+\s*=\s*\d+(?:\.\d+)?(?!\s*FROM)',  # Number literal not from subquery
+        r'SET\s+\w+\s*=\s*NULL',  # Setting to NULL (data deletion)
+        
+        # Calculated/derived values
+        r'length\s*\(',  # String length calculation
+        r'count\s*\(',  # Aggregations
         r'sum\s*\(',
         r'avg\s*\(',
         r'min\s*\(',
         r'max\s*\(',
-        r'COALESCE\s*\([^,]+,[^)]*[\'"][^\'"]+[\'"][^)]*\)',
-        r'IFNULL\s*\([^,]+,\s*[\'"][^\'"]+[\'\"]\s*\)',
-        r'IIF\s*\(',
+        
+        # Conditional transformations
+        r'COALESCE\s*\([^,]+,[^)]*[\'"][^\'"]+[\'"][^)]*\)',  # COALESCE with literals
+        r'IFNULL\s*\([^,]+,\s*[\'"][^\'"]+[\'\"]\s*\)',  # IFNULL with literals
+        r'IIF\s*\(',  # IIF function
+        
+        # JSON operations
         r'json_extract_value\s*\(',
+        
+        # Validation functions (these compute new values)
         r'is_numeric\s*\(',
         r'is_email\s*\(',
         r'is_phone\s*\(',
         r'is_valid_json\s*\(',
     ]
+    
+    # Operations that should NEVER sync (even if they don't transform data)
     NEVER_SYNC_PATTERNS = [
         r'DROP\s+TABLE',
         r'TRUNCATE\s+TABLE',
-        r'CREATE\s+(?:TEMP|TEMPORARY)\s+',
-        r'CREATE\s+VIEW',
-        r'CREATE\s+INDEX',
+        r'CREATE\s+(?:TEMP|TEMPORARY)\s+',  # Temporary objects
+        r'CREATE\s+VIEW',  # Views
+        r'CREATE\s+INDEX',  # Indexes
     ]
     
     def __init__(self, db_path: Optional[str] = None):
@@ -90,10 +108,117 @@ class EnhancedSourceTableManager:
             'last_lineage_capture': None
         }
     
+    def filter_src(self, target_table: str, planner_info: Dict[str, Any]):
+        """
+        Filter the source table to only keep rows that have matching values 
+        in the target table based on the filtering column from the query
+        
+        Parameters:
+        target_table (str): Target table name
+        planner_info (Dict): Information from the planner including filtering conditions
+        
+        Returns:
+        Dict: Results of the filtering operation
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        src_table = f"{target_table}_src"
+        
+        try:
+            result = {
+                "filter_successful": False,
+                "records_before": 0,
+                "records_after": 0,
+                "records_removed": 0,
+                "error": None,
+                "query_executed": "",
+                "filter_column": ""
+            }
+            
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name=?
+            """, (src_table,))
+            
+            if not cursor.fetchone():
+                result["error"] = f"Source table {src_table} does not exist"
+                return result
+            
+            cursor.execute(f"SELECT COUNT(*) FROM {src_table}")
+            records_before = cursor.fetchone()[0]
+            result["records_before"] = records_before
+            
+            target_sap_fields = planner_info.get("target_sap_fields", [])
+            if not target_sap_fields:
+                result["error"] = "No target_sap_fields found in planner_info"
+                return result
+            
+            filtering_fields = planner_info.get("filtering_fields", [])
+            if not filtering_fields:
+                result["error"] = "No filtering fields found in query"
+                return result
+            
+            filter_field = filtering_fields[0]
+            clean_filter_column = filter_field.split('.')[-1] if '.' in filter_field else filter_field
+            result["filter_column"] = clean_filter_column
+            
+            clean_target_fields = []
+            for field in target_sap_fields:
+                clean_field = field.split('.')[-1] if '.' in field else field
+                clean_target_fields.append(clean_field)
+            
+            if clean_filter_column not in clean_target_fields:
+                result["error"] = f"Filter column '{clean_filter_column}' not found in target fields: {clean_target_fields}"
+                return result
+            
+            filter_query = f"""
+            DELETE FROM {src_table}
+            WHERE {clean_filter_column} NOT IN (
+                SELECT DISTINCT {clean_filter_column} 
+                FROM {target_table} 
+                WHERE {clean_filter_column} IS NOT NULL
+            )
+            """
+            
+            result["query_executed"] = filter_query
+            
+            cursor.execute(filter_query)
+            records_removed = cursor.rowcount
+            
+            cursor.execute(f"SELECT COUNT(*) FROM {src_table}")
+            records_after = cursor.fetchone()[0]
+            
+            conn.commit()
+            
+            result["filter_successful"] = True
+            result["records_after"] = records_after
+            result["records_removed"] = records_removed
+            
+            logger.info(f"Selection criteria: filtered {src_table} on column '{clean_filter_column}' from {records_before} to {records_after} records ({records_removed} removed)")
+            
+            return result
+            
+        except sqlite3.Error as e:
+            conn.rollback()
+            logger.error(f"SQLite error in filter_src: {e}")
+            result["error"] = f"SQLite error: {str(e)}"
+            return result
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error in filter_src: {e}")
+            result["error"] = f"Error: {str(e)}"
+            return result
+            
+        finally:
+            conn.close()
+
+
     def handle_query_execution(self, query: str, target_table: str, planner_info: Dict[str, Any],
                               params: Optional[Dict] = None, 
                               main_execution_successful: bool = True,
-                              session_id: Optional[str] = None) -> Dict[str, Any]:
+                              session_id: Optional[str] = None,
+                              is_selection_criteria = False) -> Dict[str, Any]:
         """
         Main function to handle both source table sync AND lineage tracking
         
@@ -125,11 +250,24 @@ class EnhancedSourceTableManager:
         if not main_execution_successful:
             result["reason"] = "Main execution failed"
             return result
+        
+        # 1. Determine if query has transformations (using LLM)
         has_transformation = self._has_transformation(query)
         result["has_transformation"] = has_transformation
-        if self.sync_enabled:
+
+        if is_selection_criteria:
+            logger.info("Query marked as selection criteria")
+            has_transformation = False 
+            result.update(self.filter_src(target_table, planner_info))
+            result["has_transformation"] = has_transformation
+            result["reason"] = "Selection criteria applied to source table"
+
+        # 2. Handle source table sync (for non-transformations)
+        if self.sync_enabled and not is_selection_criteria:
             sync_result = self._handle_source_table_sync(query, target_table, params, main_execution_successful)
             result.update(sync_result)
+        
+        # 3. Handle lineage tracking (especially for transformations)
         if self.lineage_enabled and planner_info:
             lineage_result = self._capture_column_lineage(query, target_table, planner_info, session_id)
             result["lineage_captured"] = bool(lineage_result)
@@ -147,6 +285,7 @@ class EnhancedSourceTableManager:
     def _has_transformation(self, query: str) -> bool:
         """Check if query contains data transformations using LLM"""
         try:
+            # Use LLM for a general transformation check
             prompt = f"""
 Does this SQL query transform/alter data or just move existing data as-is?
 
@@ -171,13 +310,17 @@ Answer with only: YES (if it transforms data) or NO (if it just moves data)
             
         except Exception as e:
             logger.error(f"Error in LLM transformation check: {e}")
+            # Fallback to regex patterns
             return self._has_complex_transformation_regex(query)
     
     def _has_complex_transformation_regex(self, query: str) -> bool:
         """Fallback regex-based transformation detection"""
+        # Check transformation patterns
         for pattern in self.TRANSFORMATION_PATTERNS:
             if re.search(pattern, query, re.IGNORECASE):
                 return True
+        
+        # Check for complex transformations
         return self._has_complex_transformation(query)
     
     def _handle_source_table_sync(self, query: str, target_table: str, 
@@ -193,6 +336,8 @@ Answer with only: YES (if it transforms data) or NO (if it just moves data)
         }
         
         self.stats['sync_attempts'] += 1
+        
+        # Check if we should sync
         should_sync, reason = self.should_sync_to_source(query, target_table)
         result["should_sync"] = should_sync
         result["reason"] = reason
@@ -202,6 +347,8 @@ Answer with only: YES (if it transforms data) or NO (if it just moves data)
             return result
         
         logger.info(f"Starting source sync for {target_table}")
+        
+        # Ensure source table exists
         src_exists = self.ensure_src_table_exists(target_table)
         result["src_table_exists"] = src_exists
         
@@ -209,6 +356,8 @@ Answer with only: YES (if it transforms data) or NO (if it just moves data)
             result["reason"] = f"Could not create/access _src table for {target_table}"
             self.stats['sync_failures'] += 1
             return result
+        
+        # Attempt the sync
         result["sync_attempted"] = True
         sync_success = self.execute_on_src_table(query, target_table, params)
         result["sync_successful"] = sync_success
@@ -234,11 +383,16 @@ Answer with only: YES (if it transforms data) or NO (if it just moves data)
                 "timestamp": datetime.now().isoformat(),
                 "columns": {}
             }
+            
+            # Extract field mappings from planner
             qualified_source_fields = planner_info.get("qualified_source_fields", [])
             qualified_target_fields = planner_info.get("qualified_target_fields", [])
             insertion_fields = planner_info.get("insertion_fields", [])
             target_sap_fields = planner_info.get("target_sap_fields", [])
+            
+            # Map each target column to its source
             for i, target_field in enumerate(target_sap_fields):
+                # Clean the target field name (remove table prefix if present)
                 clean_target_field = self._clean_column_name(target_field)
                 
                 column_lineage = {
@@ -248,8 +402,11 @@ Answer with only: YES (if it transforms data) or NO (if it just moves data)
                     "transformation_type": "none",
                     "query_executed": query
                 }
+                
+                # Find corresponding source field
                 if i < len(insertion_fields):
                     source_field = insertion_fields[i]
+                    # Find qualified source field
                     for qualified_field in qualified_source_fields:
                         if qualified_field.endswith(f".{source_field}"):
                             table_name = qualified_field.split('.')[0]
@@ -259,11 +416,15 @@ Answer with only: YES (if it transforms data) or NO (if it just moves data)
                                 "qualified_name": qualified_field
                             }
                             break
+                
+                # Use LLM to detect transformation for this specific column
                 is_transformation, transformation_type = self._detect_transformation_with_llm(query, clean_target_field)
                 column_lineage["transformation_applied"] = is_transformation
                 column_lineage["transformation_type"] = transformation_type
                 
                 lineage_metadata["columns"][clean_target_field] = column_lineage
+            
+            # Store lineage metadata in session if session_id provided
             if session_id:
                 self._store_lineage_metadata(session_id, lineage_metadata)
             
@@ -326,15 +487,17 @@ FORMAT: YES|transformation_type OR NO
                 response = response.strip().upper()
                 
                 if response.startswith("YES"):
+                    # Extract transformation type if provided
                     if "|" in response:
                         parts = response.split("|")
                         transformation_type = parts[1].strip().lower() if len(parts) > 1 else "conditional_logic"
                     else:
-                        transformation_type = "conditional_logic"
+                        transformation_type = "conditional_logic"  # default for YES responses
                     return True, transformation_type
                 elif response.startswith("NO"):
                     return False, "none"
                 else:
+                    # Fallback: if response is unclear, assume no transformation
                     logger.warning(f"Unclear LLM response for transformation detection: {response}")
                     return False, "none"
             else:
@@ -343,11 +506,14 @@ FORMAT: YES|transformation_type OR NO
                 
         except Exception as e:
             logger.error(f"Error in LLM transformation detection: {e}")
+            # Fallback to regex-based detection for critical errors
             return self._fallback_regex_detection(query, target_column)
 
     def _fallback_regex_detection(self, query: str, target_column: str) -> Tuple[bool, str]:
         """Fallback regex-based detection for when LLM fails"""
         query_upper = query.upper()
+        
+        # Simple fallback patterns for obvious transformations
         obvious_transformations = [
             (r'SUM\(', 'aggregation'),
             (r'COUNT\(', 'aggregation'),
@@ -376,6 +542,8 @@ FORMAT: YES|transformation_type OR NO
         """
         if not column_name:
             return column_name
+        
+        # If it contains a dot, take everything after the last dot
         if '.' in column_name:
             return column_name.split('.')[-1]
         
@@ -397,6 +565,7 @@ FORMAT: YES|transformation_type OR NO
             return ""
         
         try:
+            # Get lineage metadata
             lineage_metadata = []
             if session_id:
                 lineage_metadata = self._get_lineage_metadata(session_id)
@@ -404,18 +573,30 @@ FORMAT: YES|transformation_type OR NO
             if not lineage_metadata:
                 logger.warning(f"No lineage metadata found for session {session_id}")
                 return ""
+            
+            # Build comparison query
             comparison_query = self._build_comparison_query(target_table, lineage_metadata)
             if not comparison_query:
                 logger.error("Failed to build comparison query")
                 return ""
+            
+            # Execute query and generate CSV
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             csv_filename = f"{target_table}_preload_postload_{timestamp}.csv"
             csv_path = os.path.join("reports", csv_filename)
+            
+            # Ensure reports directory exists
             os.makedirs("reports", exist_ok=True)
+            
+            # Execute query and write to CSV
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute(comparison_query)
+            
+            # Get column names
             column_names = [description[0] for description in cursor.description]
+            
+            # Write CSV
             with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
                 writer.writerow(column_names)
@@ -436,6 +617,8 @@ FORMAT: YES|transformation_type OR NO
         try:
             if not lineage_metadata:
                 return ""
+            
+            # Get primary key
             primary_key = self._get_primary_key(target_table)
             if not primary_key:
                 primary_key = "ROWID"
@@ -443,6 +626,8 @@ FORMAT: YES|transformation_type OR NO
             select_parts = [f"t.{primary_key} as primary_key"]
             joins = []
             join_tables = set()
+            
+            # Process each transformation's lineage
             for transformation in lineage_metadata:
                 columns = transformation.get("columns", {})
                 
@@ -453,6 +638,8 @@ FORMAT: YES|transformation_type OR NO
                     if source_info and source_info.get("table"):
                         source_table = source_info["table"]
                         source_column = source_info["column"]
+                        
+                        # Add source column
                         if transformation_applied:
                             alias = f"s_{source_table.lower()}"
                             select_parts.append(f"{alias}.{source_column} as {column_name}_source")
@@ -461,10 +648,16 @@ FORMAT: YES|transformation_type OR NO
                                 joins.append(f"LEFT JOIN {source_table} {alias} ON t.{primary_key} = {alias}.{primary_key}")
                                 join_tables.add(source_table)
                         else:
+                            # For non-transformed data, source and target should be same
                             select_parts.append(f"t.{column_name} as {column_name}_source")
                     else:
+                        # Handle constants or missing source info
                         select_parts.append(f"NULL as {column_name}_source")
+                    
+                    # Always add target column
                     select_parts.append(f"t.{column_name} as {column_name}_target")
+            
+            # Build final query
             query = f"""
             SELECT {', '.join(select_parts)}
             FROM {target_table} t
@@ -487,18 +680,28 @@ FORMAT: YES|transformation_type OR NO
             return False, "Missing query or target table"
         
         query_upper = query.upper().strip()
+        
+        # Check if this operates on the target table
         if not self._is_target_table_operation(query_upper, target_table):
             return False, "Not a target table operation"
+        
+        # NEVER sync these operations
         for pattern in self.NEVER_SYNC_PATTERNS:
             if re.search(pattern, query, re.IGNORECASE):
                 logger.info(f"Never-sync pattern detected: {pattern[:30]}...")
                 return False, f"Operation type not suitable for sync"
+        
+        # Check for transformation patterns - if found, DON'T sync
         for pattern in self.TRANSFORMATION_PATTERNS:
             if re.search(pattern, query, re.IGNORECASE):
                 logger.info(f"Transformation pattern detected: {pattern[:50]}...")
                 return False, f"Data transformation detected - preserving original data"
+        
+        # Special checks for complex cases
         if self._has_complex_transformation(query):
             return False, "Complex transformation detected"
+        
+        # If we get here, it's likely a simple data movement operation - SYNC IT
         query_type = self._identify_query_type(query_upper)
         logger.info(f"Query type '{query_type}' approved for sync to {target_table}_src")
         return True, f"Data preservation operation - {query_type}"
@@ -506,22 +709,34 @@ FORMAT: YES|transformation_type OR NO
     def _has_complex_transformation(self, query: str) -> bool:
         """Additional checks for complex transformations"""
         query_upper = query.upper()
+        
+        # Check for UPDATE with complex SET clause
         if 'UPDATE' in query_upper and 'SET' in query_upper:
             set_match = re.search(r'SET\s+(.*?)(?:WHERE|FROM|$)', query_upper, re.DOTALL)
             if set_match:
                 set_clause = set_match.group(1)
+                
+                # If SET clause has any function calls (except simple column references)
                 if re.search(r'\w+\s*\([^)]*\)', set_clause):
+                    # Check if it's just a simple subquery
                     if not re.search(r'^\s*\(\s*SELECT\s+\w+\s+FROM\s+\w+', set_clause):
                         return True
+                
+                # Multiple CASE statements usually indicate complex business logic
                 if set_clause.count('CASE') > 1:
                     return True
+        
+        # Check for INSERT with complex SELECT
         if 'INSERT' in query_upper and 'SELECT' in query_upper:
             select_match = re.search(r'SELECT\s+(.*?)(?:FROM|$)', query_upper, re.DOTALL)
             if select_match:
                 select_clause = select_match.group(1)
+                
+                # If SELECT has calculations or functions (not just column names)
                 if re.search(r'[\+\-\*\/]', select_clause):
                     return True
                 if re.search(r'\w+\s*\([^)]*\)', select_clause):
+                    # Allow simple column selections from subqueries
                     if not re.search(r'^\s*\w+\s*,?\s*$', select_clause):
                         return True
         
@@ -588,6 +803,8 @@ FORMAT: YES|transformation_type OR NO
             if not create_sql:
                 logger.error(f"Could not get schema for {source_table}")
                 return False
+            
+            # Replace table name in CREATE statement
             create_sql = re.sub(
                 r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["\']?\w+["\']?',
                 f'CREATE TABLE IF NOT EXISTS {target_table}',
@@ -598,6 +815,8 @@ FORMAT: YES|transformation_type OR NO
             
             cursor = conn.cursor()
             cursor.execute(create_sql)
+            
+            # Copy indexes
             cursor.execute("""
                 SELECT sql FROM sqlite_master 
                 WHERE type='index' AND tbl_name=? AND sql IS NOT NULL
@@ -635,6 +854,8 @@ FORMAT: YES|transformation_type OR NO
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            
+            # Check if source table exists
             cursor.execute("""
                 SELECT name FROM sqlite_master 
                 WHERE type='table' AND name=?
@@ -648,6 +869,7 @@ FORMAT: YES|transformation_type OR NO
             logger.info(f"Creating source table {src_table}")
             
             if self.replicate_table_schema(target_table, src_table, conn):
+                # Copy existing data
                 cursor.execute(f"INSERT INTO {src_table} SELECT * FROM {target_table}")
                 conn.commit()
                 
@@ -673,6 +895,8 @@ FORMAT: YES|transformation_type OR NO
             return False
         
         src_table = f"{target_table}_src"
+        
+        # Replace table name in query
         src_query = re.sub(
             r'\b' + re.escape(target_table) + r'\b',
             src_table,
@@ -708,6 +932,8 @@ FORMAT: YES|transformation_type OR NO
             os.makedirs(session_dir, exist_ok=True)
             
             lineage_file = f"{session_dir}/lineage_metadata.json"
+            
+            # Load existing lineage data
             existing_lineage = []
             if os.path.exists(lineage_file):
                 try:
@@ -715,7 +941,11 @@ FORMAT: YES|transformation_type OR NO
                         existing_lineage = json.load(f)
                 except json.JSONDecodeError:
                     existing_lineage = []
+            
+            # Append new lineage metadata
             existing_lineage.append(lineage_metadata)
+            
+            # Save updated lineage data
             with open(lineage_file, 'w') as f:
                 json.dump(existing_lineage, f, indent=2)
                 
@@ -739,13 +969,15 @@ FORMAT: YES|transformation_type OR NO
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            
+            # Get table info to find primary key
             cursor.execute(f"PRAGMA table_info({table_name})")
             columns = cursor.fetchall()
             
             for column in columns:
-                if column[5]:
+                if column[5]:  # pk column in PRAGMA table_info
                     conn.close()
-                    return column[1]
+                    return column[1]  # column name
             
             conn.close()
             return None
@@ -811,6 +1043,8 @@ FORMAT: YES|transformation_type OR NO
         except Exception as e:
             logger.error(f"Error verifying sync integrity: {e}")
             return {"error": str(e)}
+
+# Global instance for easy access
 _enhanced_source_manager = None
 
 def get_enhanced_source_manager() -> EnhancedSourceTableManager:
@@ -820,7 +1054,7 @@ def get_enhanced_source_manager() -> EnhancedSourceTableManager:
         _enhanced_source_manager = EnhancedSourceTableManager()
     return _enhanced_source_manager
 
-def handle_source_sync(query: str, target_table: str, 
+def handle_is_selection_criteria(query: str, target_table: str, 
                       params: Optional[Dict] = None,
                       main_execution_successful: bool = True) -> Dict[str, Any]:
     """Convenience function for handling source table sync (backward compatibility)"""
@@ -830,10 +1064,11 @@ def handle_source_sync(query: str, target_table: str,
 def handle_query_execution(query: str, target_table: str, planner_info: Dict[str, Any],
                           params: Optional[Dict] = None, 
                           main_execution_successful: bool = True,
-                          session_id: Optional[str] = None) -> Dict[str, Any]:
+                          session_id: Optional[str] = None,
+                          is_selection_criteria = False) -> Dict[str, Any]:
     """Enhanced function for handling both sync and lineage tracking"""
     manager = get_enhanced_source_manager()
-    return manager.handle_query_execution(query, target_table, planner_info, params, main_execution_successful, session_id)
+    return manager.handle_query_execution(query, target_table, planner_info, params, main_execution_successful, session_id,is_selection_criteria=is_selection_criteria)
 
 def generate_lineage_report(target_table: str, session_id: Optional[str] = None) -> str:
     """Convenience function for generating lineage report"""

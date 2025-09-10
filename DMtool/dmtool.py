@@ -458,7 +458,7 @@ class DMTool:
             logger.error(f"Segment ID {segment_id} not found in database")
             return None
 
-    def process_sequential_query(self, query, object_id, segment_id, project_id, session_id=None):
+    def process_sequential_query(self, query, object_id, segment_id, project_id, session_id = None,is_selection_criteria = False):
         """
         Process a query as part of a sequential transformation using SQL generation
         instead of Python code generation
@@ -569,7 +569,8 @@ class DMTool:
                 result = self._execute_sql_query(sql_query, sql_params, planner_info,
                 object_id=object_id,
                 segment_id=segment_id,
-                project_id=project_id)
+                project_id=project_id,
+                is_selection_criteria=is_selection_criteria)
 
 
                 if isinstance(result, dict) and "error_type" in result:
@@ -714,6 +715,23 @@ class DMTool:
             logger.error(f"Error generating report: {e}")
             return ""
 
+    def process_selection_criteria(self, selection_criteria, object_id, segment_id, project_id, session_id = None):
+        """
+        Process selection criteria query using SQL generation
+        
+        Parameters:
+        selection_criteria (str): The selection criteria query
+        object_id (int): Object ID for mapping
+        segment_id (int): Segment ID for mapping
+        project_id (int): Project ID for mapping
+        session_id (str): Optional session ID, creates new session if None
+        
+        Returns:
+        tuple: (generated_sql, result, session_id)
+        """
+        return self.process_sequential_query(selection_criteria, object_id, segment_id, project_id, session_id=session_id,is_selection_criteria=True)
+    
+    
     def _is_multi_statement_query(self, sql_query):
         """Detect if SQL contains multiple statements"""
         if not sql_query or not isinstance(sql_query, str):
@@ -728,7 +746,7 @@ class DMTool:
         logger.info(f"Created new session: {session_id}")
         return session_id
 
-    def _execute_sql_query(self, sql_query, sql_params, planner_info, object_id=None, segment_id=None, project_id=None):
+    def _execute_sql_query(self, sql_query, sql_params, planner_info, object_id=None, segment_id=None, project_id=None, is_selection_criteria=True):
         """
         Execute SQLite query using the SQLExecutor with multi-statement support
         
@@ -768,20 +786,19 @@ class DMTool:
                 
             
             if operation_type == "INSERT":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info,is_selection_criteria=is_selection_criteria)
             elif operation_type == "UPDATE":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info,is_selection_criteria=is_selection_criteria)
             elif operation_type == "DELETE":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id,session_id=planner_info.get("session_id"),planner_info=planner_info)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id,session_id=planner_info.get("session_id"),planner_info=planner_info,is_selection_criteria=is_selection_criteria)
             elif operation_type == "ALTER":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id,session_id=planner_info.get("session_id"),planner_info=planner_info)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id,session_id=planner_info.get("session_id"),planner_info=planner_info,is_selection_criteria=is_selection_criteria)
             elif operation_type == "WITH":
                 if "INSERT INTO" in sql_query.upper():
-                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info)
+                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info,is_selection_criteria=is_selection_criteria)
                 elif "UPDATE" in sql_query.upper():
-                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info)
+                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info,is_selection_criteria=is_selection_criteria)
                 else:
-
                     return self.sql_executor.execute_and_fetch_df(sql_query, sql_params,session_id=planner_info.get("session_id"))
             else:
                 return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)

@@ -1118,52 +1118,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
                 
 
         table_desc = joined_df[joined_df.columns.tolist()[:-1]]
-        additional_context_prompt = f"""
-COMPREHENSIVE QUERY ANALYSIS:
 
-CLASSIFICATION RESULTS:
-- Query Type: {classification_details.get('primary_classification', 'Unknown')}
-- Confidence: {classification_details.get('confidence', 0)}
-- Reasoning: {classification_details.get('reasoning', 'Not provided')}
-
-DETECTED ELEMENTS:
-- SAP Tables Mentioned: {', '.join(classification_details.get('detected_elements', {}).get('sap_tables_mentioned', [])) or 'None'}
-- Columns Mentioned: {', '.join(classification_details.get('detected_elements', {}).get('columns_Mentioned', [])) or 'None'}
-- Segments Referenced: {', '.join(classification_details.get('detected_elements', {}).get('segments_mentioned', [])) or 'None'}
-- Join Indicators: {', '.join(classification_details.get('detected_elements', {}).get('join_indicators', [])) or 'None'}
-- Validation Indicators: {', '.join(classification_details.get('detected_elements', {}).get('validation_indicators', [])) or 'None'}
-- Aggregation Indicators: {', '.join(classification_details.get('detected_elements', {}).get('aggregation_indicators', [])) or 'None'}
-- Transformation References: {', '.join(classification_details.get('detected_elements', {}).get('transformation_references', [])) or 'None'}
-- Has Multiple Tables: {classification_details.get('detected_elements', {}).get('has_multiple_tables', False)}
-
-TABLE VALIDATION:
-- Valid Tables: {', '.join(classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('valid_tables', {}).keys()) or 'None found'}
-- Invalid Tables: {', '.join([t.get('original_name', '') for t in classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('invalid_tables', [])]) or 'None'}
-- Schema Errors: {len(classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('schema_errors', []))} errors
-
-COLUMN VALIDATION:
-- Columns Found in Database: {', '.join(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('columns_found_in_tables', {}).keys()) or 'None'}
-- Missing Columns: {', '.join(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('missing_columns', [])) or 'None'}
-- Total Tables Scanned: {len(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('table_columns', {}))}
-
-DETAILED COLUMN-TABLE MAPPING:
-{chr(10).join([f"- Column '{col}': found in {len(tables)} table(s) → {', '.join([t.get('table', '') + '(' + t.get('actual_column_name', '') + ')' for t in tables])}" for col, tables in classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('columns_found_in_tables', {}).items()]) or '- No valid column mappings found'}
-
-TABLE COLUMNS AVAILABLE:
-{chr(10).join([f"- {table}: {', '.join(cols[:5])}{' ...' if len(cols) > 5 else ''} ({len(cols)} total)" for table, cols in classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('table_columns', {}).items()]) or '- No table schemas available'}
-
-SEGMENT MAPPINGS:
-{chr(10).join([f"- Segment '{seg}' → Tables: {', '.join(tables)}" for seg, tables in classification_details.get('enhanced_matching', {}).get('segment_target_tables', {}).items()]) or '- No segment mappings available'}
-
-FUZZY MATCHING RESULTS:
-- Tables with Confidence: {', '.join([f"{table}({conf:.0%})" for table, conf in classification_details.get('enhanced_matching', {}).get('table_match_confidence', {}).items()]) or 'None'}
-- Columns in Mentioned Tables: {', '.join([f"{table}:[{', '.join(cols)}]" for table, cols in classification_details.get('enhanced_matching', {}).get('columns_in_mentioned_table', {}).items()]) or 'None'}
-
-INSTRUCTIONS: Use ONLY the validated table and column names from the mappings above. If a column is missing or a table is invalid, do not include it in your SQL generation.
-
-
-"""
-        
         formatted_prompt = prompt_template.format(
             question=query,
             table_desc=list(table_desc.itertuples(index=False)),
@@ -1185,8 +1140,6 @@ INSTRUCTIONS: Use ONLY the validated table and column names from the mappings ab
         )
         
         response = llm.generate(formatted_prompt, temperature=0.3, max_tokens=1500)
-        
-
         json_str = re.search(r"```json(.*?)```", response, re.DOTALL)
         if json_str:
             parsed_data = json.loads(json_str.group(1).strip())

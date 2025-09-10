@@ -61,7 +61,8 @@ class SQLExecutor:
                      segment_id: Optional[int] = None,
                      project_id: Optional[int] = None,
                      session_id: Optional[str] = None,
-                     planner_info: Optional[Dict[str, Any]] = None
+                     planner_info: Optional[Dict[str, Any]] = None,
+                     is_selection_criteria = False
                      ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Execute an SQL query with parameter binding
@@ -129,7 +130,8 @@ class SQLExecutor:
                         planner_info=planner_info,
                         params=params,
                         main_execution_successful=True,
-                        session_id=session_id
+                        session_id=session_id,
+                        is_selection_criteria=is_selection_criteria
                     )
                     
                     if enhanced_result.get("sync_attempted"):
