@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 from DMtool.executor import SQLExecutor
+from DMtool.llm_config import LLMManager
 
 sql_executor = SQLExecutor()
 
@@ -130,9 +131,17 @@ class ClassificationEnhancer:
         self._available_tables = None
         self._table_columns = {}
         self._segments_df = None
-    
-
+        
     def _get_available_tables(self) -> List[str]:
+        """
+        Get list of available tables from the database
+        
+        Returns:
+            List[str]: List of table names
+        """
+        if self._available_tables is not None:
+            return self._available_tables
+            
         try:
             conn = pyodbc.connect(self.connection_string)
             cursor = conn.cursor()
@@ -142,30 +151,44 @@ class ClassificationEnhancer:
                 WHERE TABLE_TYPE = 'BASE TABLE'
             """)
             tables = [row[0] for row in cursor.fetchall()]
+            
             conn.close()
             self._available_tables = tables
             return tables
+            
         except Exception as e:
-            logger.error(f"Error fetching tables: {e}")
+            logger.error(f"Error getting available tables: {e}")
             return []
     
     def _get_table_columns(self, table_name: str) -> List[str]:
+        """
+        Get columns for a specific table
+        
+        Args:
+            table_name (str): Name of the table
+            
+        Returns:
+            List[str]: List of column names
+        """
+        if table_name in self._table_columns:
+            return self._table_columns[table_name]
+            
         try:
             conn = pyodbc.connect(self.connection_string)
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COLUMN_NAME 
-                FROM INFORMATION_SCHEMA.COLUMNS 
-                WHERE TABLE_NAME = ?
-                ORDER BY ORDINAL_POSITION
-            """, (table_name,))
-            columns = [row[0] for row in cursor.fetchall()]
+            
+
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            conn.close()
+            self._table_columns[table_name] = columns
+            return columns
+            
         except Exception as e:
-            logger.error(f"Error fetching columns for table {table_name}: {e}")
+            logger.error(f"Error getting columns for table {table_name}: {e}")
             return []
-        return columns
-
-
+    
     def _get_all_table_columns(self, table_names: List[str]) -> Dict[str, List[str]]:
         """
         Get columns for multiple tables
@@ -474,8 +497,8 @@ class ClassificationEnhancer:
 
 def enhance_classification_before_processing(classification_details: Dict[str, Any], 
                                            current_segment_id: int,
+                                           db_path: str = None,
                                            segments_csv_path: str = "segments.csv") -> Dict[str, Any]:
-
     """
     Convenience function to enhance classification details
     
@@ -488,10 +511,10 @@ def enhance_classification_before_processing(classification_details: Dict[str, A
     Returns:
         Dict[str, Any]: Enhanced classification details
     """
-    enhancer = ClassificationEnhancer(segments_csv_path)
+    enhancer = ClassificationEnhancer(db_path,segments_csv_path)
     return enhancer.enhance_classification_details(classification_details, current_segment_id)
 
-def classify_query_with_llm(query, target_table, context):
+def classify_query_with_llm(query, target_table,context):
     """
     Use LLM to classify the query type based on linguistic patterns and semantic understanding
     
@@ -515,10 +538,11 @@ You are an expert data transformation analyst. Analyze the following natural lan
 
 USER QUERY: "{query}"
 
-Previous context: {context}
-
 Note:
 if the query says Target table then it indicates {target_table}
+
+Previous Context:
+{context}
 
 CLASSIFICATION CRITERIA:
 
@@ -528,9 +552,9 @@ CLASSIFICATION CRITERIA:
 
 **CROSS_SEGMENT indicators:**
 - References to previous segments: "basic segment", "marc segment", "makt segment"
-- Temporal references: "previous", "prior", "last", "earlier" segment/transformation
+- Temporal references: "previous", "prior", "last", "earlier" segment
 - Segment keywords: "BASIC", "PLANT", "SALES", "PURCHASING", "CLASSIFICATION", "MRP", "WAREHOUSE"
-- Phrases like: "from segment", "use segment", "based on segment", "transformation X"
+- Phrases like: "from segment", "use segment", "based on segment"
 
 **VALIDATION_OPERATION indicators:**
 - Words like: "validate", "verify", "ensure", "check", "confirm"
@@ -552,7 +576,10 @@ ADDITIONAL DETECTION:
 - **SAP Tables**: Look for mentions of SAP Tables
 - **Segment Names**: Look for: Basic, Plant, Sales, Purchasing, Classification, MRP, Warehouse segments
 - **Table Count**: If multiple SAP tables mentioned, likely JOIN_OPERATION
-- **Segment References**: Any reference to numbered transformations (Transformation 1, Step 2, etc.)
+- **Segment References**: Any reference to name followed by "segment" indicates CROSS_SEGMENT
+- **Join Indicators**: Look for words like "join", "merge", "combine", "link", "both tables"
+- **Validation Indicators**: Look for words like "validate", "verify", "check", "ensure", "missing", "invalid"
+- **Previous Context indicators** : If a query talks about transformation X, use context from previous transformations to resolve fields and tables
 
 
 Respond with a JSON object:
@@ -582,26 +609,26 @@ Respond with a JSON object:
 
             return _fallback_classification(query)
             
-        client = genai.Client(api_key=api_key)
-        
-        response = client.models.generate_content(
-            model="gemini-2.5-flash", 
-            contents=prompt,
-            config=types.GenerateContentConfig(temperature=0.1)
+        llm = LLMManager(
+            provider="google",
+            model="gemini/gemini-2.5-flash",
+            api_key=api_key
         )
         
-        if not response or not hasattr(response, "text"):
+        response = llm.generate(prompt, temperature=0.3, max_tokens=500)
+        
+        if not response:
             logger.warning("Invalid response from Gemini API for query classification")
+            logger.info(f"Raw response: {response}")
             return _fallback_classification(query)
             
-
         try:
-            json_str = re.search(r"```json(.*?)```", response.text, re.DOTALL)
+            json_str = re.search(r"```json(.*?)```", response, re.DOTALL)
             if json_str:
                 result = json.loads(json_str.group(1).strip())
             else:
 
-                result = json.loads(response.text.strip())
+                result = json.loads(response.strip())
 
             primary_class = result.get("primary_classification", "SIMPLE_TRANSFORMATION")
             
@@ -624,7 +651,7 @@ Respond with a JSON object:
             
         except (json.JSONDecodeError, KeyError) as e:
             logger.error(f"Error parsing LLM classification response: {e}")
-            logger.error(f"Raw response: {response.text}")
+            logger.error(f"Raw response: {response}")
             return _fallback_classification(query)
             
     except Exception as e:
@@ -684,8 +711,7 @@ PROMPT_TEMPLATES = {
     
     CONTEXT DATA SCHEMA: {table_desc}
     
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
+    Target table name: {target_table_name}
     
     USER QUERY: {question}
 
@@ -710,7 +736,11 @@ PROMPT_TEMPLATES = {
        - Resolve ambiguities using the description field
        - Validate that the identified fields exist in the mentioned tables
     
-    3. Generate a structured representation of the transformation logic:
+    3. IMPORTANT: Provide table-qualified column references
+       - Instead of just "MATNR", provide "MARA.MATNR"
+       - Instead of just "PRODUCT", provide "t_74_table_name.PRODUCT"
+    
+    4. Generate a structured representation of the transformation logic:
        - JSON format showing the transformation flow
        - Include all source tables, fields, conditions, and targets
        - Map conditional logic to proper syntax
@@ -718,21 +748,33 @@ PROMPT_TEMPLATES = {
        - Use the provided key mappings to connect source and target fields correctly
        - Consider the current state of the target data shown above
     
-    4. Create a resolved query that takes the actual field and table names, and does not change what is said in the query
+    5. Create a resolved query that takes the actual field and table names, and does not change what is said in the query
     
-    5. For the insertion fields, identify the fields that need to be inserted into the target table based on the User query.
-    6. When encountering that mention a previous transformation like transformation 1, use transformation context in the additional context to resolve the fields and tables
-    
+    6. For the insertion fields, identify the fields that need to be inserted into the target table based on the User query.
+    7. When encountering that mention a previous transformation like transformation 1, use transformation context in the addtional context to resolve the fields and tables
+    8. For transformation plan provide a step by step plan to implement the transformation while considering the target table state and the source data schema and the exactly what the user is asking for in the query.
     Respond with:
     ```json
     {{
         "query_type": "SIMPLE_TRANSFORMATION",
         "source_table_name": [List of all source_tables],
-        "source_field_names": [List of all source_fields],
-        "filtering_fields": [List of filtering fields],
-        "insertion_fields": [field to be inserted],
-        "target_sap_fields": [Target field(s)],
-        "Resolved_query": [Rephrased query with resolved data]
+        "source_field_names": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
+        "filtering_fields": [List of table.column format for filtering],
+        "insertion_fields": [List of table.column format for insertion],
+        "target_sap_fields": [List of table.column format for target],
+        "filter_conditions": "Any filter conditions in the query",
+        "transformation_logic": "Any transformation logic in the query",
+        "table_column_mapping": {{
+            "source_tables": {{
+                "table_name": ["column1", "column2", ...]
+            }},
+            "target_tables": {{
+                "table_name": ["column1", "column2", ...]
+            }}
+        }},
+        "Resolved_query": [Rephrased query with resolved data],
+        "transformation_context": "If any previous transformation context is used, mention it here",
+        "transformation_plan": "Step by step plan to implement the transformation"
     }}
     ```
 
@@ -773,8 +815,7 @@ PROMPT_TEMPLATES = {
     
     CONTEXT DATA SCHEMA: {table_desc}
 
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
+    Target table name: {target_table_name}
     
     USER QUERY: {question}
 
@@ -792,38 +833,54 @@ PROMPT_TEMPLATES = {
     INSTRUCTIONS:
     1. Identify key entities in the join query:
        - All source tables needed for the join
-       - Join fields for each pair of tables
-       - Fields to select from each table
-       - Filtering conditions
-       - Target fields for insertion
+       - Join fields for each pair of tables WITH table qualification
+       - Fields to select from each table WITH table qualification
+       - Filtering conditions WITH table qualification
+       - Target fields for insertion WITH table qualification
     
     2. Specifically identify the join conditions:
        - Which table is joined to which
-       - On which fields they are joined
+       - On which fields they are joined (table.column format)
        - The type of join (inner, left, right)
     
-    3. When encountering that mention a previous transformation like transformation 1, use transformation context in the additional context to resolve the fields and tables
+    3. CRITICAL: Provide all column references in table.column format
+    4. When encountering that mention a previous transformation like transformation 1, use transformation context in the addtional context to resolve the fields and tables
 
-    
-    4. Format your response as JSON with the following schema:
+    5. For transformation plan provide a step by step plan to implement the transformation while considering the target table state and the source data schema and the exactly what the user is asking for in the query.
+
+    6. Format your response as JSON with the following schema:
     ```json
     {{
         "query_type": "JOIN_OPERATION",
-        "source_table_name": [List of all source tables, including previously visited segment tables],
-        "source_field_names": [List of all fields to select],
-        "filtering_fields": [List of filtering fields],
-        "insertion_fields": [insertion_field],
-        "target_sap_fields": [Target field(s)],
+        "source_table_name": [List of all source_tables],
+        "source_field_names": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
+        "filtering_fields": [List of table.column format for filtering],
+        "insertion_fields": [List of table.column format for insertion],
+        "target_sap_fields": [List of table.column format for target],
+        "filter_conditions": "Any filter conditions in the query",
+        "transformation_logic": "Any transformation logic in the query",
         "join_conditions": [
             {{
                 "left_table": "table1",
                 "right_table": "table2",
                 "left_field": "join_field_left",
                 "right_field": "join_field_right",
-                "join_type": "inner"
+                "join_type": "inner",
+                "qualified_condition": "table1.join_field_left = table2.join_field_right"
             }}
         ],
-        "Resolved_query": "Restructured query with resolved data"
+        "table_column_mapping": {{
+            "source_tables": {{
+                "table1": ["column1", "column2", ...],
+                "table2": ["column1", "column2", ...]
+            }},
+            "target_tables": {{
+                "target_table": ["column1", "column2", ...]
+            }}
+        }},
+        "Resolved_query": "Restructured query with resolved data",
+        "transformation_context": "If any previous transformation context is used, mention it here",
+        "transformation_plan": "Step by step plan to implement the transformation"
     }}
     ```
     Important Note: Do not invent new tables or columns that are not mentioned in the query and in the Context data schema.
@@ -863,8 +920,7 @@ PROMPT_TEMPLATES = {
     
     CONTEXT DATA SCHEMA: {table_desc}
     
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
+    Target table name: {target_table_name}
     
     USER QUERY: {question}
 
@@ -878,21 +934,25 @@ PROMPT_TEMPLATES = {
 
     INSTRUCTIONS:
     1. Identify which previous segments are referenced in the query
-    2. Determine how to link current data with segment data (join conditions)
-    3. Identify which fields to extract from each segment
-    4. Determine filtering conditions if any
-    5. Identify the target fields for insertion
-    6. When encountering that mention a previous transformation like transformation 1, use transformation context in the additional context to resolve the fields and tables
+    2. Determine how to link current data with segment data (join conditions WITH table.column format)
+    3. Identify which fields to extract from each segment WITH table qualification
+    4. Determine filtering conditions if any WITH table qualification
+    5. Identify the target fields for insertion WITH table qualification
+    6. CRITICAL: All column references must be in table.column format
+    7. When encountering that mention a previous transformation like transformation 1, use transformation context in the addtional context to resolve the fields and tables
+    8. For transformation plan provide a step by step plan to implement the transformation while considering the target table state and the source data schema and the exactly what the user is asking for in the query.
 
     Format your response as JSON with the following schema:
     ```json
     {{
         "query_type": "CROSS_SEGMENT",
-        "source_table_name": [List of all source tables, including segment tables],
-        "source_field_names": [List of all fields to select],
-        "filtering_fields": [List of filtering fields],
-        "insertion_fields": [List of fields to be inserted],
-        "target_sap_fields": [Target field(s)],
+        "source_table_name": [List of all source_tables],
+        "source_field_names": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
+        "filtering_fields": [List of table.column format for filtering],
+        "insertion_fields": [List of table.column format for insertion],
+        "target_sap_fields": [List of table.column format for target],
+        "filter_conditions": "Any filter conditions in the query",
+        "transformation_logic": "Any transformation logic in the query",
         "segment_references": [
             {{
                 "segment_id": "segment_id",
@@ -905,10 +965,22 @@ PROMPT_TEMPLATES = {
                 "left_table": "segment_table",
                 "right_table": "current_table",
                 "left_field": "join_field_left",
-                "right_field": "join_field_right"
+                "right_field": "join_field_right",
+                "qualified_condition": "segment_table.join_field_left = current_table.join_field_right"
             }}
         ],
-        "Resolved_query": "Restructured query with resolved data"
+        "table_column_mapping": {{
+            "source_tables": {{
+                "table1": ["column1", "column2", ...],
+                "segment_table": ["column1", "column2", ...]
+            }},
+            "target_tables": {{
+                "target_table": ["column1", "column2", ...]
+            }}
+        }},
+        "Resolved_query": "Restructured query with resolved data",
+        "transformation_context": "If any previous transformation context is used, mention it here",
+        "transformation_plan": "Step by step plan to implement the transformation"
     }}
     ```
     Important Note: Do not invent new tables or columns that are not mentioned in the query and in the Context data schema.
@@ -940,108 +1012,9 @@ PROMPT_TEMPLATES = {
     - Target table: [target_table] (has column [actual_target_column]) 
     - insertion_fields: ["actual_source_column"] ✅ (from source table schema)
     - target_sap_fields: ["actual_target_column"] ✅ (from target table schema)
-    """,
-    
-    "VALIDATION_OPERATION": """
-    You are a data validation assistant specializing in SAP data. 
-    Your task is to analyze a natural language query about data validation and map it to appropriate validation rules.
-    
-    CONTEXT DATA SCHEMA: {table_desc}
-    
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
-    
-    USER QUERY: {question}
-
-    These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
-    Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
-    Important Query Context:{additional_context}
-
-    Notes:
-    - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
-    
-    
-    INSTRUCTIONS:
-    1. Identify the validation requirements in the query
-    2. Determine which tables and fields need to be checked
-    3. Formulate the validation rules in a structured way
-    4. Specify what should happen for validation success/failure
-    
-    Format your response as JSON with the following schema:
-    ```json
-    {{
-        "query_type": "VALIDATION_OPERATION",
-        "source_table_name": [List of tables to validate],
-        "source_field_names": [List of fields to validate],
-        "validation_rules": [
-            {{
-                "field": "field_name",
-                "rule_type": "not_null|unique|range|regex|exists_in",
-                "parameters": {{
-                    "min": minimum_value,
-                    "max": maximum_value,
-                    "pattern": "regex_pattern",
-                    "reference_table": "table_name",
-                    "reference_field": "field_name"
-                }}
-            }}
-        ],
-        "target_sap_fields": [Target field(s) to update with validation results],
-        "Resolved_query": "Restructured query with resolved data"
-    }}
-    ```
-    """,
-    
-    "AGGREGATION_OPERATION": """
-    You are a data aggregation assistant specializing in SAP data. 
-    Your task is to analyze a natural language query about data aggregation and map it to appropriate aggregation operations.
-    
-    CONTEXT DATA SCHEMA: {table_desc}
-    
-    
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
-    
-    USER QUERY: {question}
-
-    These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
-    Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
-    Important Query Context:{additional_context}    
-    
-    Notes:
-    - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
-    
-    INSTRUCTIONS:
-    1. Identify the aggregation functions required (sum, count, average, etc.)
-    2. Determine which tables and fields are involved
-    3. Identify grouping fields if any
-    4. Determine filtering conditions if any
-    5. Identify where the results should be stored
-    
-    Format your response as JSON with the following schema:
-    ```json
-    {{
-        "query_type": "AGGREGATION_OPERATION",
-        "source_table_name": [Source tables],
-        "source_field_names": [Fields to aggregate],
-        "aggregation_functions": [
-            {{
-                "field": "field_name",
-                "function": "sum|count|avg|min|max",
-                "alias": "result_name"
-            }}
-        ],
-        "group_by_fields": [Fields to group by],
-        "filtering_fields": [Filtering fields],
-        "filtering_conditions": {{
-            "field_name": "condition_value"
-        }},
-        "target_sap_fields": [Target fields for results],
-        "Resolved_query": "Restructured query with resolved data"
-    }}
-    ```
     """
 }
+
 
 def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
     """
@@ -1110,17 +1083,19 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
                         else []
                     )
                 else:
+
                     target_df_sample = target_df_sample.head(5).to_dict("records") if not target_df_sample.empty else []
         except Exception as e:
             logger.warning(f"Error getting target data sample: {e}")
             target_df_sample = []
             
         context = context_manager.get_context(session_id) if session_id else None
-        query_type, classification_details = classify_query_with_llm(query,target_table,context)
+        query_type, classification_details = classify_query_with_llm(query,target_table, context)
         enhanced_classification = enhance_classification_before_processing(
             classification_details, segment_id
         )
         classification_details = enhanced_classification
+        classification_details["Transformation_context"] = context
         logger.info(f"Query type: {query_type}")
         logger.info(f"Classification details: {classification_details}")
 
@@ -1191,12 +1166,14 @@ FUZZY MATCHING RESULTS:
 - Columns in Mentioned Tables: {', '.join([f"{table}:[{', '.join(cols)}]" for table, cols in classification_details.get('enhanced_matching', {}).get('columns_in_mentioned_table', {}).items()]) or 'None'}
 
 INSTRUCTIONS: Use ONLY the validated table and column names from the mappings above. If a column is missing or a table is invalid, do not include it in your SQL generation.
+
+
 """
         
         formatted_prompt = prompt_template.format(
             question=query,
             table_desc=list(table_desc.itertuples(index=False)),
-            target_df_sample=target_df_sample_str,
+            target_table_name=", ".join(target_table) if target_table else "Not specified",
             segment_mapping=context_manager.get_segments(session_id) if session_id else [],
             additional_context=classification_details
         )
@@ -1207,24 +1184,20 @@ INSTRUCTIONS: Use ONLY the validated table and column names from the mappings ab
             logger.error("GEMINI_API_KEY not found in environment variables")
             raise APIError("Gemini API key not configured")
             
-        client = genai.Client(api_key=api_key)
-        
-        response = client.models.generate_content(
-            model="gemini-2.5-flash", 
-            contents=formatted_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.5, top_p=0.95, top_k=40
-            ),
+        llm = LLMManager(
+            provider="google",
+            model="gemini/gemini-2.5-flash",
+            api_key=api_key
         )
         
+        response = llm.generate(formatted_prompt, temperature=0.3, max_tokens=1500)
+        
 
-        json_str = re.search(r"```json(.*?)```", response.text, re.DOTALL)
+        json_str = re.search(r"```json(.*?)```", response, re.DOTALL)
         if json_str:
             parsed_data = json.loads(json_str.group(1).strip())
         else:
-
-            parsed_data = json.loads(response.text.strip())
-        
+            parsed_data = json.loads(response.strip())
         logger.info(f"Parsed data: {parsed_data}")
         parsed_data["query_type"] = query_type
         
@@ -1273,11 +1246,8 @@ INSTRUCTIONS: Use ONLY the validated table and column names from the mappings ab
 
             results = _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn)
         else:
-
-
             results["key_mapping"] = parsed_data["key_mapping"]
         
-
         results["session_id"] = session_id
         results["query_type"] = query_type
         results["visited_segments"] = visited_segments
@@ -1845,8 +1815,12 @@ class ContextualSessionManager:
         """Add a transformation record to the session context"""
         try:
             if not session_id:
+                logger.warning("No session ID provided for add_transformation_record")
                 return False
                 
+            context_path = f"{self.storage_path}/{session_id}/context.json"
+            
+
             context = self.get_context(session_id)
             if not context:
                 context = {
@@ -1861,9 +1835,11 @@ class ContextualSessionManager:
                     }
                 }
             
+
             if "transformation_history" not in context:
                 context["transformation_history"] = []
             
+
             transformation_record = {
                 "transformation_id": f"t_{len(context['transformation_history']) + 1}",
                 "timestamp": datetime.now().isoformat(),
@@ -1880,8 +1856,7 @@ class ContextualSessionManager:
             
             context["transformation_history"].append(transformation_record)
             
-            # Save to file
-            context_path = f"{self.storage_path}/{session_id}/context.json"
+
             os.makedirs(os.path.dirname(context_path), exist_ok=True)
             with open(context_path, "w") as f:
                 json.dump(context, f, indent=2)

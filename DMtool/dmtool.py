@@ -7,9 +7,7 @@ import re
 import pyodbc
 import traceback
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 
 from DMtool.planner import process_query
 from DMtool.planner import (
@@ -19,6 +17,8 @@ from DMtool.planner import ContextualSessionManager
 from DMtool.generator import SQLGenerator
 from DMtool.executor import SQLExecutor
 from DMtool.logging_config import setup_logging
+from DMtool.llm_config import LLMManager
+from DMtool.source_table_manager import generate_lineage_report
 
 setup_logging(log_to_file=True, log_to_console=True)
 
@@ -46,11 +46,15 @@ class QueryTemplateRepository:
         """
         self.template_file = template_file
         self.templates = self._load_templates()
-        api_key = os.environ.get("GEMINI_API_KEY")
+        api_key = os.environ.get("API_KEY") or os.environ.get("GEMINI_API_KEY")
         if not api_key:
             logger.error("GEMINI_API_KEY not found in environment variables")
             raise APIError("Gemini API key not configured")
-        self.client = genai.Client(api_key=api_key)
+        self.llm = LLMManager(
+            provider="google",
+            model="gemini/gemini-2.5-flash",
+            api_key=api_key
+        )
         
     def _load_templates(self):
         """
@@ -123,18 +127,12 @@ class QueryTemplateRepository:
     Template ID:"""
 
             try:
-
-                from google.genai import types
                 
-                response = self.client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=llm_prompt,
-                    config=types.GenerateContentConfig(temperature=0.1)
-                )
+                response = self.llm.generate(llm_prompt, temperature=0.05, max_tokens=50)
                 
-                if response and hasattr(response, "text"):
+                if response :
 
-                    template_id = response.text.strip().strip('"').strip("'").lower()
+                    template_id = response.strip().strip('"').strip("'").lower()
                     
 
                     best_match = None
@@ -165,105 +163,6 @@ class QueryTemplateRepository:
             logger.error(f"Error finding matching template: {e}")
             return None    
 
-class ErrorRecoveryManager:
-    """Manages error analysis and targeted retry logic"""
-    
-    def __init__(self):
-        self.max_retries = 2
-        self.retry_history = {}
-    
-    def analyze_error_stage(self, error_result: Dict[str, Any], sql_query: str = None) -> str:
-        """
-        Analyze where the error occurred and determine retry stage
-        
-        Returns:
-        - "PLANNER" - Retry from query classification/planning
-        - "GENERATOR" - Retry from SQL generation only  
-        - "EXECUTOR" - Retry execution with fixes
-        - "FATAL" - Cannot recover
-        """
-        
-        if not isinstance(error_result, dict) or "error_type" not in error_result:
-            return "FATAL"
-        
-        error_type = error_result.get("error_type", "")
-        error_message = error_result.get("error_message", "").lower()
-        
-        # Database/Table/Column issues - retry from PLANNER (re-analyze query)
-        if any(indicator in error_message for indicator in [
-            "invalid object name", "table does not exist", "invalid column name", 
-            "column not found", "invalid table", "table not found"
-        ]):
-            return "PLANNER"
-        
-        # SQL Syntax issues - retry from GENERATOR (regenerate SQL)
-        if any(indicator in error_message for indicator in [
-            "syntax error", "near", "unexpected token", "sql error",
-            "invalid sql", "parse error", "malformed", "incorrect syntax"
-        ]):
-            return "GENERATOR"
-        
-        # Execution/Runtime issues - retry EXECUTOR with fixes
-        if any(indicator in error_message for indicator in [
-            "connection", "timeout", "lock", "busy", "constraint"
-        ]):
-            return "EXECUTOR"
-        
-        # Variable/Code issues - retry from GENERATOR
-        if any(indicator in error_message for indicator in [
-            "nonetype", "not iterable", "attribute error", "key error"
-        ]):
-            return "GENERATOR"
-        
-        return "FATAL"
-    
-    def create_retry_prompt_addition(self, stage: str, error_result: Dict[str, Any], 
-                                   attempt_number: int) -> str:
-        """Create additional prompt context for retry attempts"""
-        
-        error_msg = error_result.get("error_message", "")
-        
-        if stage == "PLANNER":
-            return f"""
-RETRY ATTEMPT #{attempt_number} - QUERY ANALYSIS CORRECTION:
-Previous attempt failed with error: {error_msg}
-
-SPECIFIC INSTRUCTIONS FOR THIS RETRY:
-- Double-check all table names exist in the database schema
-- Verify all mentioned columns are available in their respective tables  
-- Use only validated table and column names from the enhanced matching results
-- If tables/columns don't exist, suggest alternatives or indicate data unavailability
-- Pay extra attention to table name formatting (no spaces, correct suffixes)
-"""
-        
-        elif stage == "GENERATOR":
-            return f"""
-RETRY ATTEMPT #{attempt_number} - SQL GENERATION CORRECTION:
-Previous SQL generation failed with error: {error_msg}
-
-SPECIFIC INSTRUCTIONS FOR THIS RETRY:
-- Generate simpler, more conservative SQL syntax
-- Avoid complex joins if column validation shows issues
-- Use proper T-SQL syntax (no SQLite-specific functions)
-- Quote table names with spaces using square brackets [table name]
-- For DDL operations (ALTER/DROP), don't try to fetch results
-- Validate column existence before including in SELECT/UPDATE clauses
-"""
-        
-        elif stage == "EXECUTOR":
-            return f"""
-RETRY ATTEMPT #{attempt_number} - EXECUTION OPTIMIZATION:
-Previous execution failed with error: {error_msg}
-
-SPECIFIC INSTRUCTIONS FOR THIS RETRY:
-- Generate more robust SQL with better error handling
-- Add NULL checks and COALESCE where appropriate
-- Use simpler table aliases and join conditions
-- Avoid operations on non-existent or empty tables
-"""
-        
-        return ""
-
 class DMTool:
     """Azure SQL Server-based DMTool for optimized data transformations using direct SQL queries"""
 
@@ -271,13 +170,16 @@ class DMTool:
         """Initialize the DMToolSQL instance"""
         try:
 
-            api_key = os.environ.get("GEMINI_API_KEY")
+            api_key = os.environ.get("API_KEY") or os.environ.get("GEMINI_API_KEY")
             if not api_key:
                 logger.error("GEMINI_API_KEY not found in environment variables")
                 raise APIError("Gemini API key not configured")
 
-            self.client = genai.Client(api_key=api_key)
- 
+            self.llm = LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=api_key
+            )
 
             self.sql_generator = SQLGenerator()
             self.sql_executor = SQLExecutor()
@@ -317,17 +219,19 @@ class DMTool:
                 "source_table_name": resolved_data.get("source_table_name", []),
                 "target_table_name": resolved_data.get("target_table_name", []),
 
-                "source_field_names": resolved_data.get("source_field_names", []),
-                "target_sap_fields": resolved_data.get("target_sap_fields", []),
-                "filtering_fields": resolved_data.get("filtering_fields", []),
-                "insertion_fields": resolved_data.get("insertion_fields", []),
+                "source_field_names": resolved_data.get("qualified_source_fields", []),
+                "target_sap_fields": resolved_data.get("qualified_target_fields", []),
+                "filtering_fields": resolved_data.get("qualified_filtering_fields", []),
+                "insertion_fields": resolved_data.get("qualified_insertion_fields", []),
 
                 "original_query": resolved_data.get("original_query", ""),
                 "restructured_query": resolved_data.get("Resolved_query", ""),
 
                 "session_id": resolved_data.get("session_id", ""),
                 "key_mapping": resolved_data.get("key_mapping", []),
-
+                "table_column_mapping": resolved_data.get("table_column_mapping", {}),
+                "transformation_context": resolved_data.get("transformation_context", ""),
+                "transformation_plan": resolved_data.get("transformation_plan", ""),
                 "query_type": resolved_data.get("query_type", "SIMPLE_TRANSFORMATION"),
             }
             
@@ -347,11 +251,7 @@ class DMTool:
             query_text = planner_info["restructured_query"]
             conditions = {}
 
-            planner_info["qualified_source_fields"] = resolved_data.get("qualified_source_fields", [])
-            planner_info["qualified_filtering_fields"] = resolved_data.get("qualified_filtering_fields", [])
-            planner_info["qualified_insertion_fields"] = resolved_data.get("qualified_insertion_fields", [])
-            planner_info["qualified_target_fields"] = resolved_data.get("qualified_target_fields", [])
-            planner_info["table_column_mapping"] = resolved_data.get("table_column_mapping", {})
+
             if query_text:
 
                 for field in planner_info["filtering_fields"]:
@@ -404,114 +304,71 @@ class DMTool:
             }
             return minimal_context
 
-    def _format_table_column_context_from_planner(self, table_column_mapping):
-        """Format table.column context from planner's table_column_mapping"""
-        try:
-            if not table_column_mapping:
-                return "No table column mapping available"
-            
-            context_parts = ["AVAILABLE TABLE.COLUMN REFERENCES:"]
-            source_tables = table_column_mapping.get("source_tables", {})
-            for table_name, columns in source_tables.items():
-                context_parts.append(f"\nSOURCE TABLE '{table_name}':")
-                for col in columns:
-                    context_parts.append(f"  {table_name}.{col}")
-            
-            target_tables = table_column_mapping.get("target_tables", {})
-            for table_name, columns in target_tables.items():
-                context_parts.append(f"\nTARGET TABLE '{table_name}':")
-                for col in columns:
-                    context_parts.append(f"  {table_name}.{col}")
-            
-            return "\n".join(context_parts)
-            
-        except Exception as e:
-            logger.error(f"Error formatting table column context: {e}")
-            return "Error formatting table column context"
-
     def _create_operation_plan(self, query, planner_info: Dict[str, Any], template: Dict[str, Any]) -> str:
         """
-        Use LLM to create a detailed plan for Azure SQL query generation using enhanced planner info
+        Use LLM to create a detailed plan for SQL query generation using enhanced planner info
         """
         try:
-            # Extract qualified field information
             qualified_source_fields = planner_info.get("qualified_source_fields", [])
             qualified_filtering_fields = planner_info.get("qualified_filtering_fields", [])
             qualified_insertion_fields = planner_info.get("qualified_insertion_fields", [])
             qualified_target_fields = planner_info.get("qualified_target_fields", [])
             table_column_mapping = planner_info.get("table_column_mapping", {})
             join_conditions = planner_info.get("join_conditions", [])
-            
-            # Get actual column names from the resolved data
-            source_tables = planner_info.get("source_table_name", [])
-            target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
-            
-            # Format table-column context
             table_column_context = self._format_table_column_context_from_planner(table_column_mapping)
-            
-            # Enhanced join context
             join_context = ""
             if join_conditions:
                 join_context = "\nVERIFIED JOIN CONDITIONS:\n"
                 for condition in join_conditions:
-                    # Use the actual field names from join conditions
-                    left_table = condition.get("left_table", "")
-                    right_table = condition.get("right_table", "")
-                    left_field = condition.get("left_field", "")
-                    right_field = condition.get("right_field", "")
+                    qualified_condition = condition.get("qualified_condition", "")
                     join_type = condition.get("join_type", "INNER")
-                    
-                    # Build qualified condition
-                    if left_table and right_table and left_field and right_field:
-                        qualified_condition = f"{left_table}.{left_field} = {right_table}.{right_field}"
-                    else:
-                        qualified_condition = condition.get("qualified_condition", "")
-                        
                     join_context += f"- {join_type} JOIN: {qualified_condition}\n"
-            
             prompt = f"""
-    You are an expert Azure SQL Server database engineer focusing on data transformation. I need you to create 
-    precise Azure SQL Server generation plan for a data transformation task.
+    You are an expert SQLite database engineer focusing on data transformation. I need you to create 
+    precise SQLite generation plan for a data transformation task.
 
-    ORIGINAL QUERY: "{query}"
+    ORIGINAL QUERY: "{planner_info.get("restructured_query", "")}"
 
-    SOURCE TABLES INFORMATION:
-    {source_tables}
-
-    TARGET TABLE INFORMATION:
-    {target_table}
-
-    JOIN CONDITIONS FROM PLANNER:
-    {join_conditions}
+    VERIFIED TABLE.COLUMN MAPPINGS:
+    {table_column_context}
 
     {join_context}
+
+    QUALIFIED FIELD INFORMATION (Use these exact references):
+    - Source Fields: {qualified_source_fields}
+    - Filtering Fields: {qualified_filtering_fields}
+    - Insertion Fields: {qualified_insertion_fields}
+    - Target Fields: {qualified_target_fields}
 
     CONTEXT INFORMATION:
     - Query Type: {planner_info.get("query_type", "SIMPLE_TRANSFORMATION")}
     - Source Tables: {planner_info.get("source_table_name", [])}
     - Target Table: {planner_info.get("target_table_name", [])}
-    - Insertion Fields: {planner_info.get("insertion_fields", [])}
-    - Target Fields: {planner_info.get("target_sap_fields", [])}
     - Key Mapping: {planner_info.get("key_mapping", [])}
 
-    Use this Template for the Azure SQL Server generation plan:
+    Use this Template for the SQLite generation plan:
     {template.get("plan", [])}
 
-    CRITICAL RULES FOR AZURE SQL:
-    1. For conditional multi-table lookups, use the actual column names provided in the join conditions
-    2. The target table is: {target_table}
-    3. Use the column names EXACTLY as they appear in the join_conditions
-    4. For the query type multi_table_conditional, the key field for joining should be taken from join_conditions
-    5. Common join fields in SAP tables: MATNR, PRODUCT, MaterialNumber, etc.
-    6. DO NOT invent column names like 'MaterialKey' - use the actual column names from join_conditions
-    7. For UPDATE operations with CASE WHEN EXISTS, use the proper join columns from the join_conditions
+    CRITICAL RULES:
+    1. Use ONLY the qualified table.column references provided above
+    2. Never invent or modify the table.column combinations
+    3. Follow the exact qualified field mappings for all operations
+    4. For JOIN operations, use the verified join conditions provided
+    5. All column references must be exactly as specified in the qualified fields
+    6. If you need to create a new column, use the ALTER TABLE statement with the exact qualified table.column reference
+    7. If you need to delete a column, use the ALTER TABLE statement with the exact qualified table.column reference
+    8. Do not create or delete columns unless explicitly mentioned in the prompt
+    9. Do not drop any tables or columns.
+    10. If a column is not said to be created, assume it already exists in the tables.
+    11. Do not create or delete tables.
+    12. Do not create transactions
 
     REQUIREMENTS:
-    1. Generate 10-20 detailed steps for Azure SQL Server query creation
-    2. Each step must reference the EXACT column names from the join conditions
+    1. Generate 10-20 detailed steps for SQL query creation
+    2. Each step must use the EXACT qualified table.column references from above
     3. Include specific T-SQL syntax examples in each step
-    4. For complex operations, reference the verified join conditions
-    5. Use TOP 1 instead of LIMIT for Azure SQL
+    4. Verify every table.column reference against the provided qualified fields
+    5. For complex operations, reference the verified join conditions
 
     Format:
     1. Step description using exact column references
@@ -519,30 +376,32 @@ class DMTool:
     3. T-SQL query template with exact column names from join_conditions
     4. Verification note confirming the column usage
 
-    EXAMPLE STEP FORMAT FOR YOUR QUERY:
-    "1. Check if materials exist in MARA_500 table
-    T-SQL operation: EXISTS check
-    Verification: Using the join field from join_conditions"
+    EXAMPLE STEP FORMAT:
+    "1. Select material data from source table
+    T-SQL operation: SELECT
+    T-SQL query template: SELECT MARA.MATNR, MARA.MTART FROM MARA
+    Verification: Using qualified fields MARA.MATNR and MARA.MTART from source fields list"
 
-    Remember: Use ONLY the column names that appear in the join_conditions - no invented columns!
+    Remember: Use ONLY the qualified table.column references provided - no modifications or additions!
+
+    Notes:
+    1. Use Alter table only when the prompt specifically mentions creation or deletion of a column. DO NOT use Alter for anything else
+    2. If User does not give to create a column then assume that the column already exists in the tables and there is not need to create a column.
+    3. If the prompt does not specify a column, do not include it in the query.
+    4. If we have Column given that exist in a table, then use that column in the query.
     """
+            response = self.llm.generate(prompt, temperature=0.3, max_tokens=1500)
             
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.1)
-            )
-            
-            if response and hasattr(response, "text"):
-                logger.info(f"Plan generated with proper column references")
-                return response.text.strip()
+            if response:
+                logger.info(f"Plan generated using qualified field references")
+                logger.info(f"Generated Plan:\n{response}")
+                return response.strip()
             else:
-                logger.warning("Invalid response from LLM in plan generation")
+                logger.warning("Invalid response from LLM in enhanced plan generation")
                 return self._generate_fallback_plan_with_qualified_fields(template, planner_info)
                 
         except Exception as e:
-            logger.error(f"Error in create_operation_plan: {e}")
+            logger.error(f"Error in enhanced create_sql_plan: {e}")
             return self._generate_fallback_plan_with_qualified_fields(template, planner_info)
 
     def _format_table_column_context_from_planner(self, table_column_mapping):
@@ -557,7 +416,6 @@ class DMTool:
                 context_parts.append(f"\nSOURCE TABLE '{table_name}':")
                 for col in columns:
                     context_parts.append(f"  {table_name}.{col}")
-            
             target_tables = table_column_mapping.get("target_tables", {})
             for table_name, columns in target_tables.items():
                 context_parts.append(f"\nTARGET TABLE '{table_name}':")
@@ -588,9 +446,9 @@ class DMTool:
             
         except Exception as e:
             logger.error(f"Error in fallback plan generation: {e}")
-            return "1. Generate basic SQL Server query\n2. Execute transformation"
+            return "1. Generate basic T-SQL query\n2. Execute transformation"
         
-    def _get_segment_name(self, segment_id, conn):
+    def _get_segment_name(self, segment_id,conn):
         cursor = conn.cursor()
         cursor.execute("SELECT segement_name FROM connection_segments WHERE segment_id = ?", (segment_id,))
         result = cursor.fetchone()
@@ -699,16 +557,19 @@ class DMTool:
                                 source_tables.append(table)
                         resolved_data["source_table_name"] = source_tables
 
-
-                planner_info = self._extract_planner_info(resolved_data)
                 
+                # planner_info = self._extract_planner_info(resolved_data)
+                planner_info = resolved_data
 
-                sql_plan = self._create_operation_plan(query, planner_info, template)
+                # sql_plan = self._create_operation_plan(planner_info["restructured_query"], planner_info, template)
                 
-
-                sql_query, sql_params = self.sql_generator.generate_sql(sql_plan, planner_info, template)
+                
+                sql_query, sql_params = self.sql_generator.generate_sql(planner_info, template,sql_plan=planner_info.get("transformation_plan", ""))
                 logger.info(f"Generated SQL query: {sql_query}")
-                result = self._execute_sql_query(sql_query, sql_params, planner_info)
+                result = self._execute_sql_query(sql_query, sql_params, planner_info,
+                object_id=object_id,
+                segment_id=segment_id,
+                project_id=project_id)
 
 
                 if isinstance(result, dict) and "error_type" in result:
@@ -825,6 +686,33 @@ class DMTool:
                 except:
                     pass
             return f"An error occurred: {e}", session_id
+        
+    def generate_preload_postload_report(self, target_table: str, session_id: Optional[str] = None) -> str:
+        """
+        Generate pre-load/post-load CSV report for a target table
+        
+        Parameters:
+        target_table (str): Target table name
+        session_id (str): Session ID for lineage tracking
+        
+        Returns:
+        str: Path to generated CSV file
+        """
+        try:
+            logger.info(f"Generating pre-load/post-load report for {target_table}")
+            
+            csv_path = generate_lineage_report(target_table, session_id)
+            
+            if csv_path:
+                logger.info(f"Report generated successfully: {csv_path}")
+                return csv_path
+            else:
+                logger.warning("Failed to generate report - no lineage data found")
+                return ""
+                
+        except Exception as e:
+            logger.error(f"Error generating report: {e}")
+            return ""
 
     def _is_multi_statement_query(self, sql_query):
         """Detect if SQL contains multiple statements"""
@@ -832,8 +720,15 @@ class DMTool:
             return False        
         statements = self.sql_executor.split_sql_statements(sql_query)
         return len(statements) > 1
+    
+    def create_session_id(self):
+        """ Create a new session ID for tracking transformations"""
+        context_manager = ContextualSessionManager()
+        session_id = context_manager.create_session()
+        logger.info(f"Created new session: {session_id}")
+        return session_id
 
-    def _execute_sql_query(self, sql_query, sql_params, planner_info):
+    def _execute_sql_query(self, sql_query, sql_params, planner_info, object_id=None, segment_id=None, project_id=None):
         """
         Execute SQL query using the SQLExecutor with multi-statement support
         
@@ -850,7 +745,11 @@ class DMTool:
         if self._is_multi_statement_query(sql_query):
             logger.info("Detected multi-statement query, using multi-query executor")
             return self.sql_executor.execute_multi_statement_query(
-                sql_query, sql_params, context_manager=ContextualSessionManager(),session_id=planner_info.get("session_id")
+                sql_query, sql_params, context_manager=ContextualSessionManager(),session_id=planner_info.get("session_id"),
+                object_id=object_id,
+                segment_id=segment_id,
+                project_id=project_id,
+                planner_info=planner_info
             )
         
 
@@ -869,31 +768,30 @@ class DMTool:
                 
             
             if operation_type == "INSERT":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info)
             elif operation_type == "UPDATE":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info)
             elif operation_type == "DELETE":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id,session_id=planner_info.get("session_id"),planner_info=planner_info)
             elif operation_type == "ALTER":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id,session_id=planner_info.get("session_id"),planner_info=planner_info)
             elif operation_type == "WITH":
                 if "INSERT INTO" in sql_query.upper():
-                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info)
                 elif "UPDATE" in sql_query.upper():
-                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info)
                 else:
 
-                    return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
+                    return self.sql_executor.execute_and_fetch_df(sql_query, sql_params,session_id=planner_info.get("session_id"))
             else:
-
                 return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
         elif not operation_type :
-            return self.sql_executor.execute_query(sql_query, sql_params,fetch_results=False)
+            return self.sql_executor.execute_query(sql_query, sql_params,fetch_results=False,planner_info=planner_info)
         elif query_type in ["JOIN_OPERATION", "CROSS_SEGMENT"]:
 
             if "INSERT INTO" in sql_query.upper() or "UPDATE" in sql_query.upper():
 
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,planner_info=planner_info)
             else:
 
                 return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
@@ -946,7 +844,7 @@ class DMTool:
             if target_table:
 
                 try:
-                    select_query = f"SELECT * FROM [{validate_sql_identifier(target_table)}]"
+                    select_query = f"SELECT * FROM {validate_sql_identifier(target_table)}"
                     target_data = self.sql_executor.execute_and_fetch_df(select_query)
                     
                     if isinstance(target_data, pd.DataFrame) and not target_data.empty:

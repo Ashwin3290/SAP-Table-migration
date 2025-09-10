@@ -74,7 +74,7 @@ class SQLGenerator:
         }
         return templates
     
-    def generate_sql(self, sql_plan, planner_info: Dict[str, Any],template: Dict[str, str]=None) -> Tuple[str, Dict[str, Any]]:
+    def generate_sql(self, planner_info: Dict[str, Any],template: Dict[str, str]=None, sql_plan: str=None) -> Tuple[str, Dict[str, Any]]:
         """Generate SQL query based on planner information using LLM for planning and generation
         
         Parameters:
@@ -152,7 +152,7 @@ class SQLGenerator:
         Generate Azure SQL query using LLM based on the plan
         """
         try:
-            # Extract all the context information
+
             query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
             source_tables = planner_info.get("source_table_name", [])
             insertion_fields = planner_info.get("insertion_fields", [])
@@ -162,24 +162,14 @@ class SQLGenerator:
             conditions = planner_info.get("extracted_conditions", {})
             original_query = planner_info.get("original_query", "")
             key_mapping = planner_info.get("key_mapping", [])
-            join_conditions = planner_info.get("join_conditions", [])
             
-            # Determine the actual join field from join_conditions
-            actual_join_field = "PRODUCT"  # Default
-            if join_conditions and len(join_conditions) > 0:
-                first_condition = join_conditions[0]
-                # Get the field from target table side
-                if first_condition.get("left_table") == "CurrentTargetTable" or first_condition.get("left_table") == target_table:
-                    actual_join_field = first_condition.get("left_field", "PRODUCT")
-                elif first_condition.get("right_table") == "CurrentTargetTable" or first_condition.get("right_table") == target_table:
-                    actual_join_field = first_condition.get("right_field", "PRODUCT")
-            
-            # Check if target table has data
+
             target_has_data = False
             target_data_samples = planner_info.get("target_data_samples", {})
             if isinstance(target_data_samples, pd.DataFrame) and not target_data_samples.empty:
                 target_has_data = True
             
+
             prompt = f"""
     You are an expert Azure SQL Server database engineer. Generate a precise Azure SQL query based on the following plan and information:
 
@@ -194,10 +184,12 @@ class SQLGenerator:
     CONTEXT INFORMATION:
     - Query Type: {query_type}
     - Source Tables: {source_tables}
+    - Insertion Fields: {insertion_fields}  
     - Target Table: {target_table}
     - Target Fields: {target_fields}
-    - Insertion Fields (to retrieve): {insertion_fields}
-    - Join Conditions: {json.dumps(join_conditions, indent=2)}
+    - Filtering Fields: {filtering_fields}
+    - Filtering Conditions: {json.dumps(conditions, indent=2)}
+    - Key Mapping: {json.dumps(key_mapping, indent=2)}
     - Target Table Has Data: {target_has_data}
 
     CRITICAL AZURE SQL REQUIREMENTS:
@@ -233,9 +225,9 @@ class SQLGenerator:
             if response and hasattr(response, "text"):
                 sql_query = response.text.strip()
                 
-                # Clean up the response
+
                 import re
-                sql_match = re.search(r"```(?:sql|tsql)\s*(.*?)\s*```", sql_query, re.DOTALL | re.IGNORECASE)
+                sql_match = re.search(r"```(?:sqlite|sql)\s*(.*?)\s*```", sql_query, re.DOTALL)
                 if sql_match:
                     sql_query = sql_match.group(1)
                 else:
@@ -249,44 +241,34 @@ class SQLGenerator:
                     sql_query = sql_query.replace("MaterialKey", actual_join_field)
                 
                 params = {}
+                
                 return sql_query.strip(), params
             else:
                 logger.warning("Invalid response from LLM in generate_sql_with_llm")
-                # Fallback query using actual column names
+                
+
                 if target_has_data and query_type != "VALIDATION_OPERATION":
-                    fallback = f"""
-        UPDATE {target_table}
-        SET {target_fields[0] if target_fields else 'MEINS'} = CASE
-        WHEN EXISTS (SELECT 1 FROM MARA_500 WHERE MATNR = {target_table}.{actual_join_field})
-        THEN (SELECT TOP 1 MEINS FROM MARA_500 WHERE MATNR = {target_table}.{actual_join_field})
-        WHEN EXISTS (SELECT 1 FROM MARA_700 WHERE MATNR = {target_table}.{actual_join_field})
-        THEN (SELECT TOP 1 MEINS FROM MARA_700 WHERE MATNR = {target_table}.{actual_join_field})
-        ELSE (SELECT TOP 1 MEINS FROM MARA WHERE MATNR = {target_table}.{actual_join_field})
-        END;"""
+
+                    if insertion_fields and target_fields:
+                        fallback = f"UPDATE {target_table} SET {target_fields[0]} = source.{insertion_fields[0]} FROM (SELECT {', '.join(insertion_fields)} FROM {source_tables[0]}) AS source WHERE {target_table}.{target_fields[0]} = source.{insertion_fields[0]}"
+                    else:
+                        fallback = f"UPDATE {target_table} SET field = 'value'"
+                elif query_type == "VALIDATION_OPERATION":
+
+                    fallback = f"SELECT * FROM {source_tables[0]}"
                 else:
-                    fallback = f"SELECT * FROM {source_tables[0] if source_tables else 'MARA'}"
-                    return fallback, {}
-                        
+
+                    if insertion_fields and target_fields:
+                        fallback = f"INSERT INTO {target_table} ({', '.join(target_fields)}) SELECT {', '.join(insertion_fields)} FROM {source_tables[0]}"
+                    else:
+                        fallback = f"SELECT * FROM {source_tables[0]}"
+                    
+                return fallback, {}
+            
         except Exception as e:
             logger.error(f"Error in generate_sql_with_llm: {e}")
             return "SELECT * FROM " + str(source_tables[0] if source_tables else "unknown_table"), {}
 
-### 3. Update the multi_table_conditional template in `query_templates.json`:
-
-# ```json
-# {
-#   "id": "multi_table_conditional",
-#   "prompt": "Check {field1} in {table1} and IF matching entries found, bring {field2} from {table1} ELSE check in {table2} and bring {field2} ELSE bring from {table3}",
-#   "query": "UPDATE {target_table} SET {target_field} = CASE WHEN EXISTS (SELECT 1 FROM {table1} WHERE MATNR = {target_table}.PRODUCT) THEN (SELECT TOP 1 {field2} FROM {table1} WHERE MATNR = {target_table}.PRODUCT) WHEN EXISTS (SELECT 1 FROM {table2} WHERE MATNR = {target_table}.PRODUCT) THEN (SELECT TOP 1 {field2} FROM {table2} WHERE MATNR = {target_table}.PRODUCT) ELSE (SELECT TOP 1 {field2} FROM {table3} WHERE MATNR = {target_table}.PRODUCT) END",
-#   "plan": [
-#     "1. Identify the target table and its key field (usually PRODUCT or similar)",
-#     "2. Identify the field to retrieve from source tables (usually MEINS or similar)",
-#     "3. Identify the three source tables to check in sequence",
-#     "4. Create a CASE expression with EXISTS checks using proper join fields",
-#     "5. Use TOP 1 for Azure SQL instead of LIMIT",
-#     "6. Prepare an UPDATE statement to update the target field"
-#   ]
-# }
     def _generate_simple_transformation(self, planner_info: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
         """Generate SQL for simple transformations
         
@@ -844,15 +826,15 @@ class SQLGenerator:
                 
 
                 if isinstance(value, list):
-                    placeholders = ["?" for j in range(len(value))]
+                    placeholders = [f":param_{i}_{j}" for j in range(len(value))]
                     where_parts.append(f"{field_ref} IN ({', '.join(placeholders)})")
                     
                     for j, val in enumerate(value):
                         params[f"param_{i}_{j}"] = val
                 else:
-                    where_parts.append(f"{field_ref} = ?")
+                    where_parts.append(f"{field_ref} = :{param_name}")
                     params[param_name] = value
-                            
+        
         if where_parts:
             return f"WHERE {' AND '.join(where_parts)}", params
         else:
@@ -1142,7 +1124,7 @@ class SQLGenerator:
 
     def analyze_and_fix_query(self, sql_query, sql_params, planner_info, max_attempts=3):
         """
-        Analyze a SQL query for Azure SQL compatibility issues and make multiple attempts to fix it
+        Analyze a SQL query for SQLite compatibility issues and make multiple attempts to fix it
         
         Parameters:
         sql_query (str): The initially generated SQL query
@@ -1155,13 +1137,9 @@ class SQLGenerator:
         """
         try:
 
-            if self._is_valid_sql_query(sql_query):
+            if self._is_valid_sqlite_query(sql_query):
                 return sql_query, sql_params, True
                 
-            
-
-            analysis = self._analyze_sql_query(sql_query, planner_info)
-            
             best_query = sql_query
             best_params = sql_params
             
@@ -1173,12 +1151,11 @@ class SQLGenerator:
                     best_query, 
                     sql_params, 
                     planner_info, 
-                    analysis, 
                     attempt
                 )
                 
 
-                if self._is_valid_sql_query(fixed_query):
+                if self._is_valid_sqlite_query(fixed_query):
                     return fixed_query, fixed_params, True
                     
 
@@ -1241,21 +1218,20 @@ class SQLGenerator:
     """
 
 
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.1)
+            llm= LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
             )
-            
+            response = llm.generate(prompt)
 
-            if response and hasattr(response, "text"):
-                return response.text.strip()
+            if response:
+                return response.strip()
             else:
                 return "Failed to analyze query"
                 
         except Exception as e:
-            logger.error(f"Error in _analyze_sql_query: {e}")
+            logger.error(f"Error in _analyze_sqlite_query: {e}")
             return f"Error analyzing query: {e}"
             
     def _fix_sql_query(self, sql_query, sql_params, planner_info, analysis, attempt_number):
@@ -1279,9 +1255,6 @@ class SQLGenerator:
 
     ORIGINAL SQL QUERY:
     {sql_query}
-
-    ANALYSIS OF ISSUES:
-    {analysis}
 
     FIX ATTEMPT: {attempt_number + 1}
 
@@ -1329,16 +1302,16 @@ class SQLGenerator:
     """
 
 
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.2)
+            llm= LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
             )
+            response = llm.generate(prompt)
             
 
-            if response and hasattr(response, "text"):
-                fixed_query = response.text.strip()
+            if response :
+                fixed_query = response.strip()
                 
 
                 import re
