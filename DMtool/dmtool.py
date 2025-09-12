@@ -428,6 +428,21 @@ class DMTool:
             logger.error(f"Error formatting table column context: {e}")
             return "Error formatting table column context"
 
+    def _find_affected_indexes(self, old_table,updated_table) -> List[str]:
+        """Identify indexes that may be affected by transformations"""
+        if len(old_table) == 0 and len(updated_table) != 0:
+            return updated_table.index.tolist()
+        min_len = min(len(old_table), len(updated_table))
+        old_hash = pd.util.hash_pandas_object(old_table.iloc[:min_len], index=False)
+        new_hash = pd.util.hash_pandas_object(updated_table.iloc[:min_len], index=False)
+
+        change_mask = old_hash != new_hash
+        changed_indexes = updated_table.index[:min_len][change_mask].tolist()
+        inserted_indexes = updated_table.index[min_len:].tolist()
+
+        return list(set(changed_indexes + inserted_indexes))
+
+
     def _generate_fallback_plan_with_qualified_fields(self, template, planner_info):
         """Generate fallback plan using qualified field information"""
         try:
@@ -481,7 +496,6 @@ class DMTool:
                 logger.error(f"Invalid query type: {type(query)}")
                 return "Query must be a non-empty string", session_id
 
-
             if not all(isinstance(x, int) for x in [object_id, segment_id, project_id]):
                 logger.error(
                     f"Invalid ID types: object_id={type(object_id)}, segment_id={type(segment_id)}, project_id={type(project_id)}"
@@ -503,7 +517,6 @@ class DMTool:
             resolved_data = process_query(
                 object_id, segment_id, project_id, query, session_id=session_id
             )
-            
 
             if not resolved_data:
                 logger.error("Failed to resolve query with planner")
@@ -562,8 +575,8 @@ class DMTool:
                 planner_info = resolved_data
 
                 # sql_plan = self._create_operation_plan(planner_info["restructured_query"], planner_info, template)
-                
-                
+                select_query = f"SELECT * FROM {validate_sql_identifier(target_table)}"
+                target_data_before = self.sql_executor.execute_and_fetch_df(select_query)
                 sql_query, sql_params = self.sql_generator.generate_sql(planner_info, template,sql_plan=planner_info.get("transformation_plan", ""))
                 logger.info(f"Generated SQL query: {sql_query}")
                 result = self._execute_sql_query(sql_query, sql_params, planner_info,
@@ -581,7 +594,7 @@ class DMTool:
                     logger.info(f"Processing multi-query result: {result.get('completed_statements', 0)} statements completed")
                     multi_result = self._handle_multi_query_result(result, planner_info, session_id)
                     
-                    if result.get("success") and len(multi_result) == 2:
+                    if result.get("success") and len(multi_result) > 2:
                         try:
                             context_manager = ContextualSessionManager()
                             transformation_data = {
@@ -601,10 +614,12 @@ class DMTool:
                                 "steps_completed": result.get("completed_statements", 0)
                             }
                             context_manager.add_transformation_record(session_id, transformation_data)
+                            target_data_after = self.sql_executor.execute_and_fetch_df(select_query)
+                            affected_indexes = self._find_affected_indexes(target_data_before,target_data_after)
                         except Exception as e:
                             logger.warning(f"Could not save transformation record for multi-query: {e}")
                     
-                    return multi_result[0], session_id
+                    return multi_result[0], affected_indexes
 
                 if "target_table_name" in resolved_data:
                     target_table = resolved_data["target_table_name"]
@@ -655,27 +670,30 @@ class DMTool:
                                 }
                                 
                                 context_manager.add_transformation_record(session_id, transformation_data)
+                                target_data_after = self.sql_executor.execute_and_fetch_df(select_query)
+                                affected_indexes = self._find_affected_indexes(target_data_before,target_data_after)
                                 
                             except Exception as e:
                                 logger.warning(f"Could not save transformation record: {e}")
 
-                            return target_data, session_id
+                            return target_data, affected_indexes
                         else:
 
                             empty_df = pd.DataFrame()
                             empty_df.attrs['message'] = f"Target table '{target_table}' is empty after transformation"
-                            return empty_df, session_id
+
+                            return empty_df, []
                             
                     except Exception as e:
 
-                        return  result, session_id
+                        return  result, []
                         
             except Exception as e:
                 logger.error(f"Error in process_sequential_query: {e}")
                 logger.error(traceback.format_exc())
                 if conn:
                     conn.close()
-                return f"An error occurred during processing: {e}", session_id
+                return f"An error occurred during processing: {e}", []
                         
 
         except Exception as e:
@@ -818,6 +836,8 @@ class DMTool:
                 # planner_info = self._extract_planner_info(resolved_data)
                 planner_info = resolved_data
                 # sql_plan = self._create_operation_plan(planner_info["restructured_query"], planner_info, template)
+                select_query = f"SELECT * FROM {validate_sql_identifier(target_table)}"
+                target_data_before = self.sql_executor.execute_and_fetch_df(select_query)
                 sql_query, sql_params = self.sql_generator.generate_sql(planner_info, template,sql_plan=planner_info.get("transformation_plan", ""))
                 logger.info(f"Generated SQL query: {sql_query}")
                 result = self._execute_sql_query(sql_query, sql_params, planner_info,
@@ -852,10 +872,12 @@ class DMTool:
                                 "steps_completed": result.get("completed_statements", 0)
                             }
                             context_manager.add_transformation_record(session_id, transformation_data)
+                            target_data_after = self.sql_executor.execute_and_fetch_df(select_query)
+                            affected_indexes = self._find_affected_indexes(target_data_before,target_data_after)
                         except Exception as e:
                             logger.warning(f"Could not save transformation record for multi-query: {e}")
                     
-                    return multi_result[0], session_id
+                    return multi_result[0], affected_indexes
 
                 if "selection_criteria_target_table" in resolved_data:
                     target_table = resolved_data["selection_criteria_target_table"]
@@ -903,27 +925,29 @@ class DMTool:
                                 }
                                 
                                 context_manager.add_transformation_record(session_id, transformation_data)
+                                target_data_after = self.sql_executor.execute_and_fetch_df(select_query)
+                                affected_indexes = self._find_affected_indexes(target_data_before,target_data_after)
                                 
                             except Exception as e:
                                 logger.warning(f"Could not save transformation record: {e}")
 
-                            return target_data, session_id
+                            return target_data, affected_indexes
                         else:
 
                             empty_df = pd.DataFrame()
                             empty_df.attrs['message'] = f"Target table '{target_table}' is empty after transformation"
-                            return empty_df, session_id
+                            return empty_df, []
                             
                     except Exception as e:
 
-                        return  result, session_id
+                        return  result, []
                         
             except Exception as e:
                 logger.error(f"Error in process_sequential_query: {e}")
                 logger.error(traceback.format_exc())
                 if conn:
                     conn.close()
-                return f"An error occurred during processing: {e}", session_id
+                return f"An error occurred during processing: {e}", []
                         
 
         except Exception as e:
@@ -936,86 +960,6 @@ class DMTool:
                     pass
             return f"An error occurred: {e}", session_id
 
-    def diff_dataframes(df1: pd.DataFrame, df2: pd.DataFrame, 
-                    key_columns: Optional[List[str]] = None) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Compare df1 (old) and df2 (new) and return indices of changed/new and removed rows.
-        
-        Args:
-            df1: Original DataFrame (old data)
-            df2: New DataFrame (new data)  
-            key_columns: List of column names to use as unique identifiers.
-                        If None, all columns are used (rows must match exactly).
-        
-        Returns:
-            - changed_indices: array of df2 indices for new/changed rows
-            - removed_indices: array of df1 indices for removed rows
-        """
-        
-        if key_columns is None:
-            # If no key columns specified, treat entire row as key
-            # Find rows in df2 that don't exist in df1
-            merged = df2.reset_index().merge(df1, how='left', indicator=True)
-            changed_mask = merged['_merge'] == 'left_only'
-            changed_indices = merged.loc[changed_mask, 'index'].values
-            
-            # Find rows in df1 that don't exist in df2
-            merged_removed = df1.reset_index().merge(df2, how='left', indicator=True)
-            removed_mask = merged_removed['_merge'] == 'left_only'
-            removed_indices = merged_removed.loc[removed_mask, 'index'].values
-            
-        else:
-            # Use specified key columns
-            value_columns = [col for col in df1.columns if col not in key_columns]
-            
-            # Reset index to track original positions
-            df1_indexed = df1.reset_index().rename(columns={'index': 'original_index_df1'})
-            df2_indexed = df2.reset_index().rename(columns={'index': 'original_index_df2'})
-            
-            # Get keys that exist in both dataframes
-            keys_df1 = df1_indexed[key_columns + ['original_index_df1']].drop_duplicates(subset=key_columns)
-            keys_df2 = df2_indexed[key_columns + ['original_index_df2']].drop_duplicates(subset=key_columns)
-            
-            # New rows: keys in df2 but not df1
-            new_keys = keys_df2.merge(keys_df1[key_columns], how='left', indicator=True)
-            new_indices = new_keys[new_keys['_merge'] == 'left_only']['original_index_df2'].values
-            
-            # Removed rows: keys in df1 but not df2
-            removed_keys = keys_df1.merge(keys_df2[key_columns], how='left', indicator=True)
-            removed_indices = removed_keys[removed_keys['_merge'] == 'left_only']['original_index_df1'].values
-            
-            # Changed rows: same keys but different values
-            if value_columns:
-                # Get common keys with their original indices
-                common_keys = keys_df1.merge(keys_df2, on=key_columns, how='inner')
-                
-                if not common_keys.empty:
-                    # Get full rows for comparison
-                    df1_common = df1_indexed.merge(common_keys[key_columns + ['original_index_df1']], on=key_columns)
-                    df2_common = df2_indexed.merge(common_keys[key_columns + ['original_index_df2']], on=key_columns)
-                    
-                    # Sort by key columns for proper comparison
-                    df1_common = df1_common.sort_values(key_columns).reset_index(drop=True)
-                    df2_common = df2_common.sort_values(key_columns).reset_index(drop=True)
-                    
-                    # Find rows where values differ
-                    changed_mask = pd.Series([False] * len(df1_common))
-                    for col in value_columns:
-                        changed_mask |= (df1_common[col] != df2_common[col])
-                    
-                    # Get df2 indices for changed rows
-                    updated_indices = df2_common.loc[changed_mask, 'original_index_df2'].values
-                else:
-                    updated_indices = np.array([])
-            else:
-                updated_indices = np.array([])
-            
-            # Combine new and updated indices
-            changed_indices = np.concatenate([new_indices, updated_indices])
-            
-        return np.sort(changed_indices), np.sort(removed_indices)
-
-    
     def _is_multi_statement_query(self, sql_query):
         """Detect if SQL contains multiple statements"""
         if not sql_query or not isinstance(sql_query, str):

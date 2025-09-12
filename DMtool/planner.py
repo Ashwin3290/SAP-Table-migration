@@ -426,7 +426,7 @@ class ClassificationEnhancer:
         }
     
     def enhance_classification_details(self, classification_details: Dict[str, Any], 
-                                     current_segment_id: int) -> Dict[str, Any]:
+                                     current_segment_id: int,is_selection_criteria: bool) -> Dict[str, Any]:
         """
         Main function to enhance classification details with fuzzy matching
         
@@ -446,9 +446,11 @@ class ClassificationEnhancer:
             columns_mentioned = classification_details.get("detected_elements", {}).get("columns_Mentioned", [])
             segments_mentioned = classification_details.get("detected_elements", {}).get("segments_mentioned", [])
             
-            segment_match_result = self._match_segments(segments_mentioned, current_segment_id)
+            if not is_selection_criteria:
+                segment_match_result = self._match_segments(segments_mentioned, current_segment_id)
+            else:
+                segment_match_result = {"matched_segments": segments_mentioned, "segment_target_tables": {}}
             
-
             table_match_result = self._match_tables(tables_mentioned)
             
 
@@ -491,7 +493,8 @@ class ClassificationEnhancer:
 def enhance_classification_before_processing(classification_details: Dict[str, Any], 
                                            current_segment_id: int,
                                            db_path: str = None,
-                                           segments_csv_path: str = "segments.csv") -> Dict[str, Any]:
+                                           segments_csv_path: str = "segments.csv",
+                                           is_selection_criteria=False) -> Dict[str, Any]:
     """
     Convenience function to enhance classification details
     
@@ -505,7 +508,7 @@ def enhance_classification_before_processing(classification_details: Dict[str, A
         Dict[str, Any]: Enhanced classification details
     """
     enhancer = ClassificationEnhancer(db_path, segments_csv_path)
-    return enhancer.enhance_classification_details(classification_details, current_segment_id)
+    return enhancer.enhance_classification_details(classification_details, current_segment_id, is_selection_criteria=is_selection_criteria)
 
 def classify_query_with_llm(query, target_table,context):
     """
@@ -730,8 +733,7 @@ PROMPT_TEMPLATES = {
        - Validate that the identified fields exist in the mentioned tables
     
     3. IMPORTANT: Provide table-qualified column references
-       - Instead of just "MATNR", provide "MARA.MATNR"
-       - Instead of just "PRODUCT", provide "t_74_table_name.PRODUCT"
+       - Instead of just "Column_name", provide "Table_name.Column_name"
     
     4. Generate a structured representation of the transformation logic:
        - JSON format showing the transformation flow
@@ -751,7 +753,7 @@ PROMPT_TEMPLATES = {
     {{
         "query_type": "SIMPLE_TRANSFORMATION",
         "source_table_name": [List of all source_tables],
-        "source_field_names": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
+        "source_field_names": [List of table.column],
         "filtering_fields": [List of table.column format for filtering],
         "insertion_fields": [List of table.column format for insertion],
         "target_sap_fields": [List of table.column format for target],
@@ -776,7 +778,7 @@ PROMPT_TEMPLATES = {
     CRITICAL FIELD IDENTIFICATION RULES:
 
     **insertion_fields**: These must contain SOURCE column names from SOURCE tables
-    - ✅ CORRECT: ["SOURCE_COL_X"] (actual column name in source table)
+    - ✅ CORRECT: ["SOURCE_COL_X"] (actual column in source table)
     - ❌ WRONG: ["TARGET_COL_Y"] (this belongs to target table)
     - Rule: insertion_fields = "What columns do I SELECT FROM the source table?"
 
@@ -846,7 +848,7 @@ PROMPT_TEMPLATES = {
     {{
         "query_type": "JOIN_OPERATION",
         "source_table_name": [List of all source_tables],
-        "source_field_names": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
+        "source_field_names": [List of table.column],
         "filtering_fields": [List of table.column format for filtering],
         "insertion_fields": [List of table.column format for insertion],
         "target_sap_fields": [List of table.column format for target],
@@ -940,7 +942,7 @@ PROMPT_TEMPLATES = {
     {{
         "query_type": "CROSS_SEGMENT",
         "source_table_name": [List of all source_tables],
-        "source_field_names": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
+        "source_field_names": [List of table.column],
         "filtering_fields": [List of table.column format for filtering],
         "insertion_fields": [List of table.column format for insertion],
         "target_sap_fields": [List of table.column format for target],
@@ -1061,8 +1063,9 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
 
             target_table = joined_df["table_name"].unique().tolist()
             if is_selection_criteria:
-                original_target_table = target_table
-                target_table = target_table+"_src"
+                original_target_table = target_table.copy()
+                target_table = [table_name+"_src" for table_name in target_table]
+            logger.info(f"Target table identified: {target_table}")
             if target_table and len(target_table) > 0:
                 target_df_sample = sql_executor.get_table_sample(target_table[0])
                 if isinstance(target_df_sample, dict) and "error_type" in target_df_sample:
@@ -1086,7 +1089,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         context = context_manager.get_context(session_id) if session_id else None
         query_type, classification_details = classify_query_with_llm(query,target_table, context)
         enhanced_classification = enhance_classification_before_processing(
-            classification_details, segment_id, db_path=os.environ.get('DB_PATH')
+            classification_details, segment_id, db_path=os.environ.get('DB_PATH'),is_selection_criteria=is_selection_criteria
         )
         classification_details = enhanced_classification
         classification_details["Transformation_context"] = context
@@ -1100,9 +1103,12 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             except Exception as e:
                 logger.warning(f"Error formatting target data sample: {e}")
                 
-
-        table_desc = joined_df[joined_df.columns.tolist()[:-1]]
-
+        if not is_selection_criteria:
+            table_desc = joined_df[joined_df.columns.tolist()[:-1]]
+        else:
+            table_desc = joined_df[joined_df.columns.tolist()[:-2]]
+            table_desc = table_desc.drop(columns=["source_field_name"])
+            
         formatted_prompt = prompt_template.format(
             question=query,
             table_desc=list(table_desc.itertuples(index=False)),
@@ -1133,7 +1139,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         parsed_data["query_type"] = query_type
         
 
-        parsed_data["target_table_name"] = joined_df["table_name"].unique().tolist()
+        parsed_data["target_table_name"] = target_table
         parsed_data["key_mapping"] = context_manager.get_key_mapping(session_id) if session_id else []
         parsed_data["visited_segments"] = visited_segments
         parsed_data["session_id"] = session_id
@@ -1178,9 +1184,9 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         else:
             results["key_mapping"] = parsed_data["key_mapping"]
         if is_selection_criteria:
-            source_table_name = joined_df[joined_df["target_sap_fields"].isin(results.get("target_sap_fields", []))]["table_name"].unique().tolist()
+            source_table_name = joined_df[joined_df["target_sap_field"].isin(results.get("target_sap_field", []))]["table_name"].unique().tolist()
             results["selection_criteria_source_table"] = source_table_name[0] if source_table_name and len(source_table_name)>0 else None
-            results["selection_criteria_target_field"] = results.get("target_sap_fields", [])[0] if results.get("target_sap_fields", []) else None
+            results["selection_criteria_target_field"] = results.get("target_sap_field", [])[0] if results.get("target_sap_field", []) else None
             results["selection_criteria_target_table"] = original_target_table[0] if original_target_table and len(original_target_table)>0 else None
 
         results["session_id"] = session_id
@@ -1945,9 +1951,9 @@ def fetch_data_by_ids(object_id, segment_id, project_id, conn):
             f.description,
             f.isMandatory,
             f.isKey,
-            f.source_table,
             r.source_field_name,
             r.target_sap_field,
+            r.source_table,
             s.table_name
         FROM connection_fields f
         LEFT JOIN (
