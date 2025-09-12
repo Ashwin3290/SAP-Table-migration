@@ -1009,7 +1009,7 @@ PROMPT_TEMPLATES = {
 }
 
 
-def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
+def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None, is_selection_criteria = False):
     """
     Process a query based on its classified type
     
@@ -1060,11 +1060,11 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         try:
 
             target_table = joined_df["table_name"].unique().tolist()
+            if is_selection_criteria:
+                original_target_table = target_table
+                target_table = target_table+"_src"
             if target_table and len(target_table) > 0:
-
                 target_df_sample = sql_executor.get_table_sample(target_table[0])
-                
-
                 if isinstance(target_df_sample, dict) and "error_type" in target_df_sample:
                     logger.warning(f"SQL-based target data sample retrieval failed, using fallback")
 
@@ -1094,27 +1094,11 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         logger.info(f"Classification details: {classification_details}")
 
         prompt_template = PROMPT_TEMPLATES.get(query_type, PROMPT_TEMPLATES["SIMPLE_TRANSFORMATION"])
-        
-
-        target_df_sample_str = "No current target data available"
         if target_df_sample:
             try:
                 target_df_sample_str = json.dumps(target_df_sample, indent=2)
             except Exception as e:
                 logger.warning(f"Error formatting target data sample: {e}")
-                
-
-        visited_segments_str = "No previously visited segments"
-        if visited_segments:
-            try:
-                formatted_segments = []
-                for seg_id, seg_info in visited_segments.items():
-                    formatted_segments.append(
-                        f"{seg_info.get('name')} (table: {seg_info.get('table_name')}, id: {seg_id})"
-                    )
-                visited_segments_str = "\n".join(formatted_segments)
-            except Exception as e:
-                logger.warning(f"Error formatting visited segments: {e}")
                 
 
         table_desc = joined_df[joined_df.columns.tolist()[:-1]]
@@ -1189,12 +1173,16 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         results = process_info(parsed_data, conn)
         
 
-        if query_type == "SIMPLE_TRANSFORMATION":
-
-            results = _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn)
+        if query_type == "SIMPLE_TRANSFORMATION":                
+            results = _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn,is_selection_criteria=is_selection_criteria)
         else:
             results["key_mapping"] = parsed_data["key_mapping"]
-        
+        if is_selection_criteria:
+            source_table_name = joined_df[joined_df["target_sap_fields"].isin(results.get("target_sap_fields", []))]["table_name"].unique().tolist()
+            results["selection_criteria_source_table"] = source_table_name[0] if source_table_name and len(source_table_name)>0 else None
+            results["selection_criteria_target_field"] = results.get("target_sap_fields", [])[0] if results.get("target_sap_fields", []) else None
+            results["selection_criteria_target_table"] = original_target_table[0] if original_target_table and len(original_target_table)>0 else None
+
         results["session_id"] = session_id
         results["query_type"] = query_type
         results["visited_segments"] = visited_segments
@@ -1215,7 +1203,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             except Exception as e:
                 logger.error(f"Error closing database connection: {e}")
 
-def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn):
+def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn,is_selection_criteria=False):
     """
     Handle key mapping specifically for simple transformations
     
@@ -1230,10 +1218,13 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
             for target_field in results["target_sap_fields"]:
                 target_field_filter = joined_df["target_sap_field"] == target_field
                 if target_field_filter.any() and joined_df[target_field_filter]["isKey"].values[0] == "True":
-
                     logger.info(f"Target field '{target_field}' is identified as a primary key")
+                    if is_selection_criteria:
 
-
+                        key_mapping = context_manager.add_key_mapping(
+                                session_id, target_field, joined_df[target_field_filter]["source_field_name"].values[0]
+                            )
+                        break
                     if results["insertion_fields"] and len(results["insertion_fields"]) > 0:
 
 
@@ -1339,7 +1330,6 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
                         logger.warning("No insertion fields found for key mapping")
                         key_mapping = context_manager.get_key_mapping(session_id)
                 else:
-
                     key_mapping = context_manager.get_key_mapping(session_id)
         except Exception as e:
             logger.error(f"Error processing key mapping: {e}")
@@ -1766,8 +1756,6 @@ class ContextualSessionManager:
                 return False
                 
             context_path = f"{self.storage_path}/{session_id}/context.json"
-            
-
             context = self.get_context(session_id)
             if not context:
                 context = {
@@ -1957,6 +1945,7 @@ def fetch_data_by_ids(object_id, segment_id, project_id, conn):
             f.description,
             f.isMandatory,
             f.isKey,
+            f.source_table,
             r.source_field_name,
             r.target_sap_field,
             s.table_name
@@ -2057,7 +2046,7 @@ def missing_values_handling(df):
         logger.error(f"Error in missing_values_handling: {e}")
         return df
 
-def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
+def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None, is_selection_criteria=False):
     """
     Process a query with context awareness and automatic query type detection
     
@@ -2096,7 +2085,8 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
             project_id, 
             query, 
             session_id, 
-            target_sap_fields
+            target_sap_fields,
+            is_selection_criteria
         )
     except Exception as e:
         logger.error(f"Error in process_query: {e}")

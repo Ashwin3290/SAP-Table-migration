@@ -7,7 +7,7 @@ import re
 import sqlite3
 import traceback
 from dotenv import load_dotenv
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 
 from DMtool.planner import process_query
 from DMtool.planner import (
@@ -457,6 +457,7 @@ class DMTool:
         else:
             logger.error(f"Segment ID {segment_id} not found in database")
             return None
+        
 
     def process_sequential_query(self, query, object_id, segment_id, project_id, session_id = None,is_selection_criteria = False):
         """
@@ -520,7 +521,6 @@ class DMTool:
                     "query": "SELECT {field} FROM {table} WHERE {filter_field} = '{filter_value}'",
                     "plan": ["1. Identify source and target", "2. Generate basic SQL query"]
                 }
-
             query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")
 
             session_id = resolved_data.get("session_id")
@@ -729,8 +729,292 @@ class DMTool:
         Returns:
         tuple: (generated_sql, result, session_id)
         """
-        return self.process_sequential_query(selection_criteria, object_id, segment_id, project_id, session_id=session_id,is_selection_criteria=True)
-    
+        is_selection_criteria = True
+        conn = None
+        try:
+            query = selection_criteria
+            if not query or not isinstance(query, str):
+                logger.error(f"Invalid query type: {type(query)}")
+                return "Query must be a non-empty string", session_id
+
+
+            if not all(isinstance(x, int) for x in [object_id, segment_id, project_id]):
+                logger.error(
+                    f"Invalid ID types: object_id={type(object_id)}, segment_id={type(segment_id)}, project_id={type(project_id)}"
+                )
+                return "Invalid ID types - must be integers", session_id
+            
+            context_manager = ContextualSessionManager()
+
+
+            if not session_id:
+                session_id = context_manager.create_session()
+                logger.info(f"Created new session: {session_id}")
+                
+
+            additional_source_tables = []
+
+
+            logger.info(f"Processing query: {query}")
+            resolved_data = process_query(
+                object_id, segment_id, project_id, query, session_id=session_id, is_selection_criteria=True
+            )
+            
+
+            if not resolved_data:
+                logger.error("Failed to resolve query with planner")
+                return "Failed to resolve query", session_id
+            
+
+            template = self.query_template_repo.find_matching_template(query)
+            logger.info(f"Found template: {template.get('id', 'None')} for query '{query}'")
+            if not template:
+                logger.error("No matching template found for query")
+
+                template = {
+                    "id": "fallback",
+                    "prompt": "Basic transformation",
+                    "query": "SELECT {field} FROM {table} WHERE {filter_field} = '{filter_value}'",
+                    "plan": ["1. Identify source and target", "2. Generate basic SQL query"]
+                }
+
+            query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")
+
+            session_id = resolved_data.get("session_id")
+
+
+            try:
+                conn = sqlite3.connect(os.environ.get('DB_PATH'))
+            except sqlite3.Error as e:
+                logger.error(f"Failed to connect to database: {e}")
+                return f"Database connection error: {e}", session_id
+
+            try:
+                resolved_data["original_query"] = query
+                
+
+                try:
+                    if "target_table_name" in resolved_data:
+                        target_table = resolved_data["target_table_name"]
+                        if isinstance(target_table, list) and len(target_table) > 0:
+                            target_table = target_table[0]
+                        target_table = validate_sql_identifier(target_table)
+                        resolved_data["target_data_samples"] = self.sql_executor.get_table_sample(target_table)
+                except Exception as e:
+                    logger.warning(f"Error getting target data samples: {e}")
+                    resolved_data["target_data_samples"] = pd.DataFrame()
+
+
+                if additional_source_tables:
+                    source_tables = resolved_data.get("source_table_name", [])
+                    if isinstance(source_tables, list):
+
+                        for table in additional_source_tables:
+                            if table not in source_tables:
+                                source_tables.append(table)
+                        resolved_data["source_table_name"] = source_tables
+
+                
+                # planner_info = self._extract_planner_info(resolved_data)
+                planner_info = resolved_data
+                # sql_plan = self._create_operation_plan(planner_info["restructured_query"], planner_info, template)
+                sql_query, sql_params = self.sql_generator.generate_sql(planner_info, template,sql_plan=planner_info.get("transformation_plan", ""))
+                logger.info(f"Generated SQL query: {sql_query}")
+                result = self._execute_sql_query(sql_query, sql_params, planner_info,
+                object_id=object_id,
+                segment_id=segment_id,
+                project_id=project_id,
+                is_selection_criteria=is_selection_criteria)
+
+
+                if isinstance(result, dict) and "error_type" in result:
+                    logger.error(f"SQL execution error: {result}")
+                    return f"SQL execution failed: {result.get('error_message', 'Unknown error')}", session_id
+
+                if isinstance(result, dict) and result.get("multi_query_result"):
+                    logger.info(f"Processing multi-query result: {result.get('completed_statements', 0)} statements completed")
+                    multi_result = self._handle_multi_query_result(result, planner_info, session_id)
+                    
+                    if result.get("success") and len(multi_result) == 2:
+                        try:
+                            context_manager = ContextualSessionManager()
+                            transformation_data = {
+                                "original_query": query,
+                                "query_type": "SELECTION_CRITERIA",
+                                "source_tables": planner_info.get("selection_criteria_source_table", []),
+                                "target_table": planner_info.get("selection_criteria_target_table", []),
+                                "fields_affected": planner_info.get("target_sap_field", []),
+                                "execution_result": {
+                                    "success": True,
+                                    "rows_affected": len(multi_result[0]) if isinstance(multi_result[0], pd.DataFrame) else 0,
+                                    "steps_completed": result.get("completed_statements", 0)
+                                },
+                                "steps_completed": result.get("completed_statements", 0)
+                            }
+                            context_manager.add_transformation_record(session_id, transformation_data)
+                        except Exception as e:
+                            logger.warning(f"Could not save transformation record for multi-query: {e}")
+                    
+                    return multi_result[0], session_id
+
+                if "selection_criteria_target_table" in resolved_data:
+                    target_table = resolved_data["selection_criteria_target_table"]
+                    if isinstance(target_table, list) and len(target_table) > 0:
+                        target_table = target_table[0]
+                segment_name = self._get_segment_name(segment_id, conn)
+                if segment_name:
+                    context_manager.add_segment(
+                        session_id,
+                        segment_name,
+                        planner_info["target_table_name"],
+                    )
+
+                if target_table and query_type in ["SIMPLE_TRANSFORMATION", "JOIN_OPERATION", "CROSS_SEGMENT", "AGGREGATION_OPERATION"]:
+                    try:
+
+                        select_query = f"SELECT * FROM [{validate_sql_identifier(target_table)}]"
+                        target_data = self.sql_executor.execute_and_fetch_df(select_query)
+                        
+                        if isinstance(target_data, pd.DataFrame) and not target_data.empty:
+
+                            rows_affected = len(target_data)
+                            non_null_columns = target_data.dropna(axis=1, how='all').columns.tolist()
+                            
+                            target_data.attrs['transformation_summary'] = {
+                                'rows': rows_affected,
+                                'populated_fields': non_null_columns,
+                                'target_table': target_table,
+                                'query_type': query_type
+                            }
+                            try:
+                                context_manager = ContextualSessionManager()
+                                transformation_data = {
+                                    "original_query": query,
+                                    "query_type": "SELECTION_CRITERIA",
+                                    "source_tables": planner_info.get("selection_criteria_source_table", []),
+                                    "target_table": planner_info.get("selection_criteria_target_table", []),
+                                    "fields_affected": planner_info.get("target_sap_field", []),
+                                    "execution_result": {
+                                        "success": True,
+                                        "rows_affected": len(multi_result[0]) if isinstance(multi_result[0], pd.DataFrame) else 0,
+                                        "steps_completed": result.get("completed_statements", 0)
+                                    },
+                                    "steps_completed": result.get("completed_statements", 0)
+                                }
+                                
+                                context_manager.add_transformation_record(session_id, transformation_data)
+                                
+                            except Exception as e:
+                                logger.warning(f"Could not save transformation record: {e}")
+
+                            return target_data, session_id
+                        else:
+
+                            empty_df = pd.DataFrame()
+                            empty_df.attrs['message'] = f"Target table '{target_table}' is empty after transformation"
+                            return empty_df, session_id
+                            
+                    except Exception as e:
+
+                        return  result, session_id
+                        
+            except Exception as e:
+                logger.error(f"Error in process_sequential_query: {e}")
+                logger.error(traceback.format_exc())
+                if conn:
+                    conn.close()
+                return f"An error occurred during processing: {e}", session_id
+                        
+
+        except Exception as e:
+            logger.error(f"Outer error in process_sequential_query: {e}")
+            logger.error(traceback.format_exc())
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
+            return f"An error occurred: {e}", session_id
+
+    def diff_dataframes(df1: pd.DataFrame, df2: pd.DataFrame, 
+                    key_columns: Optional[List[str]] = None) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Compare df1 (old) and df2 (new) and return indices of changed/new and removed rows.
+        
+        Args:
+            df1: Original DataFrame (old data)
+            df2: New DataFrame (new data)  
+            key_columns: List of column names to use as unique identifiers.
+                        If None, all columns are used (rows must match exactly).
+        
+        Returns:
+            - changed_indices: array of df2 indices for new/changed rows
+            - removed_indices: array of df1 indices for removed rows
+        """
+        
+        if key_columns is None:
+            # If no key columns specified, treat entire row as key
+            # Find rows in df2 that don't exist in df1
+            merged = df2.reset_index().merge(df1, how='left', indicator=True)
+            changed_mask = merged['_merge'] == 'left_only'
+            changed_indices = merged.loc[changed_mask, 'index'].values
+            
+            # Find rows in df1 that don't exist in df2
+            merged_removed = df1.reset_index().merge(df2, how='left', indicator=True)
+            removed_mask = merged_removed['_merge'] == 'left_only'
+            removed_indices = merged_removed.loc[removed_mask, 'index'].values
+            
+        else:
+            # Use specified key columns
+            value_columns = [col for col in df1.columns if col not in key_columns]
+            
+            # Reset index to track original positions
+            df1_indexed = df1.reset_index().rename(columns={'index': 'original_index_df1'})
+            df2_indexed = df2.reset_index().rename(columns={'index': 'original_index_df2'})
+            
+            # Get keys that exist in both dataframes
+            keys_df1 = df1_indexed[key_columns + ['original_index_df1']].drop_duplicates(subset=key_columns)
+            keys_df2 = df2_indexed[key_columns + ['original_index_df2']].drop_duplicates(subset=key_columns)
+            
+            # New rows: keys in df2 but not df1
+            new_keys = keys_df2.merge(keys_df1[key_columns], how='left', indicator=True)
+            new_indices = new_keys[new_keys['_merge'] == 'left_only']['original_index_df2'].values
+            
+            # Removed rows: keys in df1 but not df2
+            removed_keys = keys_df1.merge(keys_df2[key_columns], how='left', indicator=True)
+            removed_indices = removed_keys[removed_keys['_merge'] == 'left_only']['original_index_df1'].values
+            
+            # Changed rows: same keys but different values
+            if value_columns:
+                # Get common keys with their original indices
+                common_keys = keys_df1.merge(keys_df2, on=key_columns, how='inner')
+                
+                if not common_keys.empty:
+                    # Get full rows for comparison
+                    df1_common = df1_indexed.merge(common_keys[key_columns + ['original_index_df1']], on=key_columns)
+                    df2_common = df2_indexed.merge(common_keys[key_columns + ['original_index_df2']], on=key_columns)
+                    
+                    # Sort by key columns for proper comparison
+                    df1_common = df1_common.sort_values(key_columns).reset_index(drop=True)
+                    df2_common = df2_common.sort_values(key_columns).reset_index(drop=True)
+                    
+                    # Find rows where values differ
+                    changed_mask = pd.Series([False] * len(df1_common))
+                    for col in value_columns:
+                        changed_mask |= (df1_common[col] != df2_common[col])
+                    
+                    # Get df2 indices for changed rows
+                    updated_indices = df2_common.loc[changed_mask, 'original_index_df2'].values
+                else:
+                    updated_indices = np.array([])
+            else:
+                updated_indices = np.array([])
+            
+            # Combine new and updated indices
+            changed_indices = np.concatenate([new_indices, updated_indices])
+            
+        return np.sort(changed_indices), np.sort(removed_indices)
+
     
     def _is_multi_statement_query(self, sql_query):
         """Detect if SQL contains multiple statements"""

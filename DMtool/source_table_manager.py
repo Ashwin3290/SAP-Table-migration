@@ -107,112 +107,6 @@ class EnhancedSourceTableManager:
             'last_sync': None,
             'last_lineage_capture': None
         }
-    
-    def filter_src(self, target_table: str, planner_info: Dict[str, Any]):
-        """
-        Filter the source table to only keep rows that have matching values 
-        in the target table based on the filtering column from the query
-        
-        Parameters:
-        target_table (str): Target table name
-        planner_info (Dict): Information from the planner including filtering conditions
-        
-        Returns:
-        Dict: Results of the filtering operation
-        """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        src_table = f"{target_table}_src"
-        
-        try:
-            result = {
-                "filter_successful": False,
-                "records_before": 0,
-                "records_after": 0,
-                "records_removed": 0,
-                "error": None,
-                "query_executed": "",
-                "filter_column": ""
-            }
-            
-            cursor.execute("""
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name=?
-            """, (src_table,))
-            
-            if not cursor.fetchone():
-                result["error"] = f"Source table {src_table} does not exist"
-                return result
-            
-            cursor.execute(f"SELECT COUNT(*) FROM {src_table}")
-            records_before = cursor.fetchone()[0]
-            result["records_before"] = records_before
-            
-            target_sap_fields = planner_info.get("target_sap_fields", [])
-            if not target_sap_fields:
-                result["error"] = "No target_sap_fields found in planner_info"
-                return result
-            
-            filtering_fields = planner_info.get("filtering_fields", [])
-            if not filtering_fields:
-                result["error"] = "No filtering fields found in query"
-                return result
-            
-            filter_field = filtering_fields[0]
-            clean_filter_column = filter_field.split('.')[-1] if '.' in filter_field else filter_field
-            result["filter_column"] = clean_filter_column
-            
-            clean_target_fields = []
-            for field in target_sap_fields:
-                clean_field = field.split('.')[-1] if '.' in field else field
-                clean_target_fields.append(clean_field)
-            
-            if clean_filter_column not in clean_target_fields:
-                result["error"] = f"Filter column '{clean_filter_column}' not found in target fields: {clean_target_fields}"
-                return result
-            
-            filter_query = f"""
-            DELETE FROM {src_table}
-            WHERE {clean_filter_column} NOT IN (
-                SELECT DISTINCT {clean_filter_column} 
-                FROM {target_table} 
-                WHERE {clean_filter_column} IS NOT NULL
-            )
-            """
-            
-            result["query_executed"] = filter_query
-            
-            cursor.execute(filter_query)
-            records_removed = cursor.rowcount
-            
-            cursor.execute(f"SELECT COUNT(*) FROM {src_table}")
-            records_after = cursor.fetchone()[0]
-            
-            conn.commit()
-            
-            result["filter_successful"] = True
-            result["records_after"] = records_after
-            result["records_removed"] = records_removed
-            
-            logger.info(f"Selection criteria: filtered {src_table} on column '{clean_filter_column}' from {records_before} to {records_after} records ({records_removed} removed)")
-            
-            return result
-            
-        except sqlite3.Error as e:
-            conn.rollback()
-            logger.error(f"SQLite error in filter_src: {e}")
-            result["error"] = f"SQLite error: {str(e)}"
-            return result
-            
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"Error in filter_src: {e}")
-            result["error"] = f"Error: {str(e)}"
-            return result
-            
-        finally:
-            conn.close()
-
 
     def handle_query_execution(self, query: str, target_table: str, planner_info: Dict[str, Any],
                               params: Optional[Dict] = None, 
@@ -255,18 +149,6 @@ class EnhancedSourceTableManager:
         has_transformation = self._has_transformation(query)
         result["has_transformation"] = has_transformation
 
-        if is_selection_criteria:
-            logger.info("Query marked as selection criteria")
-            has_transformation = False 
-            result.update(self.filter_src(target_table, planner_info))
-            result["has_transformation"] = has_transformation
-            result["reason"] = "Selection criteria applied to source table"
-
-        # 2. Handle source table sync (for non-transformations)
-        if self.sync_enabled and not is_selection_criteria:
-            sync_result = self._handle_source_table_sync(query, target_table, params, main_execution_successful)
-            result.update(sync_result)
-        
         # 3. Handle lineage tracking (especially for transformations)
         if self.lineage_enabled and planner_info:
             lineage_result = self._capture_column_lineage(query, target_table, planner_info, session_id)

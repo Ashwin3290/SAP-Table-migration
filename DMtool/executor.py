@@ -170,7 +170,31 @@ class SQLExecutor:
             if conn:
                 conn.close()
 
-    
+    def sync_src_to_target(self, target_table:str):
+        """
+        Sync source table to target table
+        Parameters:
+        target_table (str): Name of the target table
+        Returns:
+        bool: True if sync was successful, False otherwise
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            sync_query = f"""
+            INSERT INTO {target_table}
+            SELECT * FROM {target_table}_src
+            """
+            cursor.execute(sync_query)
+            conn.commit()
+            logger.info(f"Successfully synced data from {target_table}_src to {target_table}")
+            return True
+        except sqlite3.Error as e:
+            logger.error(f"SQLite error during sync: {e}")
+            if conn:
+                conn.rollback()
+            return False
 
     def execute_and_fetch_df(self, query: str, params: Optional[Dict[str, Any]] = None) -> Union[pd.DataFrame, Dict[str, Any]]:
         """
