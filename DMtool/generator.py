@@ -3,13 +3,12 @@ import json
 import re
 import sqlite3
 import pandas as pd
-from google import genai
-from google.genai import types
 import traceback
 import os
 from typing import Dict, List, Any, Optional, Union, Tuple
 
 from DMtool.query_analyzer import SQLiteQueryAnalyzer
+from DMtool.llm_config import LLMManager
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +75,7 @@ class SQLGenerator:
         }
         return templates
     
-    def generate_sql(self, sql_plan, planner_info: Dict[str, Any],template: Dict[str, str]=None) -> Tuple[str, Dict[str, Any]]:
+    def generate_sql(self, planner_info: Dict[str, Any],template: Dict[str, str]=None, sql_plan: str=None) -> Tuple[str, Dict[str, Any]]:
         """Generate SQL query based on planner information using LLM for planning and generation
         
         Parameters:
@@ -181,12 +180,12 @@ class SQLGenerator:
 
             prompt = f"""
     You are an expert SQLite database engineer focusing on data transformation operations. I need you to generate 
-    precise SQLite query for a data transformation task based on the following plan and information:
+    precise SQLite query for a data transformation task based on the following information:
 
-    ORIGINAL QUERY: "{original_query}"
+    ORIGINAL QUERY: "{planner_info.get("restructured_query", original_query)}"
 
-    SQLite GENERATION PLAN:
-    {plan}
+    {f"""SQLite GENERATION PLAN:
+    {plan}""" if plan else "Follow the original query in detail and do not skip any steps and any filtering conditions."}
 
     Use the given template to generate the SQLite Query:
     {template}
@@ -224,6 +223,9 @@ class SQLGenerator:
     7. If insertion fields are requested, make sure ONLY they are included in the INSERT/UPDATE
     8. Properly handle key fields for matching records in UPDATE operations
     9. Return ONLY the final SQL query with no explanations or markdown formatting
+    10. Follow the plan step-by-step and do not skip any steps
+    11. Do not skip any filtering conditions
+    12. 
 
     CRITICAL SQLite-SPECIFIC SYNTAX:
     - SQLite does not support RIGHT JOIN or FULL JOIN (use LEFT JOIN with table order swapped instead)
@@ -231,38 +233,19 @@ class SQLGenerator:
     - SQLite UPDATE with JOIN requires FROM clause (different from standard SQL)
     - SQLite has no BOOLEAN type (use INTEGER 0/1)
     - For UPDATE with data from another table, use: UPDATE target SET col = subquery.col FROM (SELECT...) AS subquery WHERE target.key = subquery.key
-
-    EXAMPLES:
-    - For "Bring Material Number with Material Type = ROH from MARA Table" with empty target table:
-    INSERT INTO target_table (MATNR)
-    SELECT MATNR FROM MARA
-    WHERE MTART = 'ROH'
-    Note: MTART is filtering field (WHERE clause), MATNR is insertion field (SELECT/INSERT)
-
-    - For "Bring Material Number with Material Type = ROH from MARA Table" with existing target data:
-    UPDATE target_table
-    SET MATNR = source.MATNR
-    FROM (SELECT MATNR FROM MARA WHERE MTART = 'ROH') AS source
-    WHERE target_table.MATNR = source.MATNR
-    Note: MTART is filtering field (WHERE clause), MATNR is insertion field (SET clause)
-
-    - For "Validate material numbers in MARA":
-    SELECT MATNR,
-    CASE WHEN MATNR IS NULL THEN 'Invalid' ELSE 'Valid' END AS validation_result
-    FROM MARA
     """
         
 
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.1)
+            llm= LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
             )
             
+            response = llm.generate(prompt, temperature=0.05, max_tokens=500)
 
-            if response and hasattr(response, "text"):
-                sql_query = response.text.strip()
+            if response :
+                sql_query = response.strip()
                 
 
                 import re
@@ -1175,22 +1158,15 @@ class SQLGenerator:
             if self._is_valid_sqlite_query(sql_query):
                 return sql_query, sql_params, True
                 
-            
-
-            analysis = self._analyze_sqlite_query(sql_query, planner_info)
-            
             best_query = sql_query
             best_params = sql_params
             
 
             for attempt in range(max_attempts):
-                
-
                 fixed_query, fixed_params = self._fix_sqlite_query(
                     best_query, 
                     sql_params, 
                     planner_info, 
-                    analysis, 
                     attempt
                 )
                 
@@ -1202,10 +1178,6 @@ class SQLGenerator:
                 if self._compare_query_quality(fixed_query, best_query, planner_info):
                     best_query = fixed_query
                     best_params = fixed_params
-                    
-
-                if attempt < max_attempts - 1:
-                    analysis = self._analyze_sqlite_query(fixed_query, planner_info)
                     
 
             logger.warning(f"Could not generate a perfectly valid query after {max_attempts} attempts")
@@ -1258,16 +1230,15 @@ class SQLGenerator:
     """
 
 
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.1)
+            llm= LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
             )
-            
+            response = llm.generate(prompt)
 
-            if response and hasattr(response, "text"):
-                return response.text.strip()
+            if response:
+                return response.strip()
             else:
                 return "Failed to analyze query"
                 
@@ -1275,7 +1246,7 @@ class SQLGenerator:
             logger.error(f"Error in _analyze_sqlite_query: {e}")
             return f"Error analyzing query: {e}"
             
-    def _fix_sqlite_query(self, sql_query, sql_params, planner_info, analysis, attempt_number):
+    def _fix_sqlite_query(self, sql_query, sql_params, planner_info, attempt_number):
         """
         Fix a SQL query based on analysis
         
@@ -1292,13 +1263,10 @@ class SQLGenerator:
         try:
 
             prompt = f"""
-    You are an expert SQLite database engineer. Fix the following SQL query based on the analysis.
+    You are an expert SQLite database engineer. Fix the following SQL query along with the issue that is happening
 
     ORIGINAL SQL QUERY:
     {sql_query}
-
-    ANALYSIS OF ISSUES:
-    {analysis}
 
     FIX ATTEMPT: {attempt_number + 1}
 
@@ -1347,16 +1315,16 @@ class SQLGenerator:
     """
 
 
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.2)
+            llm= LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
             )
+            response = llm.generate(prompt)
             
 
-            if response and hasattr(response, "text"):
-                fixed_query = response.text.strip()
+            if response :
+                fixed_query = response.strip()
                 
 
                 import re

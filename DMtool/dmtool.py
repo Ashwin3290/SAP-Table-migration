@@ -7,9 +7,7 @@ import re
 import sqlite3
 import traceback
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List, Tuple
 
 from DMtool.planner import process_query
 from DMtool.planner import (
@@ -19,6 +17,8 @@ from DMtool.planner import ContextualSessionManager
 from DMtool.generator import SQLGenerator
 from DMtool.executor import SQLExecutor
 from DMtool.logging_config import setup_logging
+from DMtool.llm_config import LLMManager
+from DMtool.source_table_manager import generate_lineage_report
 
 setup_logging(log_to_file=True, log_to_console=True)
 
@@ -46,11 +46,15 @@ class QueryTemplateRepository:
         """
         self.template_file = template_file
         self.templates = self._load_templates()
-        api_key = os.environ.get("GEMINI_API_KEY")
+        api_key = os.environ.get("API_KEY") or os.environ.get("GEMINI_API_KEY")
         if not api_key:
             logger.error("GEMINI_API_KEY not found in environment variables")
             raise APIError("Gemini API key not configured")
-        self.client = genai.Client(api_key=api_key)
+        self.llm = LLMManager(
+            provider="google",
+            model="gemini/gemini-2.5-flash",
+            api_key=api_key
+        )
         
     def _load_templates(self):
         """
@@ -123,18 +127,12 @@ class QueryTemplateRepository:
     Template ID:"""
 
             try:
-
-                from google.genai import types
                 
-                response = self.client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=llm_prompt,
-                    config=types.GenerateContentConfig(temperature=0.1)
-                )
+                response = self.llm.generate(llm_prompt, temperature=0.05, max_tokens=50)
                 
-                if response and hasattr(response, "text"):
+                if response :
 
-                    template_id = response.text.strip().strip('"').strip("'").lower()
+                    template_id = response.strip().strip('"').strip("'").lower()
                     
 
                     best_match = None
@@ -165,105 +163,6 @@ class QueryTemplateRepository:
             logger.error(f"Error finding matching template: {e}")
             return None    
 
-class ErrorRecoveryManager:
-    """Manages error analysis and targeted retry logic"""
-    
-    def __init__(self):
-        self.max_retries = 2
-        self.retry_history = {}
-    
-    def analyze_error_stage(self, error_result: Dict[str, Any], sql_query: str = None) -> str:
-        """
-        Analyze where the error occurred and determine retry stage
-        
-        Returns:
-        - "PLANNER" - Retry from query classification/planning
-        - "GENERATOR" - Retry from SQL generation only  
-        - "EXECUTOR" - Retry execution with fixes
-        - "FATAL" - Cannot recover
-        """
-        
-        if not isinstance(error_result, dict) or "error_type" not in error_result:
-            return "FATAL"
-        
-        error_type = error_result.get("error_type", "")
-        error_message = error_result.get("error_message", "").lower()
-        
-        # Database/Table/Column issues - retry from PLANNER (re-analyze query)
-        if any(indicator in error_message for indicator in [
-            "no such table", "table does not exist", "no such column", 
-            "column not found", "invalid table", "table not found"
-        ]):
-            return "PLANNER"
-        
-        # SQL Syntax issues - retry from GENERATOR (regenerate SQL)
-        if any(indicator in error_message for indicator in [
-            "syntax error", "near", "unexpected token", "sql error",
-            "invalid sql", "parse error", "malformed"
-        ]):
-            return "GENERATOR"
-        
-        # Execution/Runtime issues - retry EXECUTOR with fixes
-        if any(indicator in error_message for indicator in [
-            "connection", "timeout", "lock", "busy", "constraint"
-        ]):
-            return "EXECUTOR"
-        
-        # Variable/Code issues - retry from GENERATOR
-        if any(indicator in error_message for indicator in [
-            "nonetype", "not iterable", "attribute error", "key error"
-        ]):
-            return "GENERATOR"
-        
-        return "FATAL"
-    
-    def create_retry_prompt_addition(self, stage: str, error_result: Dict[str, Any], 
-                                   attempt_number: int) -> str:
-        """Create additional prompt context for retry attempts"""
-        
-        error_msg = error_result.get("error_message", "")
-        
-        if stage == "PLANNER":
-            return f"""
-RETRY ATTEMPT #{attempt_number} - QUERY ANALYSIS CORRECTION:
-Previous attempt failed with error: {error_msg}
-
-SPECIFIC INSTRUCTIONS FOR THIS RETRY:
-- Double-check all table names exist in the database schema
-- Verify all mentioned columns are available in their respective tables  
-- Use only validated table and column names from the enhanced matching results
-- If tables/columns don't exist, suggest alternatives or indicate data unavailability
-- Pay extra attention to table name formatting (no spaces, correct suffixes)
-"""
-        
-        elif stage == "GENERATOR":
-            return f"""
-RETRY ATTEMPT #{attempt_number} - SQL GENERATION CORRECTION:
-Previous SQL generation failed with error: {error_msg}
-
-SPECIFIC INSTRUCTIONS FOR THIS RETRY:
-- Generate simpler, more conservative SQL syntax
-- Avoid complex joins if column validation shows issues
-- Use proper SQLite syntax (no RIGHT JOIN, use IFNULL not ISNULL)
-- Quote table names with spaces using double quotes
-- For DDL operations (ALTER/DROP), don't try to fetch results
-- Validate column existence before including in SELECT/UPDATE clauses
-"""
-        
-        elif stage == "EXECUTOR":
-            return f"""
-RETRY ATTEMPT #{attempt_number} - EXECUTION OPTIMIZATION:
-Previous execution failed with error: {error_msg}
-
-SPECIFIC INSTRUCTIONS FOR THIS RETRY:
-- Generate more robust SQL with better error handling
-- Add NULL checks and COALESCE where appropriate
-- Use simpler table aliases and join conditions
-- Avoid operations on non-existent or empty tables
-"""
-        
-        return ""
-
 class DMTool:
     """SQLite-based DMTool for optimized data transformations using direct SQLite queries"""
 
@@ -271,13 +170,16 @@ class DMTool:
         """Initialize the DMToolSQL instance"""
         try:
 
-            api_key = os.environ.get("GEMINI_API_KEY")
+            api_key = os.environ.get("API_KEY") or os.environ.get("GEMINI_API_KEY")
             if not api_key:
                 logger.error("GEMINI_API_KEY not found in environment variables")
                 raise APIError("Gemini API key not configured")
 
-            self.client = genai.Client(api_key=api_key)
- 
+            self.llm = LLMManager(
+                provider="google",
+                model="gemini/gemini-2.5-flash",
+                api_key=api_key
+            )
 
             self.sql_generator = SQLGenerator()
             self.sql_executor = SQLExecutor()
@@ -317,17 +219,19 @@ class DMTool:
                 "source_table_name": resolved_data.get("source_table_name", []),
                 "target_table_name": resolved_data.get("target_table_name", []),
 
-                "source_field_names": resolved_data.get("source_field_names", []),
-                "target_sap_fields": resolved_data.get("target_sap_fields", []),
-                "filtering_fields": resolved_data.get("filtering_fields", []),
-                "insertion_fields": resolved_data.get("insertion_fields", []),
+                "source_field_names": resolved_data.get("qualified_source_fields", []),
+                "target_sap_fields": resolved_data.get("qualified_target_fields", []),
+                "filtering_fields": resolved_data.get("qualified_filtering_fields", []),
+                "insertion_fields": resolved_data.get("qualified_insertion_fields", []),
 
                 "original_query": resolved_data.get("original_query", ""),
                 "restructured_query": resolved_data.get("Resolved_query", ""),
 
                 "session_id": resolved_data.get("session_id", ""),
                 "key_mapping": resolved_data.get("key_mapping", []),
-
+                "table_column_mapping": resolved_data.get("table_column_mapping", {}),
+                "transformation_context": resolved_data.get("transformation_context", ""),
+                "transformation_plan": resolved_data.get("transformation_plan", ""),
                 "query_type": resolved_data.get("query_type", "SIMPLE_TRANSFORMATION"),
             }
             
@@ -400,115 +304,149 @@ class DMTool:
             }
             return minimal_context
 
-    def _create_operation_plan(self, query, planner_info: Dict[str, Any],template: Dict[str, Any]) -> str:
+    def _create_operation_plan(self, query, planner_info: Dict[str, Any], template: Dict[str, Any]) -> str:
         """
-        Use LLM to create a detailed plan for SQLite query generation
-        
-        Parameters:
-        query (str): Original natural language query
-        planner_info (Dict): Information extracted by the planner
-        
-        Returns:
-        str: Step-by-step SQLite generation plan
+        Use LLM to create a detailed plan for SQLite query generation using enhanced planner info
         """
         try:
-
-            query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
-            source_tables = planner_info.get("source_table_name", [])
-            source_fields = planner_info.get("source_field_names", [])
-            target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
-            target_fields = planner_info.get("target_sap_fields", [])
-            filtering_fields = planner_info.get("filtering_fields", [])
-            conditions = planner_info.get("extracted_conditions", {})
-            key_mapping = planner_info.get("key_mapping", [])
-            
-
-            target_has_data = False
-            target_data_samples = planner_info.get("target_data_samples", {})
-            if isinstance(target_data_samples, pd.DataFrame) and not target_data_samples.isnull().all().all():
-                target_has_data = True
-            
-
-            print(source_fields)
-
+            qualified_source_fields = planner_info.get("qualified_source_fields", [])
+            qualified_filtering_fields = planner_info.get("qualified_filtering_fields", [])
+            qualified_insertion_fields = planner_info.get("qualified_insertion_fields", [])
+            qualified_target_fields = planner_info.get("qualified_target_fields", [])
+            table_column_mapping = planner_info.get("table_column_mapping", {})
+            join_conditions = planner_info.get("join_conditions", [])
+            table_column_context = self._format_table_column_context_from_planner(table_column_mapping)
+            join_context = ""
+            if join_conditions:
+                join_context = "\nVERIFIED JOIN CONDITIONS:\n"
+                for condition in join_conditions:
+                    qualified_condition = condition.get("qualified_condition", "")
+                    join_type = condition.get("join_type", "INNER")
+                    join_context += f"- {join_type} JOIN: {qualified_condition}\n"
             prompt = f"""
-    You are an expert SQLite database engineer focused on data transformation. I need you to create a step-by-step plan to generate 
-    SQLite for the following natural language query:
+    You are an expert SQLite database engineer focusing on data transformation. I need you to create 
+    precise SQLite generation plan for a data transformation task.
 
-    ORIGINAL QUERY: "{query}"
+    ORIGINAL QUERY: "{planner_info.get("restructured_query", "")}"
+
+    VERIFIED TABLE.COLUMN MAPPINGS:
+    {table_column_context}
+
+    {join_context}
+
+    QUALIFIED FIELD INFORMATION (Use these exact references):
+    - Source Fields: {qualified_source_fields}
+    - Filtering Fields: {qualified_filtering_fields}
+    - Insertion Fields: {qualified_insertion_fields}
+    - Target Fields: {qualified_target_fields}
 
     CONTEXT INFORMATION:
-    - Query Type: {query_type}
-    - Source Tables: {source_tables}
-    - Source Fields: {source_fields}
-    - Target Table: {target_table}
-    - Target Fields: {target_fields}
-    - Filtering Fields: {filtering_fields}
-    - Filtering Conditions: {json.dumps(conditions, indent=2)}
-    - Key Mapping: {json.dumps(key_mapping, indent=2)}
-    - Target Data Samples: {target_data_samples}
+    - Query Type: {planner_info.get("query_type", "SIMPLE_TRANSFORMATION")}
+    - Source Tables: {planner_info.get("source_table_name", [])}
+    - Target Table: {planner_info.get("target_table_name", [])}
+    - Key Mapping: {planner_info.get("key_mapping", [])}
 
     Use this Template for the SQLite generation plan:
-    {template["plan"]}
+    {template.get("plan", [])}
 
-    Properly understand how data is given in the source table and given the data how to transform it.
+    CRITICAL RULES:
+    1. Use ONLY the qualified table.column references provided above
+    2. Never invent or modify the table.column combinations
+    3. Follow the exact qualified field mappings for all operations
+    4. For JOIN operations, use the verified join conditions provided
+    5. All column references must be exactly as specified in the qualified fields
+    6. If you need to create a new column, use the ALTER TABLE statement with the exact qualified table.column reference
+    7. If you need to delete a column, use the ALTER TABLE statement with the exact qualified table.column reference
+    8. Do not create or delete columns unless explicitly mentioned in the prompt
+    9. Do not drop any tables or columns.
+    10. If a column is not said to be created, assume it already exists in the tables.
+    11. Do not create or delete tables.
+    12. Do not create transactions
 
-    Note:
-    Tables with t_[number] like t_24 are target tables , these can act as both source and target tables.
-    These can be have different names for same column data as the source table
-    key mapping is used to match columns between source and target tables.
-    for example, if source table has MATNR and target table has Product, then if key mapping mentions then use them for matching in where clauses.
+    REQUIREMENTS:
+    1. Generate 10-20 detailed steps for SQLite query creation
+    2. Each step must use the EXACT qualified table.column references from above
+    3. Include specific SQLite syntax examples in each step
+    4. Verify every table.column reference against the provided qualified fields
+    5. For complex operations, reference the verified join conditions
 
-    Requirements:
-    - Generate a step-by-step SQLite generation plan
-    - Give 10-20 steps to generate the SQLite query
-    - Use the following format for each step:
-        1. Step description
-        2. SQLite operation (e.g., SELECT, INSERT, UPDATE)
-        3. SQLite query template with placeholders for parameters
-        4. Any additional notes or considerations
-    - Make sure to include any filtering conditions in the SQLite query
-    - If the query references segments or previous transformations, make sure to use the appropriate source tables
-    - Pay special attention to the segment references - these indicate using data from previous segments
+    Format:
+    1. Step description using exact qualified references
+    2. SQLite operation type (SELECT, INSERT, UPDATE, etc.)
+    3. SQLite query template with exact qualified table.column names
+    4. Verification note confirming the table.column usage
 
-    Note:
-    1. ALWAYS assume we need to INSERT or UPDATE the target table with data from source tables
-    2. {"use an UPDATE operation (possibly with a subquery)" if target_has_data else " use an INSERT operation"}
-    3. For a validation query, use a SELECT operation instead
-    4. Always apply any filtering conditions to source data before inserting/updating
-    5. Match source fields to target fields exactly in the correct order
-    6. When filtering, use exact literal values (e.g., WHERE MTART = 'ROH')
-    7. For updates, use key fields to match records between source and target
-    8. If no explicit key mapping is provided, identify a likely key field (MATNR, ID, etc.)
-    10. DO NOT give any code 
-    11. DO NOT use Table alias.
-    12. When the query refers to a previous segment or transformation, 
-        we need to use the target table from that segment as a source table for this query
-    13. DO not DROP or CREATE any tables, just use the existing target table
-    14. When needing to delete a column, use ALTER TABLE to drop the column
-    Format your response as a numbered list only, with no explanations or additional text.
-    Each step should be clear, concise, and directly actionable for SQLite generation.
+    EXAMPLE STEP FORMAT:
+    "1. Select material data from source table
+    SQLite operation: SELECT
+    SQLite query template: SELECT MARA.MATNR, MARA.MTART FROM MARA
+    Verification: Using qualified fields MARA.MATNR and MARA.MTART from source fields list"
+
+    Remember: Use ONLY the qualified table.column references provided - no modifications or additions!
+
+    Notes:
+    1. Use Alter table only when the prompt specifically mentions creation or deletion of a column. DO NOT use Alter for anything else
+    2. If User does not give to create a column then assume that the column already exists in the tables and there is not need to create a column.
+    3. If the prompt does not specify a column, do not include it in the query.
+    4. If we have Column given that exist in a table, then use that column in the query.
     """
+            response = self.llm.generate(prompt, temperature=0.3, max_tokens=1500)
             
-
-            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.2)
-            )
-            
-
-            if response and hasattr(response, "text"):
-                logger.info(f"response text {response.text.strip()}")
-                return response.text.strip()
+            if response:
+                logger.info(f"Plan generated using qualified field references")
+                logger.info(f"Generated Plan:\n{response}")
+                return response.strip()
             else:
-                logger.warning("Invalid response from LLM in create_sql_plan")
-                return "1. Generate basic SQLite query based on query type\n2. Return query"
+                logger.warning("Invalid response from LLM in enhanced plan generation")
+                return self._generate_fallback_plan_with_qualified_fields(template, planner_info)
                 
         except Exception as e:
-            logger.error(f"Error in create_sql_plan: {e}")
-            return "1. Generate basic SQLite query based on query type\n2. Return query"
+            logger.error(f"Error in enhanced create_sql_plan: {e}")
+            return self._generate_fallback_plan_with_qualified_fields(template, planner_info)
+
+    def _format_table_column_context_from_planner(self, table_column_mapping):
+        """Format table.column context from planner's table_column_mapping"""
+        try:
+            if not table_column_mapping:
+                return "No table column mapping available"
+            
+            context_parts = ["AVAILABLE TABLE.COLUMN REFERENCES:"]
+            source_tables = table_column_mapping.get("source_tables", {})
+            for table_name, columns in source_tables.items():
+                context_parts.append(f"\nSOURCE TABLE '{table_name}':")
+                for col in columns:
+                    context_parts.append(f"  {table_name}.{col}")
+            target_tables = table_column_mapping.get("target_tables", {})
+            for table_name, columns in target_tables.items():
+                context_parts.append(f"\nTARGET TABLE '{table_name}':")
+                for col in columns:
+                    context_parts.append(f"  {table_name}.{col}")
+            
+            return "\n".join(context_parts)
+            
+        except Exception as e:
+            logger.error(f"Error formatting table column context: {e}")
+            return "Error formatting table column context"
+
+    def _generate_fallback_plan_with_qualified_fields(self, template, planner_info):
+        """Generate fallback plan using qualified field information"""
+        try:
+            qualified_source = planner_info.get("qualified_source_fields", [])
+            qualified_target = planner_info.get("qualified_target_fields", [])
+            
+            fallback_steps = []
+            for i, step in enumerate(template.get("plan", []), 1):
+                source_ref = qualified_source[0] if qualified_source else "source_table.source_field"
+                target_ref = qualified_target[0] if qualified_target else "target_table.target_field"
+                
+                filled_step = step.replace("{field}", source_ref).replace("{table}", source_ref.split('.')[0] if '.' in source_ref else "unknown_table")
+                fallback_steps.append(f"{i}. {filled_step}")
+            
+            return "\n".join(fallback_steps)
+            
+        except Exception as e:
+            logger.error(f"Error in fallback plan generation: {e}")
+            return "1. Generate basic SQLite query\n2. Execute transformation"
         
     def _get_segment_name(self, segment_id,conn):
         cursor = conn.cursor()
@@ -519,10 +457,11 @@ class DMTool:
         else:
             logger.error(f"Segment ID {segment_id} not found in database")
             return None
+        
 
-    def process_sequential_query(self, query, object_id, segment_id, project_id, session_id=None):
+    def process_sequential_query(self, query, object_id, segment_id, project_id, session_id = None,is_selection_criteria = False):
         """
-        Process a query as part of a sequential transformation using SQLite generation
+        Process a query as part of a sequential transformation using SQL generation
         instead of Python code generation
         
         Parameters:
@@ -582,7 +521,6 @@ class DMTool:
                     "query": "SELECT {field} FROM {table} WHERE {filter_field} = '{filter_value}'",
                     "plan": ["1. Identify source and target", "2. Generate basic SQL query"]
                 }
-
             query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")
 
             session_id = resolved_data.get("session_id")
@@ -617,18 +555,25 @@ class DMTool:
                                 source_tables.append(table)
                         resolved_data["source_table_name"] = source_tables
 
-                planner_info = self._extract_planner_info(resolved_data)
-                sql_plan = self._create_operation_plan(query, planner_info, template)
-                logger.info(f"Generated SQL plan: {sql_plan}")
+                
+                # planner_info = self._extract_planner_info(resolved_data)
+                planner_info = resolved_data
 
-                sql_query, sql_params = self.sql_generator.generate_sql(sql_plan, planner_info, template)
+                # sql_plan = self._create_operation_plan(planner_info["restructured_query"], planner_info, template)
+                
+                
+                sql_query, sql_params = self.sql_generator.generate_sql(planner_info, template,sql_plan=planner_info.get("transformation_plan", ""))
                 logger.info(f"Generated SQL query: {sql_query}")
-                result = self._execute_sql_query(sql_query, sql_params, planner_info)
-                print(result)
+                result = self._execute_sql_query(sql_query, sql_params, planner_info,
+                object_id=object_id,
+                segment_id=segment_id,
+                project_id=project_id,
+                is_selection_criteria=is_selection_criteria)
+
 
                 if isinstance(result, dict) and "error_type" in result:
-                    logger.error(f"SQLite execution error: {result}")
-                    return f"SQLite execution failed: {result.get('error_message', 'Unknown error')}", session_id
+                    logger.error(f"SQL execution error: {result}")
+                    return f"SQL execution failed: {result.get('error_message', 'Unknown error')}", session_id
 
                 if isinstance(result, dict) and result.get("multi_query_result"):
                     logger.info(f"Processing multi-query result: {result.get('completed_statements', 0)} statements completed")
@@ -674,7 +619,7 @@ class DMTool:
                 if target_table and query_type in ["SIMPLE_TRANSFORMATION", "JOIN_OPERATION", "CROSS_SEGMENT", "AGGREGATION_OPERATION"]:
                     try:
 
-                        select_query = f"SELECT * FROM {validate_sql_identifier(target_table)}"
+                        select_query = f"SELECT * FROM [{validate_sql_identifier(target_table)}]"
                         target_data = self.sql_executor.execute_and_fetch_df(select_query)
                         
                         if isinstance(target_data, pd.DataFrame) and not target_data.empty:
@@ -712,7 +657,255 @@ class DMTool:
                             except Exception as e:
                                 logger.warning(f"Could not save transformation record: {e}")
 
-                            return target_data, session_id 
+                            return target_data, session_id
+                        else:
+
+                            empty_df = pd.DataFrame()
+                            empty_df.attrs['message'] = f"Target table '{target_table}' is empty after transformation"
+                            return empty_df, session_id
+                            
+                    except Exception as e:
+
+                        return  result, session_id
+                        
+            except Exception as e:
+                logger.error(f"Error in process_sequential_query: {e}")
+                logger.error(traceback.format_exc())
+                if conn:
+                    conn.close()
+                return f"An error occurred during processing: {e}", session_id
+                        
+
+        except Exception as e:
+            logger.error(f"Outer error in process_sequential_query: {e}")
+            logger.error(traceback.format_exc())
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
+            return f"An error occurred: {e}", session_id
+        
+    def generate_preload_postload_report(self, target_table: str, session_id: Optional[str] = None) -> str:
+        """
+        Generate pre-load/post-load CSV report for a target table
+        
+        Parameters:
+        target_table (str): Target table name
+        session_id (str): Session ID for lineage tracking
+        
+        Returns:
+        str: Path to generated CSV file
+        """
+        try:
+            logger.info(f"Generating pre-load/post-load report for {target_table}")
+            
+            csv_path = generate_lineage_report(target_table, session_id)
+            
+            if csv_path:
+                logger.info(f"Report generated successfully: {csv_path}")
+                return csv_path
+            else:
+                logger.warning("Failed to generate report - no lineage data found")
+                return ""
+                
+        except Exception as e:
+            logger.error(f"Error generating report: {e}")
+            return ""
+
+    def process_selection_criteria(self, selection_criteria, object_id, segment_id, project_id, session_id = None):
+        """
+        Process selection criteria query using SQL generation
+        
+        Parameters:
+        selection_criteria (str): The selection criteria query
+        object_id (int): Object ID for mapping
+        segment_id (int): Segment ID for mapping
+        project_id (int): Project ID for mapping
+        session_id (str): Optional session ID, creates new session if None
+        
+        Returns:
+        tuple: (generated_sql, result, session_id)
+        """
+        is_selection_criteria = True
+        conn = None
+        try:
+            query = selection_criteria
+            if not query or not isinstance(query, str):
+                logger.error(f"Invalid query type: {type(query)}")
+                return "Query must be a non-empty string", session_id
+
+
+            if not all(isinstance(x, int) for x in [object_id, segment_id, project_id]):
+                logger.error(
+                    f"Invalid ID types: object_id={type(object_id)}, segment_id={type(segment_id)}, project_id={type(project_id)}"
+                )
+                return "Invalid ID types - must be integers", session_id
+            
+            context_manager = ContextualSessionManager()
+
+
+            if not session_id:
+                session_id = context_manager.create_session()
+                logger.info(f"Created new session: {session_id}")
+                
+
+            additional_source_tables = []
+
+
+            logger.info(f"Processing query: {query}")
+            resolved_data = process_query(
+                object_id, segment_id, project_id, query, session_id=session_id, is_selection_criteria=True
+            )
+            
+
+            if not resolved_data:
+                logger.error("Failed to resolve query with planner")
+                return "Failed to resolve query", session_id
+            
+
+            template = self.query_template_repo.find_matching_template(query)
+            logger.info(f"Found template: {template.get('id', 'None')} for query '{query}'")
+            if not template:
+                logger.error("No matching template found for query")
+
+                template = {
+                    "id": "fallback",
+                    "prompt": "Basic transformation",
+                    "query": "SELECT {field} FROM {table} WHERE {filter_field} = '{filter_value}'",
+                    "plan": ["1. Identify source and target", "2. Generate basic SQL query"]
+                }
+
+            query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")
+
+            session_id = resolved_data.get("session_id")
+
+
+            try:
+                conn = sqlite3.connect(os.environ.get('DB_PATH'))
+            except sqlite3.Error as e:
+                logger.error(f"Failed to connect to database: {e}")
+                return f"Database connection error: {e}", session_id
+
+            try:
+                resolved_data["original_query"] = query
+                
+
+                try:
+                    if "target_table_name" in resolved_data:
+                        target_table = resolved_data["target_table_name"]
+                        if isinstance(target_table, list) and len(target_table) > 0:
+                            target_table = target_table[0]
+                        target_table = validate_sql_identifier(target_table)
+                        resolved_data["target_data_samples"] = self.sql_executor.get_table_sample(target_table)
+                except Exception as e:
+                    logger.warning(f"Error getting target data samples: {e}")
+                    resolved_data["target_data_samples"] = pd.DataFrame()
+
+
+                if additional_source_tables:
+                    source_tables = resolved_data.get("source_table_name", [])
+                    if isinstance(source_tables, list):
+
+                        for table in additional_source_tables:
+                            if table not in source_tables:
+                                source_tables.append(table)
+                        resolved_data["source_table_name"] = source_tables
+
+                
+                # planner_info = self._extract_planner_info(resolved_data)
+                planner_info = resolved_data
+                # sql_plan = self._create_operation_plan(planner_info["restructured_query"], planner_info, template)
+                sql_query, sql_params = self.sql_generator.generate_sql(planner_info, template,sql_plan=planner_info.get("transformation_plan", ""))
+                logger.info(f"Generated SQL query: {sql_query}")
+                result = self._execute_sql_query(sql_query, sql_params, planner_info,
+                object_id=object_id,
+                segment_id=segment_id,
+                project_id=project_id,
+                is_selection_criteria=is_selection_criteria)
+
+
+                if isinstance(result, dict) and "error_type" in result:
+                    logger.error(f"SQL execution error: {result}")
+                    return f"SQL execution failed: {result.get('error_message', 'Unknown error')}", session_id
+
+                if isinstance(result, dict) and result.get("multi_query_result"):
+                    logger.info(f"Processing multi-query result: {result.get('completed_statements', 0)} statements completed")
+                    multi_result = self._handle_multi_query_result(result, planner_info, session_id)
+                    
+                    if result.get("success") and len(multi_result) == 2:
+                        try:
+                            context_manager = ContextualSessionManager()
+                            transformation_data = {
+                                "original_query": query,
+                                "query_type": "SELECTION_CRITERIA",
+                                "source_tables": planner_info.get("selection_criteria_source_table", []),
+                                "target_table": planner_info.get("selection_criteria_target_table", []),
+                                "fields_affected": planner_info.get("target_sap_field", []),
+                                "execution_result": {
+                                    "success": True,
+                                    "rows_affected": len(multi_result[0]) if isinstance(multi_result[0], pd.DataFrame) else 0,
+                                    "steps_completed": result.get("completed_statements", 0)
+                                },
+                                "steps_completed": result.get("completed_statements", 0)
+                            }
+                            context_manager.add_transformation_record(session_id, transformation_data)
+                        except Exception as e:
+                            logger.warning(f"Could not save transformation record for multi-query: {e}")
+                    
+                    return multi_result[0], session_id
+
+                if "selection_criteria_target_table" in resolved_data:
+                    target_table = resolved_data["selection_criteria_target_table"]
+                    if isinstance(target_table, list) and len(target_table) > 0:
+                        target_table = target_table[0]
+                segment_name = self._get_segment_name(segment_id, conn)
+                if segment_name:
+                    context_manager.add_segment(
+                        session_id,
+                        segment_name,
+                        planner_info["target_table_name"],
+                    )
+
+                if target_table and query_type in ["SIMPLE_TRANSFORMATION", "JOIN_OPERATION", "CROSS_SEGMENT", "AGGREGATION_OPERATION"]:
+                    try:
+
+                        select_query = f"SELECT * FROM [{validate_sql_identifier(target_table)}]"
+                        target_data = self.sql_executor.execute_and_fetch_df(select_query)
+                        
+                        if isinstance(target_data, pd.DataFrame) and not target_data.empty:
+
+                            rows_affected = len(target_data)
+                            non_null_columns = target_data.dropna(axis=1, how='all').columns.tolist()
+                            
+                            target_data.attrs['transformation_summary'] = {
+                                'rows': rows_affected,
+                                'populated_fields': non_null_columns,
+                                'target_table': target_table,
+                                'query_type': query_type
+                            }
+                            try:
+                                context_manager = ContextualSessionManager()
+                                transformation_data = {
+                                    "original_query": query,
+                                    "query_type": "SELECTION_CRITERIA",
+                                    "source_tables": planner_info.get("selection_criteria_source_table", []),
+                                    "target_table": planner_info.get("selection_criteria_target_table", []),
+                                    "fields_affected": planner_info.get("target_sap_field", []),
+                                    "execution_result": {
+                                        "success": True,
+                                        "rows_affected": len(multi_result[0]) if isinstance(multi_result[0], pd.DataFrame) else 0,
+                                        "steps_completed": result.get("completed_statements", 0)
+                                    },
+                                    "steps_completed": result.get("completed_statements", 0)
+                                }
+                                
+                                context_manager.add_transformation_record(session_id, transformation_data)
+                                
+                            except Exception as e:
+                                logger.warning(f"Could not save transformation record: {e}")
+
+                            return target_data, session_id
                         else:
 
                             empty_df = pd.DataFrame()
@@ -741,14 +934,101 @@ class DMTool:
                     pass
             return f"An error occurred: {e}", session_id
 
+    def diff_dataframes(df1: pd.DataFrame, df2: pd.DataFrame, 
+                    key_columns: Optional[List[str]] = None) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Compare df1 (old) and df2 (new) and return indices of changed/new and removed rows.
+        
+        Args:
+            df1: Original DataFrame (old data)
+            df2: New DataFrame (new data)  
+            key_columns: List of column names to use as unique identifiers.
+                        If None, all columns are used (rows must match exactly).
+        
+        Returns:
+            - changed_indices: array of df2 indices for new/changed rows
+            - removed_indices: array of df1 indices for removed rows
+        """
+        
+        if key_columns is None:
+            # If no key columns specified, treat entire row as key
+            # Find rows in df2 that don't exist in df1
+            merged = df2.reset_index().merge(df1, how='left', indicator=True)
+            changed_mask = merged['_merge'] == 'left_only'
+            changed_indices = merged.loc[changed_mask, 'index'].values
+            
+            # Find rows in df1 that don't exist in df2
+            merged_removed = df1.reset_index().merge(df2, how='left', indicator=True)
+            removed_mask = merged_removed['_merge'] == 'left_only'
+            removed_indices = merged_removed.loc[removed_mask, 'index'].values
+            
+        else:
+            # Use specified key columns
+            value_columns = [col for col in df1.columns if col not in key_columns]
+            
+            # Reset index to track original positions
+            df1_indexed = df1.reset_index().rename(columns={'index': 'original_index_df1'})
+            df2_indexed = df2.reset_index().rename(columns={'index': 'original_index_df2'})
+            
+            # Get keys that exist in both dataframes
+            keys_df1 = df1_indexed[key_columns + ['original_index_df1']].drop_duplicates(subset=key_columns)
+            keys_df2 = df2_indexed[key_columns + ['original_index_df2']].drop_duplicates(subset=key_columns)
+            
+            # New rows: keys in df2 but not df1
+            new_keys = keys_df2.merge(keys_df1[key_columns], how='left', indicator=True)
+            new_indices = new_keys[new_keys['_merge'] == 'left_only']['original_index_df2'].values
+            
+            # Removed rows: keys in df1 but not df2
+            removed_keys = keys_df1.merge(keys_df2[key_columns], how='left', indicator=True)
+            removed_indices = removed_keys[removed_keys['_merge'] == 'left_only']['original_index_df1'].values
+            
+            # Changed rows: same keys but different values
+            if value_columns:
+                # Get common keys with their original indices
+                common_keys = keys_df1.merge(keys_df2, on=key_columns, how='inner')
+                
+                if not common_keys.empty:
+                    # Get full rows for comparison
+                    df1_common = df1_indexed.merge(common_keys[key_columns + ['original_index_df1']], on=key_columns)
+                    df2_common = df2_indexed.merge(common_keys[key_columns + ['original_index_df2']], on=key_columns)
+                    
+                    # Sort by key columns for proper comparison
+                    df1_common = df1_common.sort_values(key_columns).reset_index(drop=True)
+                    df2_common = df2_common.sort_values(key_columns).reset_index(drop=True)
+                    
+                    # Find rows where values differ
+                    changed_mask = pd.Series([False] * len(df1_common))
+                    for col in value_columns:
+                        changed_mask |= (df1_common[col] != df2_common[col])
+                    
+                    # Get df2 indices for changed rows
+                    updated_indices = df2_common.loc[changed_mask, 'original_index_df2'].values
+                else:
+                    updated_indices = np.array([])
+            else:
+                updated_indices = np.array([])
+            
+            # Combine new and updated indices
+            changed_indices = np.concatenate([new_indices, updated_indices])
+            
+        return np.sort(changed_indices), np.sort(removed_indices)
+
+    
     def _is_multi_statement_query(self, sql_query):
         """Detect if SQL contains multiple statements"""
         if not sql_query or not isinstance(sql_query, str):
             return False        
         statements = self.sql_executor.split_sql_statements(sql_query)
         return len(statements) > 1
+    
+    def create_session_id(self):
+        """ Create a new session ID for tracking transformations"""
+        context_manager = ContextualSessionManager()
+        session_id = context_manager.create_session()
+        logger.info(f"Created new session: {session_id}")
+        return session_id
 
-    def _execute_sql_query(self, sql_query, sql_params, planner_info):
+    def _execute_sql_query(self, sql_query, sql_params, planner_info, object_id=None, segment_id=None, project_id=None, is_selection_criteria=True):
         """
         Execute SQLite query using the SQLExecutor with multi-statement support
         
@@ -765,7 +1045,11 @@ class DMTool:
         if self._is_multi_statement_query(sql_query):
             logger.info("Detected multi-statement query, using multi-query executor")
             return self.sql_executor.execute_multi_statement_query(
-                sql_query, sql_params, context_manager=ContextualSessionManager(),session_id=planner_info.get("session_id")
+                sql_query, sql_params, context_manager=ContextualSessionManager(),session_id=planner_info.get("session_id"),
+                object_id=object_id,
+                segment_id=segment_id,
+                project_id=project_id,
+                planner_info=planner_info
             )
         
 
@@ -784,31 +1068,29 @@ class DMTool:
                 
             
             if operation_type == "INSERT":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=True)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info,is_selection_criteria=is_selection_criteria)
             elif operation_type == "UPDATE":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=True)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info,is_selection_criteria=is_selection_criteria)
             elif operation_type == "DELETE":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=True)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id,session_id=planner_info.get("session_id"),planner_info=planner_info,is_selection_criteria=is_selection_criteria)
             elif operation_type == "ALTER":
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=True)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,object_id=object_id,segment_id=segment_id,project_id=project_id,session_id=planner_info.get("session_id"),planner_info=planner_info,is_selection_criteria=is_selection_criteria)
             elif operation_type == "WITH":
                 if "INSERT INTO" in sql_query.upper():
-                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=True)
+                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info,is_selection_criteria=is_selection_criteria)
                 elif "UPDATE" in sql_query.upper():
-                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=True)
+                    return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,session_id=planner_info.get("session_id"),planner_info=planner_info,is_selection_criteria=is_selection_criteria)
                 else:
-
-                    return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
+                    return self.sql_executor.execute_and_fetch_df(sql_query, sql_params,session_id=planner_info.get("session_id"))
             else:
-
                 return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)
         elif not operation_type :
-            return self.sql_executor.execute_query(sql_query, sql_params,fetch_results=False)
+            return self.sql_executor.execute_query(sql_query, sql_params,fetch_results=False,planner_info=planner_info)
         elif query_type in ["JOIN_OPERATION", "CROSS_SEGMENT"]:
 
             if "INSERT INTO" in sql_query.upper() or "UPDATE" in sql_query.upper():
 
-                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False)
+                return self.sql_executor.execute_query(sql_query, sql_params, fetch_results=False,planner_info=planner_info)
             else:
 
                 return self.sql_executor.execute_and_fetch_df(sql_query, sql_params)

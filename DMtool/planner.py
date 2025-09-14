@@ -7,8 +7,6 @@ import sqlite3
 from io import StringIO
 from datetime import datetime
 import logging
-from google import genai
-from google.genai import types
 from pathlib import Path
 import spacy
 import traceback
@@ -21,6 +19,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 from DMtool.executor import SQLExecutor
+from DMtool.llm_config import LLMManager
 
 sql_executor = SQLExecutor()
 
@@ -52,6 +51,7 @@ def find_closest_match(query, word_list, threshold=0.6):
     if not query or not word_list:
         return {"match": None, "score": 0.0, "all_matches": []}
     
+
     clean_query = re.sub(r'\s+', ' ', query.strip().lower())
     
     matches = []
@@ -1003,7 +1003,7 @@ def enhance_classification_before_processing(classification_details: Dict[str, A
     enhancer = ClassificationEnhancer(db_path, segments_csv_path)
     return enhancer.enhance_classification_details(classification_details, current_segment_id,joined_df)
 
-def classify_query_with_llm(query, target_table, table_desc):
+def classify_query_with_llm(query, target_table,context):
     """
     Use LLM to classify the query type based on linguistic patterns and semantic understanding
     
@@ -1030,6 +1030,9 @@ USER QUERY: "{query}"
 Note:
 if the query says Target table then it indicates {target_table}
 
+Previous Context:
+{context}
+
 CLASSIFICATION CRITERIA:
 
 **JOIN_OPERATION indicators:**
@@ -1038,7 +1041,8 @@ CLASSIFICATION CRITERIA:
 
 **CROSS_SEGMENT indicators:**
 - References to previous segments: "basic segment", "marc segment", "makt segment"
-- Segment keywords: "BASIC", "PLANT", "SALES", "PURCHASING", "CLASSIFICATION", "WAREHOUSE"
+- Temporal references: "previous", "prior", "last", "earlier" segment
+- Segment keywords: "BASIC", "PLANT", "SALES", "PURCHASING", "CLASSIFICATION", "MRP", "WAREHOUSE"
 - Phrases like: "from segment", "use segment", "based on segment"
 
 **VALIDATION_OPERATION indicators:**
@@ -1061,14 +1065,11 @@ ADDITIONAL DETECTION:
 - **SAP Tables**: Look for mentions of SAP Tables
 - **Segment Names**: Look for: Basic, Plant, Sales, Purchasing, Classification, MRP, Warehouse segments
 - **Table Count**: If multiple SAP tables mentioned, likely JOIN_OPERATION
-- **Segment References**: Any reference to numbered transformations (Transformation 1, Step 2, etc.)
+- **Segment References**: Any reference to name followed by "segment" indicates CROSS_SEGMENT
+- **Join Indicators**: Look for words like "join", "merge", "combine", "link", "both tables"
+- **Validation Indicators**: Look for words like "validate", "verify", "check", "ensure", "missing", "invalid"
+- **Previous Context indicators** : If a query talks about transformation X, use context from previous transformations to resolve fields and tables
 
-Following is a Target Table glossary: {table_desc}
-
-Note:
-- if a query mentions a previous transformation that means that we need find that transformation in the context history and use that target table
-it does not influence the classification but it is important to understand the context
-- For SAP tables mentioned do not add the table in the table name like MARC table , just the table name
 
 Respond with a JSON object:
 ```json
@@ -1097,29 +1098,26 @@ Respond with a JSON object:
 
             return _fallback_classification(query)
             
-        client = genai.Client(api_key=api_key)
+        llm = LLMManager(
+            provider="google",
+            model="gemini/gemini-2.5-flash",
+            api_key=api_key
+        )
         
-        response = client.models.generate_content(
-            model="gemini-2.5-flash", 
-            contents=prompt,
-            config=types.GenerateContentConfig(
-            temperature=0.05,
-            top_p=0.8,
-            top_k=20
-        ))
+        response = llm.generate(prompt, temperature=0.3, max_tokens=500)
         
-        if not response or not hasattr(response, "text"):
+        if not response:
             logger.warning("Invalid response from Gemini API for query classification")
+            logger.info(f"Raw response: {response}")
             return _fallback_classification(query)
             
-
         try:
-            json_str = re.search(r"```json(.*?)```", response.text, re.DOTALL)
+            json_str = re.search(r"```json(.*?)```", response, re.DOTALL)
             if json_str:
                 result = json.loads(json_str.group(1).strip())
             else:
 
-                result = json.loads(response.text.strip())
+                result = json.loads(response.strip())
 
             primary_class = result.get("primary_classification", "SIMPLE_TRANSFORMATION")
             
@@ -1142,7 +1140,7 @@ Respond with a JSON object:
             
         except (json.JSONDecodeError, KeyError) as e:
             logger.error(f"Error parsing LLM classification response: {e}")
-            logger.error(f"Raw response: {response.text}")
+            logger.error(f"Raw response: {response}")
             return _fallback_classification(query)
             
     except Exception as e:
@@ -1196,21 +1194,123 @@ def _fallback_classification(query):
     return primary_class, details
 
 PROMPT_TEMPLATES = {
+    "SIMPLE_TRANSFORMATION": """
+    You are a data transformation assistant specializing in SAP data mappings. 
+    Your task is to analyze a natural language query about data transformations and match it to the appropriate source and target tables and fields.
+    
+    CONTEXT DATA SCHEMA: {table_desc}
+    
+    Target table name: {target_table_name}
+    
+    USER QUERY: {question}
+
+    These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
+    Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
+    Important Query Context:{additional_context}
+    
+    Note:
+    - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
+    - Do not invent new tables or columns that are not mentioned in the query or the mappings.
+    
+    INSTRUCTIONS:
+    1. Identify key entities in the query:
+       - Source table(s)
+       - Source field(s) with their table associations
+       - Filtering or transformation conditions
+       - Logical flow (IF/THEN/ELSE statements)
+       - Insertion fields with their table associations
+    
+    2. Match these entities to the corresponding entries in the joined_data.csv schema
+       - For each entity, find the closest match in the schema
+       - Resolve ambiguities using the description field
+       - Validate that the identified fields exist in the mentioned tables
+    
+    3. IMPORTANT: Provide table-qualified column references
+       - Instead of just "MATNR", provide "MARA.MATNR"
+       - Instead of just "PRODUCT", provide "t_74_table_name.PRODUCT"
+    
+    4. Generate a structured representation of the transformation logic:
+       - JSON format showing the transformation flow
+       - Include all source tables, fields, conditions, and targets
+       - Map conditional logic to proper syntax
+       - Handle fallback scenarios (ELSE conditions)
+       - Use the provided key mappings to connect source and target fields correctly
+       - Consider the current state of the target data shown above
+    
+    5. Create a resolved query that takes the actual field and table names, and does not change what is said in the query
+    
+    6. For the insertion fields, identify the fields that need to be inserted into the target table based on the User query.
+    7. When encountering that mention a previous transformation like transformation 1, use transformation context in the addtional context to resolve the fields and tables
+    8. For transformation plan provide a step by step plan to implement the transformation while considering the target table state and the source data schema and the exactly what the user is asking for in the query.
+    Respond with:
+    ```json
+    {{
+        "query_type": "SIMPLE_TRANSFORMATION",
+        "source_table_name": [List of all source_tables],
+        "source_field_names": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
+        "filtering_fields": [List of table.column format for filtering],
+        "insertion_fields": [List of table.column format for insertion],
+        "target_sap_fields": [List of table.column format for target],
+        "filter_conditions": "Any filter conditions in the query",
+        "transformation_logic": "Any transformation logic in the query",
+        "table_column_mapping": {{
+            "source_tables": {{
+                "table_name": ["column1", "column2", ...]
+            }},
+            "target_tables": {{
+                "table_name": ["column1", "column2", ...]
+            }}
+        }},
+        "Resolved_query": [Rephrased query with resolved data],
+        "transformation_context": "If any previous transformation context is used, mention it here",
+        "transformation_plan": "Step by step plan to implement the transformation"
+    }}
+    ```
+
+    Important Note: Do not invent new tables or columns that are not mentioned in the query and in the Context data schema.
+
+    CRITICAL FIELD IDENTIFICATION RULES:
+
+    **insertion_fields**: These must contain SOURCE column names from SOURCE tables
+    - ✅ CORRECT: ["SOURCE_COL_X"] (actual column name in source table)
+    - ❌ WRONG: ["TARGET_COL_Y"] (this belongs to target table)
+    - Rule: insertion_fields = "What columns do I SELECT FROM the source table?"
+
+    **target_sap_fields**: These contain TARGET column names from TARGET tables  
+    - ✅ CORRECT: ["TARGET_COL_Y"] (actual column name in target table)
+    - Rule: target_sap_fields = "What columns do I INSERT INTO in the target table?"
+
+    **Key Relationship**: SOURCE.insertion_field → TARGET.target_field
+    - Example: source_table.source_column → target_table.target_column
+    - The DATA represents the same logical concept, but COLUMN NAMES may be different
+
+    **Validation Check**:
+    - insertion_fields must exist in the source_table_name tables specified
+    - target_sap_fields must exist in the target_table_name tables specified
+    - NEVER put target table column names in insertion_fields
+    - NEVER put source table column names in target_sap_fields
+
+    **General Example Pattern**:
+    - Query: "Bring [semantic_field] from [source_table]"
+    - Source table: [source_table] (has column [actual_source_column])
+    - Target table: [target_table] (has column [actual_target_column]) 
+    - insertion_fields: ["actual_source_column"] ✅ (from source table schema)
+    - target_sap_fields: ["actual_target_column"] ✅ (from target table schema)
+    """,
+    
     "JOIN_OPERATION": """
     You are a data transformation assistant specializing in SAP data mappings and JOIN operations. 
     Your task is to analyze a natural language query about joining tables and map it to the appropriate source tables, fields, and join conditions.
     
     Target Table glossary: {table_desc}
 
-    
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
+    Target table name: {target_table_name}
     
     USER QUERY: {question}
 
     Note:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
-    
+    - Do not invent new tables or columns that are not mentioned in the query or the mappings.
 
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
@@ -1222,37 +1322,85 @@ PROMPT_TEMPLATES = {
     INSTRUCTIONS:
     1. Identify key entities in the join query:
        - All source tables needed for the join
-       - Join fields for each pair of tables
-       - Fields to select from each table
-       - Filtering conditions
-       - Target fields for insertion
+       - Join fields for each pair of tables WITH table qualification
+       - Fields to select from each table WITH table qualification
+       - Filtering conditions WITH table qualification
+       - Target fields for insertion WITH table qualification
     
     2. Specifically identify the join conditions:
        - Which table is joined to which
-       - On which fields they are joined
+       - On which fields they are joined (table.column format)
        - The type of join (inner, left, right)
     
-    3. Format your response as JSON with the following schema:
+    3. CRITICAL: Provide all column references in table.column format
+    4. When encountering that mention a previous transformation like transformation 1, use transformation context in the addtional context to resolve the fields and tables
+
+    5. For transformation plan provide a step by step plan to implement the transformation while considering the target table state and the source data schema and the exactly what the user is asking for in the query.
+
+    6. Format your response as JSON with the following schema:
     ```json
     {{
         "query_type": "JOIN_OPERATION",
-        "source_table_name": [List of all source tables, including previously visited segment tables],
-        "source_field_names": [List of all fields to select],
-        "filtering_fields": [List of filtering fields],
-        "insertion_fields": [insertion_field],
-        "target_sap_fields": [Target field(s)],
+        "source_table_name": [List of all source_tables],
+        "source_field_names": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
+        "filtering_fields": [List of table.column format for filtering],
+        "insertion_fields": [List of table.column format for insertion],
+        "target_sap_fields": [List of table.column format for target],
+        "filter_conditions": "Any filter conditions in the query",
+        "transformation_logic": "Any transformation logic in the query",
         "join_conditions": [
             {{
                 "left_table": "table1",
                 "right_table": "table2",
                 "left_field": "join_field_left",
                 "right_field": "join_field_right",
-                "join_type": "inner"
+                "join_type": "inner",
+                "qualified_condition": "table1.join_field_left = table2.join_field_right"
             }}
         ],
-        "Resolved_query": "Restructured query with resolved data"
+        "table_column_mapping": {{
+            "source_tables": {{
+                "table1": ["column1", "column2", ...],
+                "table2": ["column1", "column2", ...]
+            }},
+            "target_tables": {{
+                "target_table": ["column1", "column2", ...]
+            }}
+        }},
+        "Resolved_query": "Restructured query with resolved data",
+        "transformation_context": "If any previous transformation context is used, mention it here",
+        "transformation_plan": "Step by step plan to implement the transformation"
     }}
     ```
+    Important Note: Do not invent new tables or columns that are not mentioned in the query and in the Context data schema.
+        CRITICAL FIELD IDENTIFICATION RULES:
+
+    **insertion_fields**: These must contain SOURCE column names from SOURCE tables
+    - ✅ CORRECT: ["SOURCE_COL_X"] (actual column name in source table)
+    - ❌ WRONG: ["TARGET_COL_Y"] (this belongs to target table)
+    - Rule: insertion_fields = "What columns do I SELECT FROM the source table?"
+
+    **target_sap_fields**: These contain TARGET column names from TARGET tables  
+    - ✅ CORRECT: ["TARGET_COL_Y"] (actual column name in target table)
+    - Rule: target_sap_fields = "What columns do I INSERT INTO in the target table?"
+
+    **Key Relationship**: SOURCE.insertion_field → TARGET.target_field
+    - Example: source_table.source_column → target_table.target_column
+    - The DATA represents the same logical concept, but COLUMN NAMES may be different
+
+    **Validation Check**:
+    - insertion_fields must exist in the source_table_name tables specified
+    - target_sap_fields must exist in the target_table_name tables specified
+    - NEVER put target table column names in insertion_fields
+    - NEVER put source table column names in target_sap_fields
+
+    **General Example Pattern**:
+    - Query: "Bring [semantic_field] from [source_table]"
+    - Source table: [source_table] (has column [actual_source_column])
+    - Target table: [target_table] (has column [actual_target_column]) 
+    - insertion_fields: ["actual_source_column"] ✅ (from source table schema)
+    - target_sap_fields: ["actual_target_column"] ✅ (from target table schema)
+
     """,
     
     "CROSS_SEGMENT": """
@@ -1261,8 +1409,7 @@ PROMPT_TEMPLATES = {
     
     Target Table glossary: {table_desc}
     
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
+    Target table name: {target_table_name}
     
     USER QUERY: {question}
 
@@ -1272,23 +1419,29 @@ PROMPT_TEMPLATES = {
 
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
-    
+    - Do not invent new tables or columns that are not mentioned in the query or the mappings.
+
     INSTRUCTIONS:
     1. Identify which previous segments are referenced in the query
-    2. Determine how to link current data with segment data (join conditions)
-    3. Identify which fields to extract from each segment
-    4. Determine filtering conditions if any
-    5. Identify the target fields for insertion
-    
+    2. Determine how to link current data with segment data (join conditions WITH table.column format)
+    3. Identify which fields to extract from each segment WITH table qualification
+    4. Determine filtering conditions if any WITH table qualification
+    5. Identify the target fields for insertion WITH table qualification
+    6. CRITICAL: All column references must be in table.column format
+    7. When encountering that mention a previous transformation like transformation 1, use transformation context in the addtional context to resolve the fields and tables
+    8. For transformation plan provide a step by step plan to implement the transformation while considering the target table state and the source data schema and the exactly what the user is asking for in the query.
+
     Format your response as JSON with the following schema:
     ```json
     {{
         "query_type": "CROSS_SEGMENT",
-        "source_table_name": [List of all source tables, including segment tables],
-        "source_field_names": [List of all fields to select],
-        "filtering_fields": [List of filtering fields],
-        "insertion_fields": [List of fields to be inserted],
-        "target_sap_fields": [Target field(s)],
+        "source_table_name": [List of all source_tables],
+        "source_field_names": [List of table.column format like "MARA.MATNR", "MARA.MTART"],
+        "filtering_fields": [List of table.column format for filtering],
+        "insertion_fields": [List of table.column format for insertion],
+        "target_sap_fields": [List of table.column format for target],
+        "filter_conditions": "Any filter conditions in the query",
+        "transformation_logic": "Any transformation logic in the query",
         "segment_references": [
             {{
                 "segment_id": "segment_id",
@@ -1301,207 +1454,58 @@ PROMPT_TEMPLATES = {
                 "left_table": "segment_table",
                 "right_table": "current_table",
                 "left_field": "join_field_left",
-                "right_field": "join_field_right"
+                "right_field": "join_field_right",
+                "qualified_condition": "segment_table.join_field_left = current_table.join_field_right"
             }}
         ],
-        "Resolved_query": "Restructured query with resolved data"
-    }}
-    ```
-    """,
-    
-    "VALIDATION_OPERATION": """
-    You are a data validation assistant specializing in SAP data. 
-    Your task is to analyze a natural language query about data validation and map it to appropriate validation rules.
-    
-    Target Table glossary: {table_desc}
-    
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
-    
-    USER QUERY: {question}
-
-    These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
-    Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
-    Important Query Context:{additional_context}
-
-    Notes:
-    - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
-    
-    
-    INSTRUCTIONS:
-    1. Identify the validation requirements in the query
-    2. Determine which tables and fields need to be checked
-    3. Formulate the validation rules in a structured way
-    4. Specify what should happen for validation success/failure
-    
-    Format your response as JSON with the following schema:
-    ```json
-    {{
-        "query_type": "VALIDATION_OPERATION",
-        "source_table_name": [List of tables to validate],
-        "source_field_names": [List of fields to validate],
-        "validation_rules": [
-            {{
-                "field": "field_name",
-                "rule_type": "not_null|unique|range|regex|exists_in",
-                "parameters": {{
-                    "min": minimum_value,
-                    "max": maximum_value,
-                    "pattern": "regex_pattern",
-                    "reference_table": "table_name",
-                    "reference_field": "field_name"
-                }}
+        "table_column_mapping": {{
+            "source_tables": {{
+                "table1": ["column1", "column2", ...],
+                "segment_table": ["column1", "column2", ...]
+            }},
+            "target_tables": {{
+                "target_table": ["column1", "column2", ...]
             }}
-        ],
-        "target_sap_fields": [Target field(s) to update with validation results],
-        "Resolved_query": "Restructured query with resolved data"
-    }}
-    ```
-    """,
-    
-    "AGGREGATION_OPERATION": """
-    You are a data aggregation assistant specializing in SAP data. 
-    Your task is to analyze a natural language query about data aggregation and map it to appropriate aggregation operations.
-    
-    Target Table glossary: {table_desc}
-    
-    
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
-    
-    USER QUERY: {question}
-
-    These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
-    Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
-    Important Query Context:{additional_context}    
-    
-    Notes:
-    - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
-    
-    INSTRUCTIONS:
-    1. Identify the aggregation functions required (sum, count, average, etc.)
-    2. Determine which tables and fields are involved
-    3. Identify grouping fields if any
-    4. Determine filtering conditions if any
-    5. Identify where the results should be stored
-    
-    Format your response as JSON with the following schema:
-    ```json
-    {{
-        "query_type": "AGGREGATION_OPERATION",
-        "source_table_name": [Source tables],
-        "source_field_names": [Fields to aggregate],
-        "aggregation_functions": [
-            {{
-                "field": "field_name",
-                "function": "sum|count|avg|min|max",
-                "alias": "result_name"
-            }}
-        ],
-        "group_by_fields": [Fields to group by],
-        "filtering_fields": [Filtering fields],
-        "filtering_conditions": {{
-            "field_name": "condition_value"
         }},
-        "target_sap_fields": [Target fields for results],
-        "Resolved_query": "Restructured query with resolved data"
+        "Resolved_query": "Restructured query with resolved data",
+        "transformation_context": "If any previous transformation context is used, mention it here",
+        "transformation_plan": "Step by step plan to implement the transformation"
     }}
     ```
-    """,
-    
-    "SIMPLE_TRANSFORMATION": """
-    You are a data transformation assistant specializing in SAP data mappings. 
-    Your task is to analyze a natural language query about data transformations and match it to the appropriate source and target tables and fields.
-    
-    Target Table glossary: {table_desc}
-    
-    CURRENT TARGET TABLE STATE:
-    {target_df_sample}
-    
-    USER QUERY: {question}
+    Important Note: Do not invent new tables or columns that are not mentioned in the query and in the Context data schema.
 
-    These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
-    Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
-    Important Query Context:{additional_context}
-    
-    Note:
-    - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
-    
-    INSTRUCTIONS:
-    1. Identify key entities in the query:
-       - Source table(s)
-       - Source field(s)
-       - Filtering or transformation conditions
-       - Logical flow (IF/THEN/ELSE statements)
-       - Insertion fields
-    
-    2. Match these entities to the corresponding entries in the joined_data.csv schema
-       - For each entity, find the closest match in the schema
-       - Resolve ambiguities using the description field
-       - Validate that the identified fields exist in the mentioned tables
-    
-    3. Generate a structured representation of the transformation logic:
-       - JSON format showing the transformation flow
-       - Include all source tables, fields, conditions, and targets
-       - Map conditional logic to proper syntax
-       - Handle fallback scenarios (ELSE conditions)
-       - Use the provided key mappings to connect source and target fields correctly
-       - Consider the current state of the target data shown above
-    
-    4. Create a resolved query that takes the actual field and table names, and does not change what is said in the query
-    
-    5. For the insertion fields, identify the fields that need to be inserted into the target table based on the User query.
-    
-    Respond with:
-    ```json
-    {{
-        "query_type": "SIMPLE_TRANSFORMATION",
-        "source_table_name": [List of all source_tables],
-        "source_field_names": [List of all source_fields],
-        "filtering_fields": [List of filtering fields],
-        "insertion_fields": [field to be inserted],
-        "target_sap_fields": [Target field(s)],
-        "Resolved_query": [Rephrased query with resolved data]
-    }}
-    ```
+        CRITICAL FIELD IDENTIFICATION RULES:
+
+    **insertion_fields**: These must contain SOURCE column names from SOURCE tables
+    - ✅ CORRECT: ["SOURCE_COL_X"] (actual column name in source table)
+    - ❌ WRONG: ["TARGET_COL_Y"] (this belongs to target table)
+    - Rule: insertion_fields = "What columns do I SELECT FROM the source table?"
+
+    **target_sap_fields**: These contain TARGET column names from TARGET tables  
+    - ✅ CORRECT: ["TARGET_COL_Y"] (actual column name in target table)
+    - Rule: target_sap_fields = "What columns do I INSERT INTO in the target table?"
+
+    **Key Relationship**: SOURCE.insertion_field → TARGET.target_field
+    - Example: source_table.source_column → target_table.target_column
+    - The DATA represents the same logical concept, but COLUMN NAMES may be different
+
+    **Validation Check**:
+    - insertion_fields must exist in the source_table_name tables specified
+    - target_sap_fields must exist in the target_table_name tables specified
+    - NEVER put target table column names in insertion_fields
+    - NEVER put source table column names in target_sap_fields
+
+    **General Example Pattern**:
+    - Query: "Bring [semantic_field] from [source_table]"
+    - Source table: [source_table] (has column [actual_source_column])
+    - Target table: [target_table] (has column [actual_target_column]) 
+    - insertion_fields: ["actual_source_column"] ✅ (from source table schema)
+    - target_sap_fields: ["actual_target_column"] ✅ (from target table schema)
     """
 }
 
-def map_keys(tables,key_mapping):
-    """
-    Map keys from the key_mapping to the provided tables
-    
-    Parameters:
-    tables (list): List of table names
-    key_mapping (list): List of key mappings
-    
-    Returns:
-    dict: Mapped keys for each table
-    """
-    table_keys={}
-    mapped_keys = {}
-    
-    for keys in key_mapping:
-        if isinstance(keys, dict):
-            source_col = keys.get("source_col")
-            target_col = keys.get("target_col")
-            if source_col and target_col:
-                for table in tables:
-                    if re.match(r"^t_\d+_.*$",table):
-                        if table not in table_keys:
-                            table_keys[table] = [target_col]
-                        else:
-                            if target_col not in table_keys[table]:
-                                table_keys[table].append(target_col)
-                    else:
-                        if table not in table_keys:
-                            table_keys[table] = [source_col]
-                        else:
-                            table_keys[table].append(source_col)
-    return mapped_keys
 
-
-def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
+def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None, is_selection_criteria = False):
     """
     Process a query based on its classified type
     
@@ -1552,11 +1556,11 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         try:
 
             target_table = joined_df["table_name"].unique().tolist()
+            if is_selection_criteria:
+                original_target_table = target_table
+                target_table = target_table+"_src"
             if target_table and len(target_table) > 0:
-
                 target_df_sample = sql_executor.get_table_sample(target_table[0])
-                
-
                 if isinstance(target_df_sample, dict) and "error_type" in target_df_sample:
                     logger.warning(f"SQL-based target data sample retrieval failed, using fallback")
 
@@ -1575,122 +1579,30 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             logger.warning(f"Error getting target data sample: {e}")
             target_df_sample = []
             
-
-        query_type, classification_details = classify_query_with_llm(query,target_table,list(joined_df.itertuples(index=False)))
+        context = context_manager.get_context(session_id) if session_id else None
+        query_type, classification_details = classify_query_with_llm(query,target_table, context)
         enhanced_classification = enhance_classification_before_processing(
             classification_details, segment_id, db_path=os.environ.get('DB_PATH'),joined_df=joined_df
         )
         classification_details = enhanced_classification
+        classification_details["Transformation_context"] = context
         logger.info(f"Query type: {query_type}")
         logger.info(f"Classification details: {classification_details}")
 
-
-
         prompt_template = PROMPT_TEMPLATES.get(query_type, PROMPT_TEMPLATES["SIMPLE_TRANSFORMATION"])
-        key_mapping = context_manager.get_key_mapping(session_id) if session_id else []
-        logger.info(f"Key mapping for session {session_id}: {key_mapping}")
-
-        target_df_sample_str = "No current target data available"
         if target_df_sample:
             try:
                 target_df_sample_str = json.dumps(target_df_sample, indent=2)
             except Exception as e:
                 logger.warning(f"Error formatting target data sample: {e}")
-        
-        segment_prompt = ""
-        if query_type in ["CROSS_SEGMENT", "JOIN_OPERATION"]:
-            segment_glossary = enhanced_classification.get('enhanced_matching', {}).get('segment_target_tables', {})
-            source_tables_from_classification = enhanced_classification.get('enhanced_matching', {}).get('tables_mentioned', [])
-            
-            segment_prompt = create_enhanced_segment_column_prompt(
-                segment_glossary, 
-                key_mapping, 
-                source_tables_from_classification,
-                query_type
-            )
-        visited_segments_str = "No previously visited segments"
-        if visited_segments:
-            try:
-                formatted_segments = []
-                for seg_id, seg_info in visited_segments.items():
-                    formatted_segments.append(
-                        f"{seg_info.get('name')} (table: {seg_info.get('table_name')}, id: {seg_id})"
-                    )
-                visited_segments_str = "\n".join(formatted_segments)
-            except Exception as e:
-                logger.warning(f"Error formatting visited segments: {e}")
                 
-        mapped_keys = map_keys(
-            classification_details.get('enhanced_matching', {}).get('column_validation', []).get("table_columns", {}).keys(),
-            key_mapping
-        )
-        classification_details['mapped_keys'] = mapped_keys
-        table_desc = joined_df
-        with open('classification_details.json', 'w') as f:
-            json.dump(classification_details, f, indent=2)
-#         additional_context_prompt = f"""
-# COMPREHENSIVE QUERY ANALYSIS:
 
-# CLASSIFICATION RESULTS:
-# - Query Type: {classification_details.get('primary_classification', 'Unknown')}
-# - Confidence: {classification_details.get('confidence', 0)}
-# - Reasoning: {classification_details.get('reasoning', 'Not provided')}
+        table_desc = joined_df[joined_df.columns.tolist()[:-1]]
 
-# DETECTED ELEMENTS:
-# - SAP Tables Mentioned: {', '.join(classification_details.get('detected_elements', {}).get('sap_tables_mentioned', [])) or 'None'}
-# - Columns Mentioned: {', '.join(classification_details.get('detected_elements', {}).get('columns_Mentioned', [])) or 'None'}
-# - Segments Referenced: {', '.join(classification_details.get('detected_elements', {}).get('segments_mentioned', [])) or 'None'}
-# - Join Indicators: {', '.join(classification_details.get('detected_elements', {}).get('join_indicators', [])) or 'None'}
-# - Validation Indicators: {', '.join(classification_details.get('detected_elements', {}).get('validation_indicators', [])) or 'None'}
-# - Aggregation Indicators: {', '.join(classification_details.get('detected_elements', {}).get('aggregation_indicators', [])) or 'None'}
-# - Transformation References: {', '.join(classification_details.get('detected_elements', {}).get('transformation_references', [])) or 'None'}
-# - Has Multiple Tables: {classification_details.get('detected_elements', {}).get('has_multiple_tables', False)}
-
-# TABLE VALIDATION:
-# - Valid Tables: {', '.join(classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('valid_tables', {}).keys()) or 'None found'}
-# - Invalid Tables: {', '.join([t.get('original_name', '') for t in classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('invalid_tables', [])]) or 'None'}
-# - Schema Errors: {len(classification_details.get('enhanced_matching', {}).get('table_validation', {}).get('schema_errors', []))} errors
-
-# COLUMN VALIDATION:
-# - Columns Found in Database: {', '.join(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('columns_found_in_tables', {}).keys()) or 'None'}
-# - Missing Columns: {', '.join(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('missing_columns', [])) or 'None'}
-# - Total Tables Scanned: {len(classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('table_columns', {}))}
-
-# DETAILED COLUMN-TABLE MAPPING:
-# {chr(10).join([f"- Column '{col}': found in {len(tables)} table(s) → {', '.join([t.get('table', '') + '(' + t.get('actual_column_name', '') + ')' for t in tables])}" for col, tables in classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('columns_found_in_tables', {}).items()]) or '- No valid column mappings found'}
-
-# TABLE COLUMNS AVAILABLE:
-# {chr(10).join([f"- {table}: {', '.join(cols[:5])}{' ...' if len(cols) > 5 else ''} ({len(cols)} total)" for table, cols in classification_details.get('enhanced_matching', {}).get('column_validation', {}).get('table_columns', {}).items()]) or '- No table schemas available'}
-
-# SEGMENT MAPPINGS:
-# {chr(10).join([f"- Segment '{seg}' → Tables: {', '.join(tables)}" for seg, tables in classification_details.get('enhanced_matching', {}).get('segment_target_tables', {}).items()]) or '- No segment mappings available'}
-
-# FUZZY MATCHING RESULTS:
-# - Tables with Confidence: {', '.join([f"{table}({conf:.0%})" for table, conf in classification_details.get('enhanced_matching', {}).get('table_match_confidence', {}).items()]) or 'None'}
-# - Columns in Mentioned Tables: {', '.join([f"{table}:[{', '.join(cols)}]" for table, cols in classification_details.get('enhanced_matching', {}).get('columns_in_mentioned_table', {}).items()]) or 'None'}
-
-# Column Glossary Matching:
-# - Columns Matched: {classification_details.get('enhanced_matching', {}).get('column_glossary_matching', {}).get('matched_columns', []) or 'None'}
-# - Column Hints: {classification_details.get('enhanced_matching', {}).get('column_glossary_matching', {}).get('column_hints', {}) or 'None'}
-
-# Key Columns Mapping:
-# Following are the keys in our context
-# {chr(10).join([f"- {key}: {', '.join(cols)}" for key, cols in mapped_keys.items()]) or '- No key mappings found'}
-# Mapping of these keys to the tables for the current query:
-# {mapped_keys if mapped_keys else '- No key mappings found'}
-
-# {"""SEGMENT AND COLUMN MAPPING DETAILS:
-# {segment_prompt}
-# VERIFICATION RESULTS:
-# - Verified column mappings have been checked against actual database schemas
-# - Use the EXACT column names specified above for each table
-# - Target tables used as source have different column names than original source tables""" if segment_prompt else ""}
-# """
-        
         formatted_prompt = prompt_template.format(
             question=query,
             table_desc=list(table_desc.itertuples(index=False)),
-            target_df_sample=target_df_sample_str,
+            target_table_name=", ".join(target_table) if target_table else "Not specified",
             segment_mapping=context_manager.get_segments(session_id) if session_id else [],
             additional_context=classification_details
         )
@@ -1712,24 +1624,18 @@ Use the provided segment mappings to identify the correct tables for each segmen
             logger.error("GEMINI_API_KEY not found in environment variables")
             raise APIError("Gemini API key not configured")
             
-        client = genai.Client(api_key=api_key)
-        
-        response = client.models.generate_content(
-            model="gemini-2.5-flash", 
-            contents=formatted_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.5, top_p=0.95, top_k=30
-            ),
+        llm = LLMManager(
+            provider="google",
+            model="gemini/gemini-2.5-flash",
+            api_key=api_key
         )
         
-
-        json_str = re.search(r"```json(.*?)```", response.text, re.DOTALL)
+        response = llm.generate(formatted_prompt, temperature=0.3, max_tokens=1500)
+        json_str = re.search(r"```json(.*?)```", response, re.DOTALL)
         if json_str:
             parsed_data = json.loads(json_str.group(1).strip())
         else:
-
-            parsed_data = json.loads(response.text.strip())
-        
+            parsed_data = json.loads(response.strip())
         logger.info(f"Parsed data: {parsed_data}")
         parsed_data["query_type"] = query_type
         
@@ -1774,14 +1680,15 @@ Use the provided segment mappings to identify the correct tables for each segmen
         results = process_info(parsed_data, conn)
         
 
-        if query_type == "SIMPLE_TRANSFORMATION":
-
-            results = _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn)
+        if query_type == "SIMPLE_TRANSFORMATION":                
+            results = _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn,is_selection_criteria=is_selection_criteria)
         else:
-
-
             results["key_mapping"] = parsed_data["key_mapping"]
-        
+        if is_selection_criteria:
+            source_table_name = joined_df[joined_df["target_sap_fields"].isin(results.get("target_sap_fields", []))]["table_name"].unique().tolist()
+            results["selection_criteria_source_table"] = source_table_name[0] if source_table_name and len(source_table_name)>0 else None
+            results["selection_criteria_target_field"] = results.get("target_sap_fields", [])[0] if results.get("target_sap_fields", []) else None
+            results["selection_criteria_target_table"] = original_target_table[0] if original_target_table and len(original_target_table)>0 else None
 
         results["session_id"] = session_id
         results["query_type"] = query_type
@@ -1803,7 +1710,7 @@ Use the provided segment mappings to identify the correct tables for each segmen
             except Exception as e:
                 logger.error(f"Error closing database connection: {e}")
 
-def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn):
+def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn,is_selection_criteria=False):
     """
     Handle key mapping specifically for simple transformations
     
@@ -1818,10 +1725,13 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
             for target_field in results["target_sap_fields"]:
                 target_field_filter = joined_df["target_sap_field"] == target_field
                 if target_field_filter.any() and joined_df[target_field_filter]["isKey"].values[0] == "True":
-
                     logger.info(f"Target field '{target_field}' is identified as a primary key")
+                    if is_selection_criteria:
 
-
+                        key_mapping = context_manager.add_key_mapping(
+                                session_id, target_field, joined_df[target_field_filter]["source_field_name"].values[0]
+                            )
+                        break
                     if results["insertion_fields"] and len(results["insertion_fields"]) > 0:
 
 
@@ -1927,7 +1837,6 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
                         logger.warning("No insertion fields found for key mapping")
                         key_mapping = context_manager.get_key_mapping(session_id)
                 else:
-
                     key_mapping = context_manager.get_key_mapping(session_id)
         except Exception as e:
             logger.error(f"Error processing key mapping: {e}")
@@ -2354,8 +2263,6 @@ class ContextualSessionManager:
                 return False
                 
             context_path = f"{self.storage_path}/{session_id}/context.json"
-            
-
             context = self.get_context(session_id)
             if not context:
                 context = {
@@ -2545,6 +2452,7 @@ def fetch_data_by_ids(object_id, segment_id, project_id, conn):
             f.description,
             f.isMandatory,
             f.isKey,
+            f.source_table,
             r.source_field_name,
             r.target_sap_field,
             s.table_name
@@ -2645,7 +2553,7 @@ def missing_values_handling(df):
         logger.error(f"Error in missing_values_handling: {e}")
         return df
 
-def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None):
+def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None, is_selection_criteria=False):
     """
     Process a query with context awareness and automatic query type detection
     
@@ -2684,7 +2592,8 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
             project_id, 
             query, 
             session_id, 
-            target_sap_fields
+            target_sap_fields,
+            is_selection_criteria
         )
     except Exception as e:
         logger.error(f"Error in process_query: {e}")
