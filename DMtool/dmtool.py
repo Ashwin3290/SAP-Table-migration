@@ -511,18 +511,6 @@ class DMTool:
                 
 
             additional_source_tables = []
-
-
-            logger.info(f"Processing query: {query}")
-            resolved_data = process_query(
-                object_id, segment_id, project_id, query, session_id=session_id
-            )
-
-            if not resolved_data:
-                logger.error("Failed to resolve query with planner")
-                return "Failed to resolve query", session_id
-            
-
             template = self.query_template_repo.find_matching_template(query)
             logger.info(f"Found template: {template.get('id', 'None')} for query '{query}'")
             if not template:
@@ -534,6 +522,16 @@ class DMTool:
                     "query": "SELECT {field} FROM {table} WHERE {filter_field} = '{filter_value}'",
                     "plan": ["1. Identify source and target", "2. Generate basic SQL query"]
                 }
+
+            logger.info(f"Processing query: {query}")
+            resolved_data = process_query(
+                object_id, segment_id, project_id, query,template=template, session_id=session_id
+            )
+
+            if not resolved_data:
+                logger.error("Failed to resolve query with planner")
+                return "Failed to resolve query", session_id
+            
             query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")
 
             session_id = resolved_data.get("session_id")
@@ -772,18 +770,6 @@ class DMTool:
 
             additional_source_tables = []
 
-
-            logger.info(f"Processing query: {query}")
-            resolved_data = process_query(
-                object_id, segment_id, project_id, query, session_id=session_id, is_selection_criteria=True
-            )
-            
-
-            if not resolved_data:
-                logger.error("Failed to resolve query with planner")
-                return "Failed to resolve query", session_id
-            
-
             template={
                 "id": "filter_and_keep_rows",
                 "prompt": "Filter and update target table where {filter_field} = {filter_value}",
@@ -796,6 +782,16 @@ class DMTool:
                     "5. Consider backing up data before executing the DELETE operation"
                 ]
                 }
+            logger.info(f"Processing query: {query}")
+            resolved_data = process_query(
+                object_id, segment_id, project_id, query, session_id=session_id,template=template, is_selection_criteria=True
+            )
+            
+
+            if not resolved_data:
+                logger.error("Failed to resolve query with planner")
+                return "Failed to resolve query", session_id
+            
 
             query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")
 
@@ -834,9 +830,7 @@ class DMTool:
                         resolved_data["source_table_name"] = source_tables
 
                 
-                # planner_info = self._extract_planner_info(resolved_data)
                 planner_info = resolved_data
-                # sql_plan = self._create_operation_plan(planner_info["restructured_query"], planner_info, template)
                 select_query = f"SELECT * FROM {validate_sql_identifier(target_table)}"
                 target_data_before = self.sql_executor.execute_and_fetch_df(select_query)
                 sql_query, sql_params = self.sql_generator.generate_sql(planner_info, template,sql_plan=planner_info.get("transformation_plan", ""))
@@ -864,10 +858,11 @@ class DMTool:
                         planner_info["target_table_name"],
                     )
 
-                if target_table and query_type in ["SIMPLE_TRANSFORMATION", "JOIN_OPERATION", "CROSS_SEGMENT", "AGGREGATION_OPERATION"]:
+                if target_table:
                     try:
 
                         select_query = f"SELECT * FROM [{validate_sql_identifier(target_table)}]"
+                        self.sql_executor.sync_src_to_target(target_table)
                         target_data = self.sql_executor.execute_and_fetch_df(select_query)
                         
                         if isinstance(target_data, pd.DataFrame) and not target_data.empty:
@@ -892,15 +887,12 @@ class DMTool:
                                     "execution_result": {
                                         "success": True,
                                         "rows_affected": len(target_data) if isinstance(target_data, pd.DataFrame) else 0,
-                                        "steps_completed": result.get("completed_statements", 0)
-                                    },
-                                    "steps_completed": result.get("completed_statements", 0)
+                                    }
                                 }
                                 
                                 context_manager.add_transformation_record(session_id, transformation_data)
-                                self.sql_executor.sync_src_to_target(target_table)
-                                target_data_after = self.sql_executor.execute_and_fetch_df(select_query)
-                                affected_indexes = self._find_affected_indexes(target_data_before,target_data_after)
+                                affected_indexes = self._find_affected_indexes(target_data_before,target_data) 
+                                return target_data, affected_indexes
                                 
                             except Exception as e:
                                 logger.warning(f"Could not save transformation record: {e}")
@@ -913,7 +905,6 @@ class DMTool:
                             return empty_df, []
                             
                     except Exception as e:
-
                         return  result, []
                         
             except Exception as e:

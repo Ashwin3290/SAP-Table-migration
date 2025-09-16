@@ -170,9 +170,9 @@ class SQLExecutor:
             if conn:
                 conn.close()
 
-    def sync_src_to_target(self, target_table:str):
+    def sync_src_to_target(self, target_table: str):
         """
-        Sync source table to target table
+        Sync source table to target table with column intersection handling
         Parameters:
         target_table (str): Name of the target table
         Returns:
@@ -180,21 +180,55 @@ class SQLExecutor:
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-
+        logger.info(f"Starting sync from {target_table}_src to {target_table}")
         try:
+            # Get column names from source table
+            cursor.execute(f"PRAGMA table_info({target_table}_src)")
+            src_columns = [row[1] for row in cursor.fetchall()]
+            
+            # Get column names from target table
+            cursor.execute(f"PRAGMA table_info({target_table})")
+            target_columns = [row[1] for row in cursor.fetchall()]
+            
+            # Find intersection of columns (common columns)
+            common_columns = list(set(src_columns) & set(target_columns))
+            
+            if not common_columns:
+                logger.error(f"No common columns found between {target_table}_src and {target_table}")
+                return False
+            
+            # Create SELECT clause for source table (only common columns)
+            src_select = ", ".join(common_columns)
+            
+            # Create column list for INSERT (all target columns)
+            target_column_list = ", ".join(target_columns)
+            
+            # Create SELECT clause that includes NULLs for non-common target columns
+            select_values = []
+            for col in target_columns:
+                if col in common_columns:
+                    select_values.append(col)
+                else:
+                    select_values.append("NULL")
+            
+            select_clause = ", ".join(select_values)
+            
             sync_query = f"""
-            INSERT INTO {target_table}
-            SELECT * FROM {target_table}_src
+            INSERT INTO {target_table} ({target_column_list})
+            SELECT {select_clause} FROM {target_table}_src
             """
             cursor.execute(sync_query)
             conn.commit()
             logger.info(f"Successfully synced data from {target_table}_src to {target_table}")
             return True
+            
         except sqlite3.Error as e:
             logger.error(f"SQLite error during sync: {e}")
             if conn:
                 conn.rollback()
             return False
+        finally:
+            conn.close()
 
     def execute_and_fetch_df(self, query: str, params: Optional[Dict[str, Any]] = None) -> Union[pd.DataFrame, Dict[str, Any]]:
         """

@@ -715,6 +715,9 @@ PROMPT_TEMPLATES = {
     Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
     Important Query Context:{additional_context}
     
+    Template for logic:
+    {template}
+
     Note:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
     - Do not invent new tables or columns that are not mentioned in the query or the mappings.
@@ -852,6 +855,9 @@ PROMPT_TEMPLATES = {
     Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
     Important Query Context:{additional_context}
 
+    Template for logic:
+    {template}
+
     INSTRUCTIONS:
     1. Identify key entities in the join query:
        - All source tables needed for the join
@@ -977,6 +983,9 @@ PROMPT_TEMPLATES = {
     Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
     Important Query Context:{additional_context}
 
+    Template for logic:
+    {template}
+
     Notes:
     - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
     - Do not invent new tables or columns that are not mentioned in the query or the mappings.
@@ -1091,7 +1100,7 @@ PROMPT_TEMPLATES = {
 }
 
 
-def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None, is_selection_criteria = False):
+def process_query_by_type(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None,template=None, is_selection_criteria = False):
     """
     Process a query based on its classified type
     
@@ -1111,13 +1120,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
     conn = None
     try:
 
-        context_manager = ContextualSessionManager()
-        
-
-        previous_context = context_manager.get_context(session_id) if session_id else None
-        visited_segments = previous_context.get("segments_visited", {}) if previous_context else {}
-        
-
+        context_manager = ContextualSessionManager()    
         conn = sqlite3.connect(os.environ.get('DB_PATH'))
         
 
@@ -1168,6 +1171,9 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             
         if is_selection_criteria:
             context = None
+        else:
+            context = context_manager.get_context(session_id) if session_id else None
+        visited_segments = context.get("segments_visited", {}) if context else {}
         if is_selection_criteria:
             query+=f" Filttering should be done on {target_table}" 
         query_type, classification_details = classify_query_with_llm(query,target_table, context)
@@ -1199,7 +1205,8 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             table_desc=list(table_desc.itertuples(index=False)),
             target_table_name=", ".join(target_table) if target_table else "Not specified",
             segment_mapping=context_manager.get_segments(session_id) if session_id else [],
-            additional_context=classification_details
+            additional_context=classification_details,
+            template=template
         )
         
 
@@ -1264,7 +1271,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         results = process_info(parsed_data, conn)
         
 
-        if query_type == "SIMPLE_TRANSFORMATION":                
+        if query_type == "SIMPLE_TRANSFORMATION" or is_selection_criteria:                
             results = _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn,is_selection_criteria=is_selection_criteria)
         else:
             results["key_mapping"] = parsed_data["key_mapping"]
@@ -1293,72 +1300,84 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
                 conn.close()
             except Exception as e:
                 logger.error(f"Error closing database connection: {e}")
-
-def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn,is_selection_criteria=False):
+                
+def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_id, conn, is_selection_criteria=False):
     """
     Handle key mapping specifically for simple transformations
     
     This uses the original key mapping logic for simple transformations
+    For selection criteria, it directly adds all fields marked as keys
     """
     key_mapping = []
+    
+    # For selection criteria: directly add all fields marked as keys
+    if is_selection_criteria:
+        try:
+            # Find all rows where isKey == "True"
+            key_fields = joined_df[joined_df["isKey"] == "True"]
+            
+            for _, row in key_fields.iterrows():
+                target_field = row["target_sap_field"]
+                source_field = row["source_field_name"]
+                
+                # Only add if both target and source field names are present and not null
+                if pd.notna(target_field) and pd.notna(source_field) and target_field and source_field:
+                    key_mapping = context_manager.add_key_mapping(session_id, target_field, source_field)
+                    logger.info(f"Added key mapping for selection criteria: {target_field} -> {source_field}")
+            
+            results["key_mapping"] = key_mapping
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error processing key mapping for selection criteria: {e}")
+            results["key_mapping"] = []
+            return results
+    
+    # Original logic for non-selection criteria
     key_mapping = context_manager.get_key_mapping(session_id)
     
     if not key_mapping:
         try:
-
             for target_field in results["target_sap_fields"]:
                 target_field_filter = joined_df["target_sap_field"] == target_field
                 if target_field_filter.any() and joined_df[target_field_filter]["isKey"].values[0] == "True":
                     logger.info(f"Target field '{target_field}' is identified as a primary key")
-                    if is_selection_criteria:
-
-                        key_mapping = context_manager.add_key_mapping(
-                                session_id, target_field, joined_df[target_field_filter]["source_field_name"].values[0]
-                            )
-                        break
+                    
                     if results["insertion_fields"] and len(results["insertion_fields"]) > 0:
-
-
                         source_field = None
                         
-
+                        # Find matching source field
                         for field in results["insertion_fields"]:
                             if field in results["source_field_names"]:
                                 source_field = field
                                 break
                                 
-
                         if not source_field and results["insertion_fields"]:
                             source_field = results["insertion_fields"][0]
                             
-
                         source_table = (
                             results["source_table_name"][0]
                             if results["source_table_name"]
                             else None
                         )
 
-
                         if source_table and source_field:
                             error = None
                             try:
-
+                                # Data validation logic
                                 has_nulls = False
                                 has_duplicates = False
                                 
                                 try:
-
                                     safe_table = validate_sql_identifier(source_table)
                                     safe_field = validate_sql_identifier(source_field)
                                     
-
                                     null_query = f"SELECT COUNT(*) AS null_count FROM {safe_table} WHERE {safe_field} IS NULL"
                                     null_result = sql_executor.execute_query(null_query)
                                     
                                     if isinstance(null_result, list) and null_result:
                                         has_nulls = null_result[0].get("null_count", 0) > 0
                                     
-
                                     dup_query = f"""
                                     SELECT COUNT(*) AS dup_count
                                     FROM (
@@ -1379,10 +1398,7 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
                                     has_nulls = True
                                     has_duplicates = True
                                     
-
-
                                 if has_nulls or has_duplicates:
-
                                     restructured_query = results.get("restructured_query", "")
                                     is_distinct_query = (
                                         check_distinct_requirement(restructured_query) if restructured_query 
@@ -1390,7 +1406,6 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
                                     )
 
                                     if not is_distinct_query:
-
                                         error_msg = f"Cannot use '{source_field}' as a primary key: "
                                         if has_nulls and has_duplicates:
                                             error_msg += "contains null values and duplicate entries"
@@ -1410,7 +1425,6 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
                                 error = f"Error during key validation: {e}"
                                 
                         if not error and source_field:
-
                             logger.info(f"Adding key mapping: {target_field} -> {source_field}")
                             key_mapping = context_manager.add_key_mapping(
                                 session_id, target_field, source_field
@@ -1424,14 +1438,10 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
                     key_mapping = context_manager.get_key_mapping(session_id)
         except Exception as e:
             logger.error(f"Error processing key mapping: {e}")
-
             key_mapping = []
 
-
     results["key_mapping"] = key_mapping
-    
     return results
-
 class SQLInjectionError(Exception):
     """Exception raised for potential SQL injection attempts."""
     pass
@@ -2136,7 +2146,7 @@ def missing_values_handling(df):
         logger.error(f"Error in missing_values_handling: {e}")
         return df
 
-def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None, is_selection_criteria=False):
+def process_query(object_id, segment_id, project_id, query, session_id=None, target_sap_fields=None,template = None, is_selection_criteria=False):
     """
     Process a query with context awareness and automatic query type detection
     
@@ -2176,6 +2186,7 @@ def process_query(object_id, segment_id, project_id, query, session_id=None, tar
             query, 
             session_id, 
             target_sap_fields,
+            template,
             is_selection_criteria
         )
     except Exception as e:
