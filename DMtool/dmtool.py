@@ -852,34 +852,6 @@ class DMTool:
                     logger.error(f"SQL execution error: {result}")
                     return f"SQL execution failed: {result.get('error_message', 'Unknown error')}", session_id
 
-                if isinstance(result, dict) and result.get("multi_query_result"):
-                    logger.info(f"Processing multi-query result: {result.get('completed_statements', 0)} statements completed")
-                    multi_result = self._handle_multi_query_result(result, planner_info, session_id)
-                    
-                    if result.get("success") and len(multi_result) == 2:
-                        try:
-                            context_manager = ContextualSessionManager()
-                            transformation_data = {
-                                "original_query": query,
-                                "query_type": "SELECTION_CRITERIA",
-                                "source_tables": planner_info.get("selection_criteria_source_table", []),
-                                "target_table": planner_info.get("selection_criteria_target_table", []),
-                                "fields_affected": planner_info.get("target_sap_field", []),
-                                "execution_result": {
-                                    "success": True,
-                                    "rows_affected": len(multi_result[0]) if isinstance(multi_result[0], pd.DataFrame) else 0,
-                                    "steps_completed": result.get("completed_statements", 0)
-                                },
-                                "steps_completed": result.get("completed_statements", 0)
-                            }
-                            context_manager.add_transformation_record(session_id, transformation_data)
-                            target_data_after = self.sql_executor.execute_and_fetch_df(select_query)
-                            affected_indexes = self._find_affected_indexes(target_data_before,target_data_after)
-                        except Exception as e:
-                            logger.warning(f"Could not save transformation record for multi-query: {e}")
-                    
-                    return multi_result[0], affected_indexes
-
                 if "selection_criteria_target_table" in resolved_data:
                     target_table = resolved_data["selection_criteria_target_table"]
                     if isinstance(target_table, list) and len(target_table) > 0:
@@ -919,13 +891,14 @@ class DMTool:
                                     "fields_affected": planner_info.get("target_sap_field", []),
                                     "execution_result": {
                                         "success": True,
-                                        "rows_affected": len(multi_result[0]) if isinstance(multi_result[0], pd.DataFrame) else 0,
+                                        "rows_affected": len(target_data) if isinstance(target_data, pd.DataFrame) else 0,
                                         "steps_completed": result.get("completed_statements", 0)
                                     },
                                     "steps_completed": result.get("completed_statements", 0)
                                 }
                                 
                                 context_manager.add_transformation_record(session_id, transformation_data)
+                                self.sql_executor.sync_src_to_target(target_table)
                                 target_data_after = self.sql_executor.execute_and_fetch_df(select_query)
                                 affected_indexes = self._find_affected_indexes(target_data_before,target_data_after)
                                 
@@ -1134,3 +1107,4 @@ class DMTool:
     📝 Session ID: {session_id}"""
             
             return None, error_message, session_id
+            
