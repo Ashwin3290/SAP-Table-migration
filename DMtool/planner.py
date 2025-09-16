@@ -1142,34 +1142,29 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         
 
         target_df_sample = None
-        try:
 
-            target_table = joined_df["table_name"].unique().tolist()
-            if is_selection_criteria:
-                original_target_table = target_table.copy()
-                target_table = [table_name+"_src" for table_name in target_table]
-            logger.info(f"Target table identified: {target_table}")
-            if target_table and len(target_table) > 0:
-                target_df_sample = sql_executor.get_table_sample(target_table[0])
-                if isinstance(target_df_sample, dict) and "error_type" in target_df_sample:
-                    logger.warning(f"SQL-based target data sample retrieval failed, using fallback")
+        target_table = joined_df["table_name"].unique().tolist()
+        if is_selection_criteria:
+            original_target_table = target_table.copy()
+            target_table = [table_name+"_src" for table_name in target_table]
+        logger.info(f"Target table identified: {target_table}")
+        if target_table and len(target_table) > 0:
+            target_df_sample = sql_executor.get_table_sample(target_table[0])
+            if isinstance(target_df_sample, dict) and "error_type" in target_df_sample:
+                logger.warning(f"SQL-based target data sample retrieval failed, using fallback")
 
-                    target_df = get_or_create_session_target_df(
-                        session_id, target_table[0], conn
-                    )
-                    target_df_sample = (
-                        target_df.head(5).to_dict("records")
-                        if not target_df.empty
-                        else []
-                    )
-                else:
-
-                    target_df_sample = target_df_sample.head(5).to_dict("records") if not target_df_sample.empty else []
-        except Exception as e:
-            logger.warning(f"Error getting target data sample: {e}")
-            target_df_sample = []
+                target_df = get_or_create_session_target_df(
+                    session_id, target_table[0], conn
+                )
+                target_df_sample = (
+                    target_df.head(5).to_dict("records")
+                    if not target_df.empty
+                    else []
+                )
+            else:
+                target_df_sample = target_df_sample.head(5).to_dict("records") if not target_df_sample.empty else []
             
-       if is_selection_criteria:
+        if is_selection_criteria:
             context = None
         else:
             context = context_manager.get_context(session_id) if session_id else None
@@ -1189,12 +1184,6 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         logger.info(f"Classification details: {classification_details}")
 
         prompt_template = PROMPT_TEMPLATES.get(query_type, PROMPT_TEMPLATES["SIMPLE_TRANSFORMATION"])
-        if target_df_sample:
-            try:
-                target_df_sample_str = json.dumps(target_df_sample, indent=2)
-            except Exception as e:
-                logger.warning(f"Error formatting target data sample: {e}")
-                
         if not is_selection_criteria:
             table_desc = joined_df[joined_df.columns.tolist()[:-1]]
         else:
@@ -1295,6 +1284,9 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
         results["target_table_schema"] = parsed_data.get("target_table_schema", [])
         
         return results
+
+
+
     finally:
         if conn:
             try:
