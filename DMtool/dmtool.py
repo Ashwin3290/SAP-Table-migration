@@ -784,16 +784,17 @@ class DMTool:
                 return "Failed to resolve query", session_id
             
 
-            template = self.query_template_repo.find_matching_template(query)
-            logger.info(f"Found template: {template.get('id', 'None')} for query '{query}'")
-            if not template:
-                logger.error("No matching template found for query")
-
-                template = {
-                    "id": "fallback",
-                    "prompt": "Basic transformation",
-                    "query": "SELECT {field} FROM {table} WHERE {filter_field} = '{filter_value}'",
-                    "plan": ["1. Identify source and target", "2. Generate basic SQL query"]
+            template={
+                "id": "filter_and_keep_rows",
+                "prompt": "Filter and update target table where {filter_field} = {filter_value}",
+                "query": "DELETE FROM {target_table} WHERE {filter_field} != '{filter_value}'",
+                "plan": [
+                    "1. Identify the target table to filter",
+                    "2. Identify the filter field and value condition", 
+                    "3. Use DELETE statement to remove all rows that don't match the condition",
+                    "4. This will keep only rows where the condition is true",
+                    "5. Consider backing up data before executing the DELETE operation"
+                ]
                 }
 
             query_type = resolved_data.get("query_type", "SIMPLE_TRANSFORMATION")

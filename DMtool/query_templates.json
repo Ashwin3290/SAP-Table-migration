@@ -367,5 +367,16 @@
       "3. Use strftime('%B %d, %Y', date) to format as 'Month DD, YYYY'",
       "4. Update all records with the human-readable formatted dates"
     ]
+  },
+  {
+    "id": "filter_and_keep_rows",
+    "prompt": "Filter and update target table where {filter_field} = {filter_value}",
+    "query": "DELETE FROM {target_table} WHERE {filter_field} != '{filter_value}'",
+    "plan": [
+        "1. Identify the target table to filter",
+        "2. Identify the filter field and value condition", 
+        "3. Use DELETE statement to remove all rows that don't match the condition",
+        "4. This will keep only rows where the condition is true"
+    ]
   }
 ]
