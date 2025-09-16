@@ -1120,7 +1120,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
     conn = None
     try:
 
-        context_manager = ContextualSessionManager()    
+        context_manager = ContextualSessionManager()
         conn = sqlite3.connect(os.environ.get('DB_PATH'))
         
 
@@ -1169,11 +1169,12 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             logger.warning(f"Error getting target data sample: {e}")
             target_df_sample = []
             
-        if is_selection_criteria:
+       if is_selection_criteria:
             context = None
         else:
             context = context_manager.get_context(session_id) if session_id else None
-        visited_segments = context.get("segments_visited", {}) if context else {}
+            visited_segments = context.get("segments_visited", {}) if context else {}
+        
         if is_selection_criteria:
             query+=f" Filttering should be done on {target_table}" 
         query_type, classification_details = classify_query_with_llm(query,target_table, context)

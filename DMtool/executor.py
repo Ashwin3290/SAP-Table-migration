@@ -217,9 +217,14 @@ class SQLExecutor:
             INSERT INTO {target_table} ({target_column_list})
             SELECT {select_clause} FROM {target_table}_src
             """
+            
             cursor.execute(sync_query)
             conn.commit()
+            
             logger.info(f"Successfully synced data from {target_table}_src to {target_table}")
+            logger.info(f"Common columns synced: {common_columns}")
+            logger.info(f"Target-only columns filled with NULL: {set(target_columns) - set(common_columns)}")
+            
             return True
             
         except sqlite3.Error as e:
