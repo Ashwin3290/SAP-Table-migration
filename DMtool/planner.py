@@ -802,6 +802,33 @@ PROMPT_TEMPLATES = {
     - Target table: [target_table] (has column [actual_target_column]) 
     - insertion_fields: ["actual_source_column"] ✅ (from source table schema)
     - target_sap_fields: ["actual_target_column"] ✅ (from target table schema)
+
+    Transformation plan REQUIREMENTS:
+    1. Generate 10-20 detailed steps for SQLite query creation
+    2. Each step must use the EXACT qualified table.column references from above
+    3. Include specific SQLite syntax examples in each step
+    4. Verify every table.column reference against the provided qualified fields
+    5. For complex operations, reference the verified join conditions
+
+    CRITICAL RULES For transformation plan:
+    1. Use ONLY the qualified table.column references provided above
+    2. Never invent or modify the table.column combinations
+    3. Follow the exact qualified field mappings for all operations
+    4. For JOIN operations, use the verified join conditions provided
+    5. All column references must be exactly as specified in the qualified fields
+    6. If you need to create a new column, use the ALTER TABLE statement with the exact qualified table.column reference
+    7. If you need to delete a column, use the ALTER TABLE statement with the exact qualified table.column reference
+    8. Do not create or delete columns unless explicitly mentioned in the prompt
+    9. Do not drop any tables or columns.
+    10. If a column is not said to be created, assume it already exists in the tables.
+    11. Do not create or delete tables.
+    12. Do not create transactions
+
+    Notes for transformation plan:
+    1. Use Alter table only when the prompt specifically mentions creation or deletion of a column. DO NOT use Alter for anything else
+    2. If User does not give to create a column then assume that the column already exists in the tables and there is not need to create a column.
+    3. If the prompt does not specify a column, do not include it in the query.
+    4. If we have Column given that exist in a table, then use that column in the query.
     """,
     
     "JOIN_OPERATION": """
@@ -907,6 +934,33 @@ PROMPT_TEMPLATES = {
     - insertion_fields: ["actual_source_column"] ✅ (from source table schema)
     - target_sap_fields: ["actual_target_column"] ✅ (from target table schema)
 
+    Transformation plan REQUIREMENTS:
+    1. Generate 10-20 detailed steps for SQLite query creation
+    2. Each step must use the EXACT qualified table.column references from above
+    3. Include specific SQLite syntax examples in each step
+    4. Verify every table.column reference against the provided qualified fields
+    5. For complex operations, reference the verified join conditions
+
+    CRITICAL RULES For transformation plan:
+    1. Use ONLY the qualified table.column references provided above
+    2. Never invent or modify the table.column combinations
+    3. Follow the exact qualified field mappings for all operations
+    4. For JOIN operations, use the verified join conditions provided
+    5. All column references must be exactly as specified in the qualified fields
+    6. If you need to create a new column, use the ALTER TABLE statement with the exact qualified table.column reference
+    7. If you need to delete a column, use the ALTER TABLE statement with the exact qualified table.column reference
+    8. Do not create or delete columns unless explicitly mentioned in the prompt
+    9. Do not drop any tables or columns.
+    10. If a column is not said to be created, assume it already exists in the tables.
+    11. Do not create or delete tables.
+    12. Do not create transactions
+
+    Notes for transformation plan:
+    1. Use Alter table only when the prompt specifically mentions creation or deletion of a column. DO NOT use Alter for anything else
+    2. If User does not give to create a column then assume that the column already exists in the tables and there is not need to create a column.
+    3. If the prompt does not specify a column, do not include it in the query.
+    4. If we have Column given that exist in a table, then use that column in the query.
+
     """,
     
     "CROSS_SEGMENT": """
@@ -1007,6 +1061,32 @@ PROMPT_TEMPLATES = {
     - Target table: [target_table] (has column [actual_target_column]) 
     - insertion_fields: ["actual_source_column"] ✅ (from source table schema)
     - target_sap_fields: ["actual_target_column"] ✅ (from target table schema)
+    Transformation plan REQUIREMENTS:
+    1. Generate 10-20 detailed steps for SQLite query creation
+    2. Each step must use the EXACT qualified table.column references from above
+    3. Include specific SQLite syntax examples in each step
+    4. Verify every table.column reference against the provided qualified fields
+    5. For complex operations, reference the verified join conditions
+
+    CRITICAL RULES For transformation plan:
+    1. Use ONLY the qualified table.column references provided above
+    2. Never invent or modify the table.column combinations
+    3. Follow the exact qualified field mappings for all operations
+    4. For JOIN operations, use the verified join conditions provided
+    5. All column references must be exactly as specified in the qualified fields
+    6. If you need to create a new column, use the ALTER TABLE statement with the exact qualified table.column reference
+    7. If you need to delete a column, use the ALTER TABLE statement with the exact qualified table.column reference
+    8. Do not create or delete columns unless explicitly mentioned in the prompt
+    9. Do not drop any tables or columns.
+    10. If a column is not said to be created, assume it already exists in the tables.
+    11. Do not create or delete tables.
+    12. Do not create transactions
+
+    Notes for transformation plan:
+    1. Use Alter table only when the prompt specifically mentions creation or deletion of a column. DO NOT use Alter for anything else
+    2. If User does not give to create a column then assume that the column already exists in the tables and there is not need to create a column.
+    3. If the prompt does not specify a column, do not include it in the query.
+    4. If we have Column given that exist in a table, then use that column in the query.
     """
 }
 
@@ -1086,12 +1166,17 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             logger.warning(f"Error getting target data sample: {e}")
             target_df_sample = []
             
-        context = context_manager.get_context(session_id) if session_id else None
+        if is_selection_criteria:
+            context = None
+        if is_selection_criteria:
+            query+=f" Filttering should be done on {target_table}" 
         query_type, classification_details = classify_query_with_llm(query,target_table, context)
-        enhanced_classification = enhance_classification_before_processing(
-            classification_details, segment_id, db_path=os.environ.get('DB_PATH'),is_selection_criteria=is_selection_criteria
-        )
-        classification_details = enhanced_classification
+        if not is_selection_criteria:
+            enhanced_classification = enhance_classification_before_processing(
+                classification_details, segment_id, db_path=os.environ.get('DB_PATH'),is_selection_criteria=is_selection_criteria
+            )
+            classification_details = enhanced_classification
+            
         classification_details["Transformation_context"] = context
         logger.info(f"Query type: {query_type}")
         logger.info(f"Classification details: {classification_details}")
@@ -2021,7 +2106,6 @@ def missing_values_handling(df):
                     df_processed["source_table"] = df_processed["source_table"].fillna(
                         fill_value
                     )
-
 
         if (
             "source_field_name" in df_processed.columns
