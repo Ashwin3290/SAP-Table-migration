@@ -6,7 +6,7 @@ from typing import Dict, List, Any, Optional, Union, Tuple
 import os
 import pandas as pd
 
-from DMtool.llm_config import LLMManager
+from DMtool.llm_query_gen.llm_config import LLMManager
 
 logger = logging.getLogger(__name__)
 

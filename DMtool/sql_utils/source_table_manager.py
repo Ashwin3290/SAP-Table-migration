@@ -9,7 +9,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 # Import LLM manager for transformation detection
-from DMtool.llm_config import LLMManager
+from DMtool.llm_query_gen.llm_config import LLMManager
 
 load_dotenv()
 logger = logging.getLogger(__name__)

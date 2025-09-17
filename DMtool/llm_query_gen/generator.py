@@ -7,8 +7,8 @@ import traceback
 import os
 from typing import Dict, List, Any, Optional, Union, Tuple
 
-from DMtool.query_analyzer import SQLiteQueryAnalyzer
-from DMtool.llm_config import LLMManager
+from DMtool.sql_utils.query_analyzer import SQLiteQueryAnalyzer
+from DMtool.llm_query_gen.llm_config import LLMManager
 
 logger = logging.getLogger(__name__)
 
@@ -148,144 +148,144 @@ class SQLGenerator:
             else:
                 return self._generate_simple_transformation(planner_info)
 
-    def generate_sql_with_llm(self, plan: str, planner_info: Dict[str, Any],template: str=None) -> Tuple[str, Dict[str, Any]]:
-        """
-        Generate SQLite query using LLM based on the plan
+    # def generate_sql_with_llm(self, plan: str, planner_info: Dict[str, Any],template: str=None) -> Tuple[str, Dict[str, Any]]:
+    #     """
+    #     Generate SQLite query using LLM based on the plan
         
-        Parameters:
-        plan (str): Step-by-step plan for SQLite generation
-        planner_info (Dict): Information extracted by the planner
+    #     Parameters:
+    #     plan (str): Step-by-step plan for SQLite generation
+    #     planner_info (Dict): Information extracted by the planner
         
-        Returns:
-        Tuple[str, Dict[str, Any]]: The generated SQLite query and parameters
-        """
-        try:
+    #     Returns:
+    #     Tuple[str, Dict[str, Any]]: The generated SQLite query and parameters
+    #     """
+    #     try:
 
-            query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
-            source_tables = planner_info.get("source_table_name", [])
-            insertion_fields = planner_info.get("insertion_fields", [])
-            target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
-            target_fields = planner_info.get("target_sap_fields", [])
-            filtering_fields = planner_info.get("filtering_fields", [])
-            conditions = planner_info.get("extracted_conditions", {})
-            original_query = planner_info.get("original_query", "")
-            key_mapping = planner_info.get("key_mapping", [])
+    #         query_type = planner_info.get("query_type", "SIMPLE_TRANSFORMATION")
+    #         source_tables = planner_info.get("source_table_name", [])
+    #         insertion_fields = planner_info.get("insertion_fields", [])
+    #         target_table = planner_info.get("target_table_name", [])[0] if planner_info.get("target_table_name") else None
+    #         target_fields = planner_info.get("target_sap_fields", [])
+    #         filtering_fields = planner_info.get("filtering_fields", [])
+    #         conditions = planner_info.get("extracted_conditions", {})
+    #         original_query = planner_info.get("original_query", "")
+    #         key_mapping = planner_info.get("key_mapping", [])
             
 
-            target_has_data = False
-            target_data_samples = planner_info.get("target_data_samples", {})
-            if isinstance(target_data_samples, pd.DataFrame) and not target_data_samples.empty:
-                target_has_data = True
+    #         target_has_data = False
+    #         target_data_samples = planner_info.get("target_data_samples", {})
+    #         if isinstance(target_data_samples, pd.DataFrame) and not target_data_samples.empty:
+    #             target_has_data = True
             
 
-            prompt = f"""
-    You are an expert SQLite database engineer focusing on data transformation operations. I need you to generate 
-    precise SQLite query for a data transformation task based on the following information:
+    #         prompt = f"""
+    # You are an expert SQLite database engineer focusing on data transformation operations. I need you to generate 
+    # precise SQLite query for a data transformation task based on the following information:
 
-    ORIGINAL QUERY: "{planner_info.get("restructured_query", original_query)}"
+    # ORIGINAL QUERY: "{planner_info.get("restructured_query", original_query)}"
 
-    {f"""SQLite GENERATION PLAN:
-    {plan}""" if plan else "Follow the original query in detail and do not skip any steps and any filtering conditions."}
+    # {f"""SQLite GENERATION PLAN:
+    # {plan}""" if plan else "Follow the original query in detail and do not skip any steps and any filtering conditions."}
 
-    Use the given template to generate the SQLite Query:
-    {template}
+    # Use the given template to generate the SQLite Query:
+    # {template}
 
-    CONTEXT INFORMATION:
-    - Query Type: {query_type}
-    - Source Tables: {source_tables}
-    - Insertion Fields: {insertion_fields}  
-    - Target Table: {target_table}
-    - Target Fields: {target_fields}
-    - Filtering Fields: {filtering_fields}
-    - Filtering Conditions: {json.dumps(conditions, indent=2)}
-    - Key Mapping: {json.dumps(key_mapping, indent=2)}
-    - Target Table Has Data: {target_has_data}
+    # CONTEXT INFORMATION:
+    # - Query Type: {query_type}
+    # - Source Tables: {source_tables}
+    # - Insertion Fields: {insertion_fields}  
+    # - Target Table: {target_table}
+    # - Target Fields: {target_fields}
+    # - Filtering Fields: {filtering_fields}
+    # - Filtering Conditions: {json.dumps(conditions, indent=2)}
+    # - Key Mapping: {json.dumps(key_mapping, indent=2)}
+    # - Target Table Has Data: {target_has_data}
 
-    CRITICAL FIELD USAGE RULES:
-    1. Insertion Fields ({insertion_fields}) are the ONLY fields that should appear in:
-       - INSERT INTO field lists
-       - UPDATE SET clauses
-       - SELECT clauses for data retrieval operations
-    2. Filtering Fields ({filtering_fields}) should ONLY appear in:
-       - WHERE clauses
-       - JOIN conditions for filtering
-       - HAVING clauses
-    3. NEVER mix insertion fields with filtering fields in INSERT/UPDATE operations
-    4. If a field appears in both lists, use it according to the operation context
+    # CRITICAL FIELD USAGE RULES:
+    # 1. Insertion Fields ({insertion_fields}) are the ONLY fields that should appear in:
+    #    - INSERT INTO field lists
+    #    - UPDATE SET clauses
+    #    - SELECT clauses for data retrieval operations
+    # 2. Filtering Fields ({filtering_fields}) should ONLY appear in:
+    #    - WHERE clauses
+    #    - JOIN conditions for filtering
+    #    - HAVING clauses
+    # 3. NEVER mix insertion fields with filtering fields in INSERT/UPDATE operations
+    # 4. If a field appears in both lists, use it according to the operation context
 
-    IMPORTANT REQUIREMENTS:
-    1. Generate ONLY standard SQLite SQL syntax (not MS SQL, MySQL, PostgreSQL, etc.)
-    2. For all queries except validations, use DML operations (INSERT, UPDATE, etc.)
-    3. If Target Table Has Data = True, use UPDATE operations with proper key matching
-    4. If Target Table Has Data = False, use INSERT operations
-    5. For validation queries only, use SELECT operations
-    6. Always include WHERE clauses for all filter conditions using exact literal values
-    7. If insertion fields are requested, make sure ONLY they are included in the INSERT/UPDATE
-    8. Properly handle key fields for matching records in UPDATE operations
-    9. Return ONLY the final SQL query with no explanations or markdown formatting
-    10. Follow the plan step-by-step and do not skip any steps
-    11. Do not skip any filtering conditions
-    12. 
+    # IMPORTANT REQUIREMENTS:
+    # 1. Generate ONLY standard SQLite SQL syntax (not MS SQL, MySQL, PostgreSQL, etc.)
+    # 2. For all queries except validations, use DML operations (INSERT, UPDATE, etc.)
+    # 3. If Target Table Has Data = True, use UPDATE operations with proper key matching
+    # 4. If Target Table Has Data = False, use INSERT operations
+    # 5. For validation queries only, use SELECT operations
+    # 6. Always include WHERE clauses for all filter conditions using exact literal values
+    # 7. If insertion fields are requested, make sure ONLY they are included in the INSERT/UPDATE
+    # 8. Properly handle key fields for matching records in UPDATE operations
+    # 9. Return ONLY the final SQL query with no explanations or markdown formatting
+    # 10. Follow the plan step-by-step and do not skip any steps
+    # 11. Do not skip any filtering conditions
+    # 12. 
 
-    CRITICAL SQLite-SPECIFIC SYNTAX:
-    - SQLite does not support RIGHT JOIN or FULL JOIN (use LEFT JOIN with table order swapped instead)
-    - SQLite uses IFNULL instead of ISNULL for handling nulls
-    - SQLite UPDATE with JOIN requires FROM clause (different from standard SQL)
-    - SQLite has no BOOLEAN type (use INTEGER 0/1)
-    - For UPDATE with data from another table, use: UPDATE target SET col = subquery.col FROM (SELECT...) AS subquery WHERE target.key = subquery.key
-    """
+    # CRITICAL SQLite-SPECIFIC SYNTAX:
+    # - SQLite does not support RIGHT JOIN or FULL JOIN (use LEFT JOIN with table order swapped instead)
+    # - SQLite uses IFNULL instead of ISNULL for handling nulls
+    # - SQLite UPDATE with JOIN requires FROM clause (different from standard SQL)
+    # - SQLite has no BOOLEAN type (use INTEGER 0/1)
+    # - For UPDATE with data from another table, use: UPDATE target SET col = subquery.col FROM (SELECT...) AS subquery WHERE target.key = subquery.key
+    # """
         
 
-            llm= LLMManager(
-                provider="google",
-                model="gemini/gemini-2.5-flash",
-                api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
-            )
+    #         llm= LLMManager(
+    #             provider="google",
+    #             model="gemini/gemini-2.5-flash",
+    #             api_key=os.getenv("API_KEY") or os.getenv("GEMINI_API_KEY")
+    #         )
             
-            response = llm.generate(prompt, temperature=0.05, max_tokens=500)
+    #         response = llm.generate(prompt, temperature=0.05, max_tokens=500)
 
-            if response :
-                sql_query = response.strip()
+    #         if response :
+    #             sql_query = response.strip()
                 
 
-                import re
-                sql_match = re.search(r"```(?:sqlite|sql)\s*(.*?)\s*```", sql_query, re.DOTALL)
-                if sql_match:
-                    sql_query = sql_match.group(1)
-                else:
-                    sql_match = re.search(r"```\s*(.*?)\s*```", sql_query, re.DOTALL)
-                    if sql_match:
-                        sql_query = sql_match.group(1)
+    #             import re
+    #             sql_match = re.search(r"```(?:sqlite|sql)\s*(.*?)\s*```", sql_query, re.DOTALL)
+    #             if sql_match:
+    #                 sql_query = sql_match.group(1)
+    #             else:
+    #                 sql_match = re.search(r"```\s*(.*?)\s*```", sql_query, re.DOTALL)
+    #                 if sql_match:
+    #                     sql_query = sql_match.group(1)
                 
 
-                params = {}
+    #             params = {}
                 
-                return sql_query.strip(), params
-            else:
-                logger.warning("Invalid response from LLM in generate_sql_with_llm")
+    #             return sql_query.strip(), params
+    #         else:
+    #             logger.warning("Invalid response from LLM in generate_sql_with_llm")
                 
 
-                if target_has_data and query_type != "VALIDATION_OPERATION":
+    #             if target_has_data and query_type != "VALIDATION_OPERATION":
 
-                    if insertion_fields and target_fields:
-                        fallback = f"UPDATE {target_table} SET {target_fields[0]} = source.{insertion_fields[0]} FROM (SELECT {', '.join(insertion_fields)} FROM {source_tables[0]}) AS source WHERE {target_table}.{target_fields[0]} = source.{insertion_fields[0]}"
-                    else:
-                        fallback = f"UPDATE {target_table} SET field = 'value'"
-                elif query_type == "VALIDATION_OPERATION":
+    #                 if insertion_fields and target_fields:
+    #                     fallback = f"UPDATE {target_table} SET {target_fields[0]} = source.{insertion_fields[0]} FROM (SELECT {', '.join(insertion_fields)} FROM {source_tables[0]}) AS source WHERE {target_table}.{target_fields[0]} = source.{insertion_fields[0]}"
+    #                 else:
+    #                     fallback = f"UPDATE {target_table} SET field = 'value'"
+    #             elif query_type == "VALIDATION_OPERATION":
 
-                    fallback = f"SELECT * FROM {source_tables[0]}"
-                else:
+    #                 fallback = f"SELECT * FROM {source_tables[0]}"
+    #             else:
 
-                    if insertion_fields and target_fields:
-                        fallback = f"INSERT INTO {target_table} ({', '.join(target_fields)}) SELECT {', '.join(insertion_fields)} FROM {source_tables[0]}"
-                    else:
-                        fallback = f"SELECT * FROM {source_tables[0]}"
+    #                 if insertion_fields and target_fields:
+    #                     fallback = f"INSERT INTO {target_table} ({', '.join(target_fields)}) SELECT {', '.join(insertion_fields)} FROM {source_tables[0]}"
+    #                 else:
+    #                     fallback = f"SELECT * FROM {source_tables[0]}"
                     
-                return fallback, {}
+    #             return fallback, {}
             
-        except Exception as e:
-            logger.error(f"Error in generate_sql_with_llm: {e}")
-            return "SELECT * FROM " + str(source_tables[0] if source_tables else "unknown_table"), {}
+    #     except Exception as e:
+    #         logger.error(f"Error in generate_sql_with_llm: {e}")
+    #         return "SELECT * FROM " + str(source_tables[0] if source_tables else "unknown_table"), {}
 
     def _generate_simple_transformation(self, planner_info: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
         """Generate SQL for simple transformations

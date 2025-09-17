@@ -12,14 +12,16 @@ import spacy
 import traceback
 from dotenv import load_dotenv
 from difflib import SequenceMatcher
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
+from DMtool.errors import SQLInjectionError, SessionError, APIError, DataProcessingError
+
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-from DMtool.executor import SQLExecutor
-from DMtool.llm_config import LLMManager
+from DMtool.sql_utils.executor import SQLExecutor
+from DMtool.llm_query_gen.llm_config import LLMManager
 
 sql_executor = SQLExecutor()
 
@@ -1435,24 +1437,6 @@ def _handle_key_mapping_for_simple(results, joined_df, context_manager, session_
 
     results["key_mapping"] = key_mapping
     return results
-class SQLInjectionError(Exception):
-    """Exception raised for potential SQL injection attempts."""
-    pass
-
-class SessionError(Exception):
-    """Exception raised for session-related errors."""
-    pass
-
-
-class APIError(Exception):
-    """Exception raised for API-related errors."""
-    pass
-
-
-class DataProcessingError(Exception):
-    """Exception raised for data processing errors."""
-    pass
-
 
 def validate_sql_identifier(identifier):
     """

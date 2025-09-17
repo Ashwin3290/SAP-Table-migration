@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Union, Tuple
 
-from DMtool.sqlite_utils import add_sqlite_functions
-from DMtool.source_table_manager import handle_query_execution
+from DMtool.sql_utils.sqlite_utils import add_sqlite_functions
+from DMtool.sql_utils.source_table_manager import handle_query_execution
 
 load_dotenv()
 
