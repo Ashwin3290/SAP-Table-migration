@@ -1168,8 +1168,7 @@ def process_query_by_type(object_id, segment_id, project_id, query, session_id=N
             context = None
         else:
             context = context_manager.get_context(session_id) if session_id else None
-            visited_segments = context.get("segments_visited", {}) if context else {}
-        
+        visited_segments = context.get("segments_visited", {}) if context else {}
         if is_selection_criteria:
             query+=f" Filttering should be done on {target_table}" 
         query_type, classification_details = classify_query_with_llm(query,target_table, context)
