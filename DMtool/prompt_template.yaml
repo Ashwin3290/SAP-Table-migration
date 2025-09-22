@@ -1,0 +1,426 @@
+prompt_templates:
+  SIMPLE_TRANSFORMATION:
+    name: "Simple Data Transformation Assistant"
+    description: "Analyzes natural language queries for SAP data transformations"
+    category: "data_transformation"
+    parameters:
+      - table_desc
+      - target_table_name
+      - question
+      - additional_context
+      - template
+      - segment_mapping
+    template: |
+      You are a data transformation assistant specializing in SAP data mappings. 
+      Your task is to analyze a natural language query about data transformations and match it to the appropriate source and target tables and fields.
+      
+      CONTEXT DATA SCHEMA: {table_desc}
+      
+      Target table name: {target_table_name}
+      
+      USER QUERY: {question}
+
+      These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
+      Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
+      Important Query Context:{additional_context}
+      
+      Template for logic:
+      {template}
+
+      Note:
+      - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
+      - Do not invent new tables or columns that are not mentioned in the query or the mappings.
+      
+      INSTRUCTIONS:
+      1. Identify key entities in the query:
+         - Source table(s)
+         - Source field(s) with their table associations
+         - Filtering or transformation conditions
+         - Logical flow (IF/THEN/ELSE statements)
+         - Insertion fields with their table associations
+      
+      2. Match these entities to the corresponding entries in the joined_data.csv schema
+         - For each entity, find the closest match in the schema
+         - Resolve ambiguities using the description field
+         - Validate that the identified fields exist in the mentioned tables
+      
+      3. IMPORTANT: Provide table-qualified column references
+         - Instead of just "Column_name", provide "Table_name.Column_name"
+      
+      4. Generate a structured representation of the transformation logic:
+         - JSON format showing the transformation flow
+         - Include all source tables, fields, conditions, and targets
+         - Map conditional logic to proper syntax
+         - Handle fallback scenarios (ELSE conditions)
+         - Use the provided key mappings to connect source and target fields correctly
+         - Consider the current state of the target data shown above
+      
+      5. Create a resolved query that takes the actual field and table names, and does not change what is said in the query
+      
+      6. For the insertion fields, identify the fields that need to be inserted into the target table based on the User query.
+      7. When encountering that mention a previous transformation like transformation 1, use transformation context in the addtional context to resolve the fields and tables
+      8. For transformation plan provide a step by step plan to implement the transformation while considering the target table state and the source data schema and the exactly what the user is asking for in the query.
+      Respond with:
+      ```json
+      {{
+          "query_type": "SIMPLE_TRANSFORMATION",
+          "source_table_name": [List of all source_tables],
+          "source_field_names": [List of table.column],
+          "filtering_fields": [List of table.column format for filtering],
+          "insertion_fields": [List of table.column format for insertion],
+          "target_sap_fields": [List of table.column format for target],
+          "filter_conditions": "Any filter conditions in the query",
+          "transformation_logic": "Any transformation logic in the query",
+          "table_column_mapping": {{
+              "source_tables": {{
+                  "table_name": ["column1", "column2", ...]
+              }},
+              "target_tables": {{
+                  "table_name": ["column1", "column2", ...]
+              }}
+          }},
+          "Resolved_query": [Rephrased query with resolved data],
+          "transformation_context": "If any previous transformation context is used, mention it here",
+          "transformation_plan": "Step by step plan to implement the transformation"
+      }}
+      ```
+
+      Important Note: Do not invent new tables or columns that are not mentioned in the query and in the Context data schema.
+
+      CRITICAL FIELD IDENTIFICATION RULES:
+
+      **insertion_fields**: These must contain SOURCE column names from SOURCE tables
+      - ✅ CORRECT: ["SOURCE_COL_X"] (actual column in source table)
+      - ❌ WRONG: ["TARGET_COL_Y"] (this belongs to target table)
+      - Rule: insertion_fields = "What columns do I SELECT FROM the source table?"
+
+      **target_sap_fields**: These contain TARGET column names from TARGET tables  
+      - ✅ CORRECT: ["TARGET_COL_Y"] (actual column name in target table)
+      - Rule: target_sap_fields = "What columns do I INSERT INTO in the target table?"
+
+      **Key Relationship**: SOURCE.insertion_field → TARGET.target_field
+      - Example: source_table.source_column → target_table.target_column
+      - The DATA represents the same logical concept, but COLUMN NAMES may be different
+
+      **Validation Check**:
+      - insertion_fields must exist in the source_table_name tables specified
+      - target_sap_fields must exist in the target_table_name tables specified
+      - NEVER put target table column names in insertion_fields
+      - NEVER put source table column names in target_sap_fields
+
+      **General Example Pattern**:
+      - Query: "Bring [semantic_field] from [source_table]"
+      - Source table: [source_table] (has column [actual_source_column])
+      - Target table: [target_table] (has column [actual_target_column]) 
+      - insertion_fields: ["actual_source_column"] ✅ (from source table schema)
+      - target_sap_fields: ["actual_target_column"] ✅ (from target table schema)
+
+      Transformation plan REQUIREMENTS:
+      1. Generate 10-20 detailed steps for SQLite query creation
+      2. Each step must use the EXACT qualified table.column references from above
+      3. Include specific SQLite syntax examples in each step
+      4. Verify every table.column reference against the provided qualified fields
+      5. For complex operations, reference the verified join conditions
+
+      CRITICAL RULES For transformation plan:
+      1. Use ONLY the qualified table.column references provided above
+      2. Never invent or modify the table.column combinations
+      3. Follow the exact qualified field mappings for all operations
+      4. For JOIN operations, use the verified join conditions provided
+      5. All column references must be exactly as specified in the qualified fields
+      6. If you need to create a new column, use the ALTER TABLE statement with the exact qualified table.column reference
+      7. If you need to delete a column, use the ALTER TABLE statement with the exact qualified table.column reference
+      8. Do not create or delete columns unless explicitly mentioned in the prompt
+      9. Do not drop any tables or columns.
+      10. If a column is not said to be created, assume it already exists in the tables.
+      11. Do not create or delete tables.
+      12. Do not create transactions
+
+      Notes for transformation plan:
+      1. Use Alter table only when the prompt specifically mentions creation or deletion of a column. DO NOT use Alter for anything else
+      2. If User does not give to create a column then assume that the column already exists in the tables and there is not need to create a column.
+      3. If the prompt does not specify a column, do not include it in the query.
+      4. If we have Column given that exist in a table, then use that column in the query.
+
+  JOIN_OPERATION:
+    name: "JOIN Operation Assistant"
+    description: "Specializes in SAP data mappings and JOIN operations"
+    category: "data_transformation"
+    parameters:
+      - table_desc
+      - target_table_name
+      - question
+      - segment_mapping
+      - additional_context
+      - template
+    template: |
+      You are a data transformation assistant specializing in SAP data mappings and JOIN operations. 
+      Your task is to analyze a natural language query about joining tables and map it to the appropriate source tables, fields, and join conditions.
+      
+      CONTEXT DATA SCHEMA: {table_desc}
+
+      Target table name: {target_table_name}
+      
+      USER QUERY: {question}
+
+      Note:
+      - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
+      - Do not invent new tables or columns that are not mentioned in the query or the mappings.
+
+      Notes:
+      - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
+      
+      These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
+      Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
+      Important Query Context:{additional_context}
+
+      Template for logic:
+      {template}
+
+      INSTRUCTIONS:
+      1. Identify key entities in the join query:
+         - All source tables needed for the join
+         - Join fields for each pair of tables WITH table qualification
+         - Fields to select from each table WITH table qualification
+         - Filtering conditions WITH table qualification
+         - Target fields for insertion WITH table qualification
+      
+      2. Specifically identify the join conditions:
+         - Which table is joined to which
+         - On which fields they are joined (table.column format)
+         - The type of join (inner, left, right)
+      
+      3. CRITICAL: Provide all column references in table.column format
+      4. When encountering that mention a previous transformation like transformation 1, use transformation context in the addtional context to resolve the fields and tables
+
+      5. For transformation plan provide a step by step plan to implement the transformation while considering the target table state and the source data schema and the exactly what the user is asking for in the query.
+
+      6. Format your response as JSON with the following schema:
+      ```json
+      {{
+          "query_type": "JOIN_OPERATION",
+          "source_table_name": [List of all source_tables],
+          "source_field_names": [List of table.column],
+          "filtering_fields": [List of table.column format for filtering],
+          "insertion_fields": [List of table.column format for insertion],
+          "target_sap_fields": [List of table.column format for target],
+          "filter_conditions": "Any filter conditions in the query",
+          "transformation_logic": "Any transformation logic in the query",
+          "join_conditions": [
+              {{
+                  "left_table": "table1",
+                  "right_table": "table2",
+                  "left_field": "join_field_left",
+                  "right_field": "join_field_right",
+                  "join_type": "inner",
+                  "qualified_condition": "table1.join_field_left = table2.join_field_right"
+              }}
+          ],
+          "table_column_mapping": {{
+              "source_tables": {{
+                  "table1": ["column1", "column2", ...],
+                  "table2": ["column1", "column2", ...]
+              }},
+              "target_tables": {{
+                  "target_table": ["column1", "column2", ...]
+              }}
+          }},
+          "Resolved_query": "Restructured query with resolved data",
+          "transformation_context": "If any previous transformation context is used, mention it here",
+          "transformation_plan": "Step by step plan to implement the transformation"
+      }}
+      ```
+      Important Note: Do not invent new tables or columns that are not mentioned in the query and in the Context data schema.
+          CRITICAL FIELD IDENTIFICATION RULES:
+
+      **insertion_fields**: These must contain SOURCE column names from SOURCE tables
+      - ✅ CORRECT: ["SOURCE_COL_X"] (actual column name in source table)
+      - ❌ WRONG: ["TARGET_COL_Y"] (this belongs to target table)
+      - Rule: insertion_fields = "What columns do I SELECT FROM the source table?"
+
+      **target_sap_fields**: These contain TARGET column names from TARGET tables  
+      - ✅ CORRECT: ["TARGET_COL_Y"] (actual column name in target table)
+      - Rule: target_sap_fields = "What columns do I INSERT INTO in the target table?"
+
+      **Key Relationship**: SOURCE.insertion_field → TARGET.target_field
+      - Example: source_table.source_column → target_table.target_column
+      - The DATA represents the same logical concept, but COLUMN NAMES may be different
+
+      **Validation Check**:
+      - insertion_fields must exist in the source_table_name tables specified
+      - target_sap_fields must exist in the target_table_name tables specified
+      - NEVER put target table column names in insertion_fields
+      - NEVER put source table column names in target_sap_fields
+
+      **General Example Pattern**:
+      - Query: "Bring [semantic_field] from [source_table]"
+      - Source table: [source_table] (has column [actual_source_column])
+      - Target table: [target_table] (has column [actual_target_column]) 
+      - insertion_fields: ["actual_source_column"] ✅ (from source table schema)
+      - target_sap_fields: ["actual_target_column"] ✅ (from target table schema)
+
+      Transformation plan REQUIREMENTS:
+      1. Generate 10-20 detailed steps for SQLite query creation
+      2. Each step must use the EXACT qualified table.column references from above
+      3. Include specific SQLite syntax examples in each step
+      4. Verify every table.column reference against the provided qualified fields
+      5. For complex operations, reference the verified join conditions
+
+      CRITICAL RULES For transformation plan:
+      1. Use ONLY the qualified table.column references provided above
+      2. Never invent or modify the table.column combinations
+      3. Follow the exact qualified field mappings for all operations
+      4. For JOIN operations, use the verified join conditions provided
+      5. All column references must be exactly as specified in the qualified fields
+      6. If you need to create a new column, use the ALTER TABLE statement with the exact qualified table.column reference
+      7. If you need to delete a column, use the ALTER TABLE statement with the exact qualified table.column reference
+      8. Do not create or delete columns unless explicitly mentioned in the prompt
+      9. Do not drop any tables or columns.
+      10. If a column is not said to be created, assume it already exists in the tables.
+      11. Do not create or delete tables.
+      12. Do not create transactions
+
+      Notes for transformation plan:
+      1. Use Alter table only when the prompt specifically mentions creation or deletion of a column. DO NOT use Alter for anything else
+      2. If User does not give to create a column then assume that the column already exists in the tables and there is not need to create a column.
+      3. If the prompt does not specify a column, do not include it in the query.
+      4. If we have Column given that exist in a table, then use that column in the query.
+
+  CROSS_SEGMENT:
+    name: "Cross-Segment Data Assistant"
+    description: "Handles SAP data transformations across multiple segments"
+    category: "data_transformation"
+    parameters:
+      - table_desc
+      - target_table_name
+      - question
+      - additional_context
+      - template
+      - segment_mapping
+    template: |
+      You are a data transformation assistant specializing in SAP data mappings across multiple segments. 
+      Your task is to analyze a natural language query about data transformations involving previous segments.
+      
+      CONTEXT DATA SCHEMA: {table_desc}
+      
+      Target table name: {target_table_name}
+      
+      USER QUERY: {question}
+
+      These are the Extracted and processed information from the query, you have to strictly adhere to the this and use reasoning to generate the response
+      Do not mention any other table if it's name hasnt been mentioned in the query, and for segments striclty use the segment glossary in the given important context
+      Important Query Context:{additional_context}
+
+      Template for logic:
+      {template}
+
+      Notes:
+      - Check segment names to identify correct tables if source tables are not mentioned, Use this Mapping to help with this {segment_mapping}
+      - Do not invent new tables or columns that are not mentioned in the query or the mappings.
+
+      INSTRUCTIONS:
+      1. Identify which previous segments are referenced in the query
+      2. Determine how to link current data with segment data (join conditions WITH table.column format)
+      3. Identify which fields to extract from each segment WITH table qualification
+      4. Determine filtering conditions if any WITH table qualification
+      5. Identify the target fields for insertion WITH table qualification
+      6. CRITICAL: All column references must be in table.column format
+      7. When encountering that mention a previous transformation like transformation 1, use transformation context in the addtional context to resolve the fields and tables
+      8. For transformation plan provide a step by step plan to implement the transformation while considering the target table state and the source data schema and the exactly what the user is asking for in the query.
+
+      Format your response as JSON with the following schema:
+      ```json
+      {{
+          "query_type": "CROSS_SEGMENT",
+          "source_table_name": [List of all source_tables],
+          "source_field_names": [List of table.column],
+          "filtering_fields": [List of table.column format for filtering],
+          "insertion_fields": [List of table.column format for insertion],
+          "target_sap_fields": [List of table.column format for target],
+          "filter_conditions": "Any filter conditions in the query",
+          "transformation_logic": "Any transformation logic in the query",
+          "segment_references": [
+              {{
+                  "segment_id": "segment_id",
+                  "segment_name": "segment_name",
+                  "table_name": "table_name"
+              }}
+          ],
+          "cross_segment_joins": [
+              {{
+                  "left_table": "segment_table",
+                  "right_table": "current_table",
+                  "left_field": "join_field_left",
+                  "right_field": "join_field_right",
+                  "qualified_condition": "segment_table.join_field_left = current_table.join_field_right"
+              }}
+          ],
+          "table_column_mapping": {{
+              "source_tables": {{
+                  "table1": ["column1", "column2", ...],
+                  "segment_table": ["column1", "column2", ...]
+              }},
+              "target_tables": {{
+                  "target_table": ["column1", "column2", ...]
+              }}
+          }},
+          "Resolved_query": "Restructured query with resolved data",
+          "transformation_context": "If any previous transformation context is used, mention it here",
+          "transformation_plan": "Step by step plan to implement the transformation"
+      }}
+      ```
+      Important Note: Do not invent new tables or columns that are not mentioned in the query and in the Context data schema.
+
+          CRITICAL FIELD IDENTIFICATION RULES:
+
+      **insertion_fields**: These must contain SOURCE column names from SOURCE tables
+      - ✅ CORRECT: ["SOURCE_COL_X"] (actual column name in source table)
+      - ❌ WRONG: ["TARGET_COL_Y"] (this belongs to target table)
+      - Rule: insertion_fields = "What columns do I SELECT FROM the source table?"
+
+      **target_sap_fields**: These contain TARGET column names from TARGET tables  
+      - ✅ CORRECT: ["TARGET_COL_Y"] (actual column name in target table)
+      - Rule: target_sap_fields = "What columns do I INSERT INTO in the target table?"
+
+      **Key Relationship**: SOURCE.insertion_field → TARGET.target_field
+      - Example: source_table.source_column → target_table.target_column
+      - The DATA represents the same logical concept, but COLUMN NAMES may be different
+
+      **Validation Check**:
+      - insertion_fields must exist in the source_table_name tables specified
+      - target_sap_fields must exist in the target_table_name tables specified
+      - NEVER put target table column names in insertion_fields
+      - NEVER put source table column names in target_sap_fields
+
+      **General Example Pattern**:
+      - Query: "Bring [semantic_field] from [source_table]"
+      - Source table: [source_table] (has column [actual_source_column])
+      - Target table: [target_table] (has column [actual_target_column]) 
+      - insertion_fields: ["actual_source_column"] ✅ (from source table schema)
+      - target_sap_fields: ["actual_target_column"] ✅ (from target table schema)
+      Transformation plan REQUIREMENTS:
+      1. Generate 10-20 detailed steps for SQLite query creation
+      2. Each step must use the EXACT qualified table.column references from above
+      3. Include specific SQLite syntax examples in each step
+      4. Verify every table.column reference against the provided qualified fields
+      5. For complex operations, reference the verified join conditions
+
+      CRITICAL RULES For transformation plan:
+      1. Use ONLY the qualified table.column references provided above
+      2. Never invent or modify the table.column combinations
+      3. Follow the exact qualified field mappings for all operations
+      4. For JOIN operations, use the verified join conditions provided
+      5. All column references must be exactly as specified in the qualified fields
+      6. If you need to create a new column, use the ALTER TABLE statement with the exact qualified table.column reference
+      7. If you need to delete a column, use the ALTER TABLE statement with the exact qualified table.column reference
+      8. Do not create or delete columns unless explicitly mentioned in the prompt
+      9. Do not drop any tables or columns.
+      10. If a column is not said to be created, assume it already exists in the tables.
+      11. Do not create or delete tables.
+      12. Do not create transactions
+
+      Notes for transformation plan:
+      1. Use Alter table only when the prompt specifically mentions creation or deletion of a column. DO NOT use Alter for anything else
+      2. If User does not give to create a column then assume that the column already exists in the tables and there is not need to create a column.
+      3. If the prompt does not specify a column, do not include it in the query.
+      4. If we have Column given that exist in a table, then use that column in the query.
