@@ -378,5 +378,70 @@
         "3. Use DELETE statement to remove all rows that don't match the condition",
         "4. This will keep only rows where the condition is true"
     ]
+  },
+  {
+    "id": "convert_string_to_int",
+    "prompt": "Add a new column named {new_column} to the target table. For each record, convert the value in the {source_field} field from text to an integer and store it in the {new_column} column.",
+    "query": "ALTER TABLE {target_table} ADD COLUMN {new_column} INTEGER; UPDATE {target_table} SET {new_column} = CAST({source_field} AS INTEGER)",
+    "plan": [
+      "1. Add a new INTEGER column to the target table for storing the converted values",
+      "2. Use the CAST() function to explicitly convert the value from the source field to an INTEGER",
+      "3. Update all records in the new column with the converted integer values"
+    ]
+  },
+  [
+  {
+    "id": "select_and_sort",
+    "prompt": "Retrieve all records from the {target_table} and sort the results in {sort_order} order based on the values in the {sort_field} column.",
+    "query": "SELECT * FROM {target_table} ORDER BY {sort_field} {sort_order}",
+    "plan": [
+      "1. Use SELECT * to retrieve all columns from the target table",
+      "2. Use the ORDER BY clause to specify the sort column",
+      "3. Use the {sort_order} parameter (ASC for ascending or DESC for descending) to define the sort order"
+    ]
+  },
+  {
+    "id": "select_and_sort_multi",
+    "prompt": "Retrieve specific columns {select_fields} from the {target_table} and sort the results first by {first_sort_field} in {first_sort_order}, then by {second_sort_field} in {second_sort_order}.",
+    "query": "SELECT {select_fields} FROM {target_table} ORDER BY {first_sort_field} {first_sort_order}, {second_sort_field} {second_sort_order}",
+    "plan": [
+      "1. Use SELECT to retrieve the specified columns from the target table",
+      "2. Use the ORDER BY clause with multiple columns to define the multi-level sort",
+      "3. Apply the appropriate sort order (ASC or DESC) for each sort field"
+    ]
+  },
+  {
+    "id": "select_and_group_by_count",
+    "prompt": "Count the number of records for each distinct value in the {group_by_field} column of the {target_table}.",
+    "query": "SELECT {group_by_field}, COUNT(*) AS count_of_records FROM {target_table} GROUP BY {group_by_field}",
+    "plan": [
+      "1. Use SELECT to retrieve the group by column and apply COUNT(*) to get the number of records",
+      "2. Assign an alias 'count_of_records' to the counted column for clarity",
+      "3. Use the GROUP BY clause to group the rows based on the specified column"
+    ]
+  },
+  {
+    "id": "select_and_group_by_agg",
+    "prompt": "Calculate the {aggregate_function} of the {aggregate_field} for each distinct value in the {group_by_field} column of the {target_table}.",
+    "query": "SELECT {group_by_field}, {aggregate_function}({aggregate_field}) AS aggregated_value FROM {target_table} GROUP BY {group_by_field}",
+    "plan": [
+      "1. Use SELECT to retrieve the group by column and apply an aggregate function (e.g., SUM, AVG, MAX, MIN) to another column",
+      "2. Assign an alias 'aggregated_value' to the aggregate column",
+      "3. Use the GROUP BY clause to group the rows based on the specified column"
+    ]
+  },
+  {
+    "id": "group_by_and_order_by",
+    "prompt": "Calculate the {aggregate_function} of the {aggregate_field} for each distinct value in the {group_by_field} column and order the results based on the aggregated value in {sort_order}.",
+    "query": "SELECT {group_by_field}, {aggregate_function}({aggregate_field}) AS aggregated_value FROM {target_table} GROUP BY {group_by_field} ORDER BY aggregated_value {sort_order}",
+    "plan": [
+      "1. Use SELECT to retrieve the group by column and apply an aggregate function",
+      "2. Use the GROUP BY clause to group the rows",
+      "3. Use the ORDER BY clause to sort the aggregated results based on the column's alias in the specified order"
+    ]
   }
+]
+
+
+
 ]
